@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strconv"
 
 	"github.com/casbin/casbin/v2"
 	"github.com/gin-gonic/gin"
@@ -112,6 +113,11 @@ type ExecuteRequest struct {
 	AdminUsername string `json:"admin_username" binding:"required"`
 	AdminPassword string `json:"admin_password" binding:"required,min=8"`
 	AdminEmail    string `json:"admin_email" binding:"required,email"`
+	// OTel (optional)
+	OTelEnabled          *bool  `json:"otel_enabled"`
+	OTelExporterEndpoint string `json:"otel_exporter_endpoint"`
+	OTelServiceName      string `json:"otel_service_name"`
+	OTelSampleRate       string `json:"otel_sample_rate"`
 }
 
 // Execute performs the full installation.
@@ -199,6 +205,27 @@ func (h *InstallHandler) Execute(c *gin.Context) {
 		return
 	}
 
+	// Set OTel config if provided
+	if req.OTelEnabled != nil {
+		enabled := strconv.FormatBool(*req.OTelEnabled)
+		endpoint := req.OTelExporterEndpoint
+		if endpoint == "" {
+			endpoint = "http://localhost:4318"
+		}
+		serviceName := req.OTelServiceName
+		if serviceName == "" {
+			serviceName = "metis"
+		}
+		sampleRate := req.OTelSampleRate
+		if sampleRate == "" {
+			sampleRate = "1.0"
+		}
+		if err := seed.SetOTelConfig(db.DB, enabled, endpoint, serviceName, sampleRate); err != nil {
+			Fail(c, http.StatusInternalServerError, "failed to set otel config: "+err.Error())
+			return
+		}
+	}
+
 	// 8. Create admin user
 	adminRole, err := findAdminRole(db.DB)
 	if err != nil {
@@ -250,8 +277,8 @@ func (h *InstallHandler) Execute(c *gin.Context) {
 func (h *InstallHandler) hotSwitch(cfg *config.MetisConfig, db *database.DB, enforcer *casbin.Enforcer) error {
 	injector := h.injector
 
-	// Provide the config and new DB to IOC
-	do.ProvideValue(injector, cfg)
+	// Provide the config and new DB to IOC (use Override to be safe against retries)
+	do.OverrideValue(injector, cfg)
 	if db != h.db {
 		// PostgreSQL: override the DB in the container
 		do.OverrideValue(injector, db)
@@ -266,37 +293,37 @@ func (h *InstallHandler) hotSwitch(cfg *config.MetisConfig, db *database.DB, enf
 
 	blacklist := do.MustInvoke[*token.TokenBlacklist](injector)
 
-	// Register remaining kernel providers
-	do.Provide(injector, casbinpkg.NewEnforcer)
-	do.Provide(injector, repository.NewUser)
-	do.Provide(injector, repository.NewRefreshToken)
-	do.Provide(injector, repository.NewRole)
-	do.Provide(injector, repository.NewMenu)
-	do.Provide(injector, repository.NewNotification)
-	do.Provide(injector, repository.NewMessageChannel)
-	do.Provide(injector, repository.NewAuthProvider)
-	do.Provide(injector, repository.NewUserConnection)
-	do.Provide(injector, repository.NewAuditLog)
-	do.Provide(injector, repository.NewTwoFactorSecret)
-	do.Provide(injector, service.NewCasbin)
-	do.Provide(injector, service.NewRole)
-	do.Provide(injector, service.NewMenu)
-	do.Provide(injector, service.NewAuth)
-	do.Provide(injector, service.NewUser)
-	do.Provide(injector, service.NewNotification)
-	do.Provide(injector, service.NewMessageChannel)
-	do.Provide(injector, service.NewSession)
-	do.Provide(injector, service.NewSettings)
-	do.Provide(injector, service.NewAuthProvider)
-	do.Provide(injector, service.NewUserConnection)
-	do.Provide(injector, service.NewAuditLog)
-	do.Provide(injector, service.NewCaptcha)
-	do.Provide(injector, service.NewTwoFactor)
-	do.Provide(injector, repository.NewIdentitySource)
-	do.Provide(injector, service.NewIdentitySource)
-	do.ProvideValue(injector, oauth.NewStateManager())
-	do.Provide(injector, New)
-	do.Provide(injector, scheduler.New)
+	// Register remaining kernel providers (Override to handle retries safely)
+	do.Override(injector, casbinpkg.NewEnforcer)
+	do.Override(injector, repository.NewUser)
+	do.Override(injector, repository.NewRefreshToken)
+	do.Override(injector, repository.NewRole)
+	do.Override(injector, repository.NewMenu)
+	do.Override(injector, repository.NewNotification)
+	do.Override(injector, repository.NewMessageChannel)
+	do.Override(injector, repository.NewAuthProvider)
+	do.Override(injector, repository.NewUserConnection)
+	do.Override(injector, repository.NewAuditLog)
+	do.Override(injector, repository.NewTwoFactorSecret)
+	do.Override(injector, service.NewCasbin)
+	do.Override(injector, service.NewRole)
+	do.Override(injector, service.NewMenu)
+	do.Override(injector, service.NewAuth)
+	do.Override(injector, service.NewUser)
+	do.Override(injector, service.NewNotification)
+	do.Override(injector, service.NewMessageChannel)
+	do.Override(injector, service.NewSession)
+	do.Override(injector, service.NewSettings)
+	do.Override(injector, service.NewAuthProvider)
+	do.Override(injector, service.NewUserConnection)
+	do.Override(injector, service.NewAuditLog)
+	do.Override(injector, service.NewCaptcha)
+	do.Override(injector, service.NewTwoFactor)
+	do.Override(injector, repository.NewIdentitySource)
+	do.Override(injector, service.NewIdentitySource)
+	do.OverrideValue(injector, oauth.NewStateManager())
+	do.Override(injector, New)
+	do.Override(injector, scheduler.New)
 
 	// Boot apps
 	for _, a := range app.All() {

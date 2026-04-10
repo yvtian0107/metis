@@ -1,9 +1,17 @@
 ### Requirement: samber/do IOC container
-The system SHALL use samber/do v2 as the dependency injection container for managing service lifecycle. The container SHALL register auth-related providers: UserRepository, RefreshTokenRepository, AuthService, UserService, AuthHandler, UserHandler. Additionally, the container SHALL register RBAC-related providers: Casbin enforcer, RoleRepository, MenuRepository, RoleService, MenuService, CasbinService, RoleHandler, MenuHandler. The container SHALL also register the scheduler.Engine provider, which depends on database.DB. After kernel initialization, the system SHALL iterate all registered Apps (via `app.All()`) and call each App's `Providers()` method to register App-specific providers into the same IOC container.
+The system SHALL use samber/do v2 as the dependency injection container for managing service lifecycle. In **normal mode** (installed), the container SHALL register all kernel and app providers at startup as before. In **install mode** (not installed), the container SHALL register only minimal providers needed for installation: database.DB (with default SQLite or from metis.yaml), SysConfigRepo, SysConfigService, and InstallHandler. After installation completes, the install handler SHALL register remaining providers and routes into the same container (hot switch).
 
-#### Scenario: Service registration and resolution
-- **WHEN** the application starts
+#### Scenario: Service registration in normal mode
+- **WHEN** the application starts and the system is installed
 - **THEN** all kernel services (database, repositories, services, handlers, scheduler engine) SHALL be registered first, followed by each registered App's providers, all resolved lazily on first use
+
+#### Scenario: Service registration in install mode
+- **WHEN** the application starts and the system is not installed
+- **THEN** only database.DB, SysConfigRepo, SysConfigService, and InstallHandler SHALL be registered. No auth, casbin, scheduler, or business handlers SHALL be registered.
+
+#### Scenario: Hot switch after installation
+- **WHEN** the install handler completes installation successfully
+- **THEN** it SHALL register all remaining kernel and app providers, run app seeds, register all routes, and start the scheduler engine -- all within the same process
 
 #### Scenario: App provider registration
 - **WHEN** optional Apps are registered in the global registry
@@ -14,10 +22,10 @@ The system SHALL shut down gracefully on SIGTERM or SIGINT signals.
 
 #### Scenario: Receive termination signal
 - **WHEN** the process receives SIGTERM or SIGINT
-- **THEN** the system SHALL stop accepting new requests, stop the scheduler engine (waiting for running tasks to complete), complete in-flight requests, close database connections, and exit cleanly
+- **THEN** the system SHALL stop accepting new requests, stop the scheduler engine (if running), complete in-flight requests, close database connections, and exit cleanly
 
 ### Requirement: Gin engine with standard middleware
-The system SHALL initialize a Gin engine with slog-based request logging, panic recovery middleware, and route groups for public/authenticated endpoints. The authenticated group SHALL use CasbinAuth middleware for permission checking instead of RequireRole middleware. After kernel routes are registered, the system SHALL iterate all registered Apps and call each App's `Routes()` method to register App-specific routes under the authenticated API group.
+The system SHALL initialize a Gin engine with slog-based request logging and panic recovery middleware. In **install mode**, only install-related routes and SPA static assets SHALL be registered. In **normal mode**, the full route tree (public + authenticated groups) SHALL be registered as before.
 
 #### Scenario: Request logging
 - **WHEN** any HTTP request is processed
@@ -27,31 +35,35 @@ The system SHALL initialize a Gin engine with slog-based request logging, panic 
 - **WHEN** a handler panics during request processing
 - **THEN** the middleware SHALL recover, log the error, and return a 500 response
 
-#### Scenario: Route group organization
-- **WHEN** routes are registered
-- **THEN** the system SHALL organize routes into two groups: public (login/refresh/public-site-info) and authenticated (JWTAuth + CasbinAuth middleware). The CasbinAuth middleware SHALL replace the previous RequireRole("admin") middleware for fine-grained permission control.
+#### Scenario: Install mode routes
+- **WHEN** the system is in install mode
+- **THEN** the Gin engine SHALL only register `/api/v1/install/*` routes and SPA static asset serving. No JWT, Casbin, or business routes SHALL be registered.
 
-#### Scenario: App route registration
-- **WHEN** optional Apps are registered
-- **THEN** main.go SHALL call `a.Routes(apiGroup)` for each App, passing the authenticated API route group
+#### Scenario: Normal mode routes
+- **WHEN** the system is in normal mode
+- **THEN** the system SHALL organize routes into public and authenticated groups with JWTAuth + CasbinAuth middleware, and call `a.Routes(apiGroup)` for each App
 
 ### Requirement: Server port configuration
-The system SHALL listen on port 8080 by default, configurable via `SERVER_PORT` environment variable.
+The system SHALL listen on port 8080 by default. The port SHALL be configurable via the `server_port` key in SystemConfig (stored in DB). When the system is not installed, it SHALL always use port 8080.
 
 #### Scenario: Default port
-- **WHEN** no `SERVER_PORT` environment variable is set
+- **WHEN** the system starts and no `server_port` config exists in SystemConfig
 - **THEN** the server SHALL listen on port 8080
 
-#### Scenario: Custom port
-- **WHEN** `SERVER_PORT=9090` is set
+#### Scenario: Custom port from DB
+- **WHEN** the system starts and `server_port` is set to `9090` in SystemConfig
 - **THEN** the server SHALL listen on port 9090
 
+#### Scenario: Install mode port
+- **WHEN** the system starts in install mode
+- **THEN** the server SHALL listen on port 8080 (hardcoded default, DB not yet initialized)
+
 ### Requirement: Makefile build commands
-The Makefile SHALL provide commands for development and production builds. Production builds SHALL support `EDITION` and `APPS` parameters for module selection.
+The Makefile SHALL provide commands for development and production builds.
 
 #### Scenario: Dev mode
 - **WHEN** `make dev` is run
-- **THEN** the Go server SHALL start with all modules (no build tags needed)
+- **THEN** the Go server SHALL start with all modules (no build tags needed). The developer SHALL complete the install wizard in the browser on first run.
 
 #### Scenario: Production build
 - **WHEN** `make build` is run
@@ -62,8 +74,16 @@ The Makefile SHALL provide commands for development and production builds. Produ
 - **THEN** the system SHALL generate a minimal frontend registry, build the frontend, then compile the Go binary with `-tags edition_lite`
 
 ### Requirement: Scheduler engine startup
-The scheduler engine SHALL be started after all task registrations are complete and before the HTTP server begins accepting requests.
+The scheduler engine SHALL be started only after installation is complete. In install mode, the scheduler SHALL NOT be started.
 
-#### Scenario: Engine starts on boot
-- **WHEN** the application starts and all TaskDefs have been registered
-- **THEN** `engine.Start()` SHALL be called, syncing task states to DB, starting cron dispatcher, and starting the queue poller
+#### Scenario: Engine starts in normal mode
+- **WHEN** the application starts in normal mode and all TaskDefs have been registered
+- **THEN** `engine.Start()` SHALL be called
+
+#### Scenario: Engine starts after hot switch
+- **WHEN** installation completes and the system hot-switches to normal mode
+- **THEN** `engine.Start()` SHALL be called as part of the hot switch sequence
+
+#### Scenario: No engine in install mode
+- **WHEN** the application starts in install mode
+- **THEN** the scheduler engine SHALL NOT be created or started

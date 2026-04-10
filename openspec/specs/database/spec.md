@@ -1,25 +1,25 @@
 ### Requirement: Database initialization with GORM
-The system SHALL initialize a GORM database connection on startup using the configured driver and DSN, and register the otelgorm OpenTelemetry plugin for automatic query tracing with parameter sanitization.
+The system SHALL initialize a GORM database connection on startup using the configuration from `metis.yaml` (via the `config.MetisConfig` struct). When no config file exists (install mode), the system SHALL use default SQLite settings. The otelgorm plugin SHALL be registered after OTel initialization (which now happens after DB connection).
 
-#### Scenario: Default SQLite initialization
-- **WHEN** no `DB_DRIVER` environment variable is set
-- **THEN** the system SHALL open a SQLite database at `metis.db` with foreign keys enabled and WAL journal mode
+#### Scenario: Default SQLite initialization (install mode)
+- **WHEN** no `metis.yaml` file exists
+- **THEN** the system SHALL open a SQLite database at `metis.db` with foreign keys enabled and WAL journal mode, using hardcoded defaults
 
-#### Scenario: SQLite with custom path
-- **WHEN** `DB_DRIVER=sqlite` and `DB_DSN` is set to a custom path
-- **THEN** the system SHALL open SQLite at the specified path with foreign keys and WAL mode
+#### Scenario: SQLite from config file
+- **WHEN** `metis.yaml` contains `db_driver: sqlite` and a `db_dsn` value
+- **THEN** the system SHALL open SQLite at the specified path with the configured DSN
 
-#### Scenario: PostgreSQL initialization
-- **WHEN** `DB_DRIVER=postgres` and `DB_DSN` contains a valid PostgreSQL connection string
+#### Scenario: PostgreSQL from config file
+- **WHEN** `metis.yaml` contains `db_driver: postgres` and a valid PostgreSQL DSN
 - **THEN** the system SHALL open a PostgreSQL connection using the provided DSN
 
 #### Scenario: Unsupported driver
-- **WHEN** `DB_DRIVER` is set to an unsupported value
+- **WHEN** `db_driver` in metis.yaml is set to an unsupported value
 - **THEN** the system SHALL return an error indicating the driver is not supported
 
 #### Scenario: OTel GORM plugin registration
-- **WHEN** the database is initialized
-- **THEN** the otelgorm plugin SHALL be registered with WithoutQueryVariables option, automatically tracing all DB operations with sanitized SQL parameters
+- **WHEN** the database is initialized and OTel is subsequently enabled
+- **THEN** the otelgorm plugin SHALL be registered with WithoutQueryVariables option after OTel initialization completes
 
 ### Requirement: Pure Go SQLite driver
 The system SHALL use the `github.com/glebarez/sqlite` driver (no CGO dependency) for SQLite connections.
@@ -29,12 +29,12 @@ The system SHALL use the `github.com/glebarez/sqlite` driver (no CGO dependency)
 - **THEN** the binary SHALL compile and run successfully with SQLite support
 
 ### Requirement: AutoMigrate on startup
-The system SHALL run GORM AutoMigrate for all registered models during database initialization, including User, RefreshToken, Role, and Menu models. The Casbin GORM adapter SHALL auto-create its `casbin_rule` table separately.
+The system SHALL run GORM AutoMigrate for all registered models during database initialization, including all kernel models. In install mode, AutoMigrate SHALL be called during the installation process (not at DB init time). In normal mode, AutoMigrate SHALL run at startup as before.
 
-#### Scenario: First run with empty database
-- **WHEN** the application starts with a new empty database
-- **THEN** all model tables INCLUDING users, refresh_tokens, roles, and menus SHALL be created automatically. The casbin_rule table SHALL be created by the GORM adapter initialization.
+#### Scenario: Install mode migration
+- **WHEN** the installation is executed via `POST /api/v1/install/execute`
+- **THEN** AutoMigrate SHALL be called for all kernel and app models as part of the installation sequence
 
-#### Scenario: Subsequent run with existing schema
-- **WHEN** the application starts with an existing database
-- **THEN** AutoMigrate SHALL add any new columns or indexes without data loss
+#### Scenario: Normal mode startup
+- **WHEN** the application starts in normal mode with an existing database
+- **THEN** AutoMigrate SHALL run at startup to add any new columns or indexes without data loss

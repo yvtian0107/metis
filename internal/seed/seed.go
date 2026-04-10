@@ -31,7 +31,7 @@ func Install(db *gorm.DB, enforcer *casbin.Enforcer) (*Result, error) {
 	// 3. Seed Casbin policies
 	seedPolicies(db, enforcer, roleMap, r)
 
-	// 4. Seed ALL default configs (including new ones: server_port, otel.*, site.name)
+	// 4. Seed ALL default configs (server_port, otel.*, system.app_name, etc.)
 	seedDefaultConfigs(db)
 
 	// 5. Seed default auth providers
@@ -179,7 +179,7 @@ var defaultConfigs = []model.SystemConfig{
 	{Key: "otel.service_name", Value: "metis", Remark: "OTel 服务名称"},
 	{Key: "otel.sample_rate", Value: "1.0", Remark: "Trace 采样率 (0-1)"},
 	// Site
-	{Key: "site.name", Value: "Metis", Remark: "站点名称"},
+	{Key: "system.app_name", Value: "Metis", Remark: "站点名称"},
 }
 
 func seedDefaultConfigs(db *gorm.DB) {
@@ -215,15 +215,31 @@ func seedAuthProviders(db *gorm.DB) {
 	}
 }
 
-// SetSiteName updates the site.name config during installation.
+// SetSiteName updates the system.app_name config during installation.
 func SetSiteName(db *gorm.DB, name string) error {
-	return db.Where("`key` = ?", "site.name").Assign(model.SystemConfig{Value: name}).FirstOrCreate(&model.SystemConfig{Key: "site.name"}).Error
+	return db.Where("`key` = ?", "system.app_name").Assign(model.SystemConfig{Value: name}).FirstOrCreate(&model.SystemConfig{Key: "system.app_name"}).Error
 }
 
 // SetInstalled marks the system as installed.
 func SetInstalled(db *gorm.DB) error {
 	cfg := model.SystemConfig{Key: "app.installed", Value: "true", Remark: "系统安装标记"}
 	return db.Where("`key` = ?", "app.installed").Assign(cfg).FirstOrCreate(&cfg).Error
+}
+
+// SetOTelConfig updates OTel-related configs during installation.
+func SetOTelConfig(db *gorm.DB, enabled, endpoint, serviceName, sampleRate string) error {
+	configs := []model.SystemConfig{
+		{Key: "otel.enabled", Value: enabled},
+		{Key: "otel.exporter_endpoint", Value: endpoint},
+		{Key: "otel.service_name", Value: serviceName},
+		{Key: "otel.sample_rate", Value: sampleRate},
+	}
+	for _, cfg := range configs {
+		if err := db.Where("`key` = ?", cfg.Key).Assign(cfg).FirstOrCreate(&cfg).Error; err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // IsInstalled checks if the system has been installed.

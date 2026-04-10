@@ -1,10 +1,11 @@
 import { useState, useCallback } from "react"
-import { useNavigate } from "react-router"
+import { ChevronRight } from "lucide-react"
 
 import { AuthShell } from "@/components/auth/auth-shell"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Switch } from "@/components/ui/switch"
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -26,6 +27,13 @@ interface AdminConfig {
   password: string
   confirmPassword: string
   email: string
+}
+
+interface OTelConfig {
+  enabled: boolean
+  exporterEndpoint: string
+  serviceName: string
+  sampleRate: string
 }
 
 interface StepDef {
@@ -294,14 +302,20 @@ function DatabaseStep({
 function SiteInfoStep({
   config,
   onChange,
+  otelConfig,
+  onOTelChange,
   onNext,
   onBack,
 }: {
   config: SiteConfig
   onChange: (c: SiteConfig) => void
+  otelConfig: OTelConfig
+  onOTelChange: (c: OTelConfig) => void
   onNext: () => void
   onBack: () => void
 }) {
+  const [showAdvanced, setShowAdvanced] = useState(false)
+
   return (
     <div className="space-y-5">
       <div className="text-center">
@@ -329,6 +343,78 @@ function SiteInfoStep({
           显示在登录页和浏览器标题中
         </p>
       </div>
+
+      {/* Advanced settings toggle */}
+      <button
+        type="button"
+        onClick={() => setShowAdvanced(!showAdvanced)}
+        className="flex w-full items-center gap-1.5 text-[13px] font-medium text-slate-400 transition hover:text-slate-600"
+      >
+        <ChevronRight
+          className={`h-3.5 w-3.5 transition-transform duration-200 ${showAdvanced ? "rotate-90" : ""}`}
+        />
+        高级设置
+      </button>
+
+      {showAdvanced && (
+        <div className="space-y-3 rounded-xl border border-slate-200/60 bg-white/60 p-4">
+          <div className="mb-2 text-[12px] font-medium text-slate-400 uppercase tracking-wide">
+            OpenTelemetry
+          </div>
+
+          {/* OTel enabled toggle */}
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="text-[13px] font-medium text-slate-600">启用追踪</div>
+              <div className="text-[11px] text-slate-400">启用 OpenTelemetry 分布式追踪</div>
+            </div>
+            <Switch
+              checked={otelConfig.enabled}
+              onCheckedChange={(checked) => onOTelChange({ ...otelConfig, enabled: checked })}
+            />
+          </div>
+
+          {otelConfig.enabled && (
+            <div className="space-y-3 pt-1">
+              <div>
+                <Label className="mb-1.5 block text-[13px] font-medium text-slate-500">
+                  导出端点
+                </Label>
+                <Input
+                  placeholder="http://localhost:4318"
+                  value={otelConfig.exporterEndpoint}
+                  onChange={(e) => onOTelChange({ ...otelConfig, exporterEndpoint: e.target.value })}
+                  className="auth-input"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <Label className="mb-1.5 block text-[13px] font-medium text-slate-500">
+                    服务名称
+                  </Label>
+                  <Input
+                    placeholder="metis"
+                    value={otelConfig.serviceName}
+                    onChange={(e) => onOTelChange({ ...otelConfig, serviceName: e.target.value })}
+                    className="auth-input"
+                  />
+                </div>
+                <div>
+                  <Label className="mb-1.5 block text-[13px] font-medium text-slate-500">
+                    采样率
+                  </Label>
+                  <Input
+                    placeholder="1.0"
+                    value={otelConfig.sampleRate}
+                    onChange={(e) => onOTelChange({ ...otelConfig, sampleRate: e.target.value })}
+                    className="auth-input"
+                  />
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="flex gap-3">
         <Button
@@ -492,14 +578,15 @@ function CompleteStep({
   dbConfig,
   siteConfig,
   adminConfig,
+  otelConfig,
   onBack,
 }: {
   dbConfig: DBConfig
   siteConfig: SiteConfig
   adminConfig: AdminConfig
+  otelConfig: OTelConfig
   onBack: () => void
 }) {
-  const navigate = useNavigate()
   const [installing, setInstalling] = useState(false)
   const [done, setDone] = useState(false)
   const [error, setError] = useState("")
@@ -519,6 +606,10 @@ function CompleteStep({
         admin_username: adminConfig.username,
         admin_password: adminConfig.password,
         admin_email: adminConfig.email,
+        otel_enabled: otelConfig.enabled,
+        otel_exporter_endpoint: otelConfig.exporterEndpoint,
+        otel_service_name: otelConfig.serviceName,
+        otel_sample_rate: otelConfig.sampleRate,
       })
       setDone(true)
     } catch (err) {
@@ -526,7 +617,7 @@ function CompleteStep({
     } finally {
       setInstalling(false)
     }
-  }, [dbConfig, siteConfig, adminConfig])
+  }, [dbConfig, siteConfig, adminConfig, otelConfig])
 
   if (done) {
     return (
@@ -546,7 +637,7 @@ function CompleteStep({
         </div>
         <Button
           className="h-[2.625rem] w-full rounded-xl border-0 bg-slate-900 text-sm font-medium tracking-[-0.01em] text-white shadow-[0_1px_2px_rgba(0,0,0,0.05),inset_0_1px_0_rgba(255,255,255,0.06)] hover:bg-slate-800 active:scale-[0.985]"
-          onClick={() => navigate("/login", { replace: true })}
+          onClick={() => { window.location.href = "/login" }}
         >
           进入系统
         </Button>
@@ -588,6 +679,15 @@ function CompleteStep({
           <span className="text-slate-400">邮箱</span>
           <span className="font-medium text-slate-700">{adminConfig.email}</span>
         </div>
+        {otelConfig.enabled && (
+          <>
+            <div className="border-t border-slate-100" />
+            <div className="flex justify-between">
+              <span className="text-slate-400">OpenTelemetry</span>
+              <span className="font-medium text-slate-700">{otelConfig.exporterEndpoint}</span>
+            </div>
+          </>
+        )}
       </div>
 
       {error && (
@@ -656,6 +756,12 @@ export default function InstallPage() {
     confirmPassword: "",
     email: "",
   })
+  const [otelConfig, setOTelConfig] = useState<OTelConfig>({
+    enabled: false,
+    exporterEndpoint: "http://localhost:4318",
+    serviceName: "metis",
+    sampleRate: "1.0",
+  })
 
   const steps = dbConfig.driver === "postgres" ? STEPS_POSTGRES : STEPS_SQLITE
 
@@ -675,6 +781,8 @@ export default function InstallPage() {
           <SiteInfoStep
             config={siteConfig}
             onChange={setSiteConfig}
+            otelConfig={otelConfig}
+            onOTelChange={setOTelConfig}
             onNext={() => setStep(2)}
             onBack={() => setStep(0)}
           />
@@ -694,6 +802,7 @@ export default function InstallPage() {
             dbConfig={dbConfig}
             siteConfig={siteConfig}
             adminConfig={adminConfig}
+            otelConfig={otelConfig}
             onBack={() => setStep(2)}
           />
         )
