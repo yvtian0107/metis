@@ -15,6 +15,9 @@ export interface PaginatedResponse<T> {
 export interface SiteInfo {
   appName: string;
   hasLogo: boolean;
+  version: string;
+  gitCommit: string;
+  buildTime: string;
 }
 
 export class ApiError extends Error {

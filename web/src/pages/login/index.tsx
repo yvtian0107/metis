@@ -252,6 +252,11 @@ export default function LoginPage() {
           </div>
         </div>
       </div>
+      {siteInfo?.version && (
+        <div className="fixed bottom-3 right-4 text-[11px] text-slate-300">
+          {siteInfo.version}
+        </div>
+      )}
     </AuthShell>
   )
 }

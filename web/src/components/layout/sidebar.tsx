@@ -1,5 +1,7 @@
 import { useMemo } from "react"
 import { useLocation, useNavigate } from "react-router"
+import { useQuery } from "@tanstack/react-query"
+import { Info } from "lucide-react"
 import { useMenuStore, type MenuItem } from "@/stores/menu"
 import { useUiStore } from "@/stores/ui"
 import { getIcon } from "@/lib/icon-map"
@@ -9,6 +11,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip"
+import { api, type SiteInfo } from "@/lib/api"
 
 interface NavApp {
   id: number
@@ -76,6 +79,12 @@ export function Sidebar() {
   const collapsed = useUiStore((s) => s.sidebarCollapsed)
   const menuTree = useMenuStore((s) => s.menuTree)
 
+  const { data: siteInfo } = useQuery({
+    queryKey: ["site-info"],
+    queryFn: () => api.get<SiteInfo>("/api/v1/site-info"),
+    staleTime: 60_000,
+  })
+
   const navApps = useMemo(() => buildNavApps(menuTree), [menuTree])
   const activeApp = useMemo(() => findActiveNavApp(navApps, pathname), [navApps, pathname])
 
@@ -115,6 +124,19 @@ export function Sidebar() {
             </Tooltip>
           )
         })}
+
+        {siteInfo?.version && (
+          <Tooltip delayDuration={0}>
+            <TooltipTrigger asChild>
+              <div className="mt-auto flex h-9 w-9 items-center justify-center text-sidebar-foreground/30">
+                <Info className="h-3.5 w-3.5" />
+              </div>
+            </TooltipTrigger>
+            <TooltipContent side="right" sideOffset={8}>
+              {siteInfo.version}
+            </TooltipContent>
+          </Tooltip>
+        )}
       </nav>
 
       {/* Tier 2: Nav Panel */}

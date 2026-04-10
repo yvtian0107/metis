@@ -8,6 +8,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"metis/internal/model"
+	"metis/internal/version"
 )
 
 const (
@@ -18,8 +19,11 @@ const (
 )
 
 type siteInfoResp struct {
-	AppName string `json:"appName"`
-	HasLogo bool   `json:"hasLogo"`
+	AppName   string `json:"appName"`
+	HasLogo   bool   `json:"hasLogo"`
+	Version   string `json:"version"`
+	GitCommit string `json:"gitCommit"`
+	BuildTime string `json:"buildTime"`
 }
 
 func (h *Handler) GetSiteInfo(c *gin.Context) {
@@ -33,7 +37,13 @@ func (h *Handler) GetSiteInfo(c *gin.Context) {
 		hasLogo = true
 	}
 
-	OK(c, siteInfoResp{AppName: appName, HasLogo: hasLogo})
+	OK(c, siteInfoResp{
+		AppName:   appName,
+		HasLogo:   hasLogo,
+		Version:   version.Version,
+		GitCommit: version.GitCommit,
+		BuildTime: version.BuildTime,
+	})
 }
 
 type updateSiteInfoReq struct {
