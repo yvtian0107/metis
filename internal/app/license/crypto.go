@@ -11,7 +11,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"sort"
 	"strings"
 )
@@ -79,26 +78,19 @@ func GenerateKeyPair(encKey []byte) (string, string, error) {
 	return pubB64, base64.StdEncoding.EncodeToString(encrypted), nil
 }
 
-// GetEncryptionKey returns the 32-byte AES key.
-// Priority: LICENSE_KEY_SECRET env var > SHA-256 of JWT_SECRET env var.
-func GetEncryptionKey() ([]byte, error) {
-	if secret := os.Getenv("LICENSE_KEY_SECRET"); secret != "" {
-		h := sha256.Sum256([]byte(secret))
-		return h[:], nil
-	}
-	if secret := os.Getenv("JWT_SECRET"); secret != "" {
-		h := sha256.Sum256([]byte(secret))
+// GetEncryptionKey returns the 32-byte AES key from jwtSecret.
+func GetEncryptionKey(jwtSecret []byte) ([]byte, error) {
+	if len(jwtSecret) > 0 {
+		h := sha256.Sum256(jwtSecret)
 		return h[:], nil
 	}
 	return nil, ErrNoEncryptionKey
 }
 
 // GetEncryptionKeyWithFallback returns the encryption key, using jwtSecret as fallback.
+// The licenseKeySecret (from metis.yaml) takes priority over jwtSecret.
 func GetEncryptionKeyWithFallback(jwtSecret []byte) ([]byte, error) {
-	if secret := os.Getenv("LICENSE_KEY_SECRET"); secret != "" {
-		h := sha256.Sum256([]byte(secret))
-		return h[:], nil
-	}
+	// jwtSecret already contains the secret from metis.yaml
 	if len(jwtSecret) > 0 {
 		h := sha256.Sum256(jwtSecret)
 		return h[:], nil

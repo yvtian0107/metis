@@ -3,13 +3,14 @@ package database
 import (
 	"fmt"
 	"log/slog"
-	"os"
 
 	"github.com/glebarez/sqlite"
 	"github.com/samber/do/v2"
 	"github.com/uptrace/opentelemetry-go-extra/otelgorm"
+	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 
+	"metis/internal/config"
 	"metis/internal/model"
 )
 
@@ -18,19 +19,31 @@ type DB struct {
 	*gorm.DB
 }
 
+// New creates a DB from MetisConfig in the IOC container.
+// If no config is provided, falls back to default SQLite.
 func New(i do.Injector) (*DB, error) {
-	driver := os.Getenv("DB_DRIVER")
-	dsn := os.Getenv("DB_DSN")
+	cfg, err := do.InvokeAs[*config.MetisConfig](i)
+	if err != nil {
+		// No config in container — use default SQLite (install mode)
+		cfg = config.DefaultSQLiteConfig()
+	}
+	return Open(cfg.DBDriver, cfg.DBDSN)
+}
 
+// Open connects to a database with the given driver and DSN.
+// Used by both normal startup and install wizard (for connection testing).
+func Open(driver, dsn string) (*DB, error) {
 	var dialector gorm.Dialector
 	switch driver {
 	case "postgres":
-		return nil, fmt.Errorf("postgres driver not yet installed; run: go get gorm.io/driver/postgres")
-	default:
+		dialector = postgres.Open(dsn)
+	case "sqlite", "":
 		if dsn == "" {
 			dsn = "metis.db?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)"
 		}
 		dialector = sqlite.Open(dsn)
+	default:
+		return nil, fmt.Errorf("unsupported database driver: %s", driver)
 	}
 
 	db, err := gorm.Open(dialector, &gorm.Config{})
@@ -43,7 +56,13 @@ func New(i do.Injector) (*DB, error) {
 		return nil, fmt.Errorf("otelgorm plugin failed: %w", err)
 	}
 
-	if err := db.AutoMigrate(
+	slog.Info("database connected", "driver", driver, "dsn", dsn)
+	return &DB{DB: db}, nil
+}
+
+// AutoMigrateKernel runs AutoMigrate for all kernel models.
+func AutoMigrateKernel(db *gorm.DB) error {
+	return db.AutoMigrate(
 		&model.SystemConfig{},
 		&model.Role{},
 		&model.Menu{},
@@ -59,12 +78,7 @@ func New(i do.Injector) (*DB, error) {
 		&model.MessageChannel{},
 		&model.AuditLog{},
 		&model.IdentitySource{},
-	); err != nil {
-		return nil, fmt.Errorf("auto migrate failed: %w", err)
-	}
-
-	slog.Info("database initialized", "driver", driver, "dsn", dsn)
-	return &DB{DB: db}, nil
+	)
 }
 
 // Shutdown implements do.ShutdownerWithError for graceful cleanup.

@@ -15,11 +15,10 @@ make web-dev          # Run Vite dev server (port 3000, proxies /api → :8080)
 make build            # Build frontend + compile single binary (./metis)
 make release          # Cross-compile for linux/darwin/windows (amd64+arm64) → dist/
 make run              # build + run
-make init-dev-user    # Create admin/admin123 user for local dev
 cd web && bun run lint  # ESLint the frontend (includes React Compiler rules)
 ```
 
-For development, run `make dev` and `make web-dev` in separate terminals. The Vite dev server at :3000 proxies `/api/*` to the Go server at :8080.
+For development, run `make dev` and `make web-dev` in separate terminals. The Vite dev server at :3000 proxies `/api/*` to the Go server at :8080. On first run, open `http://localhost:3000` — the install wizard will guide you through database selection, site setup, and admin account creation.
 
 **Go build verification**: Use `go build -tags dev ./cmd/server/` to check compilation without building the frontend (the `dev` tag provides an empty embed FS).
 
@@ -36,9 +35,7 @@ make build APPS=system,ai                        # 内核 + AI（前端裁剪，
 | `EDITION` | Go build tag，控制后端编译哪些 App | 空（全部编译） |
 | `APPS` | 前端模块列表，`scripts/gen-registry.sh` 据此生成 `web/src/apps/registry.ts` | 空（全量 registry） |
 
-**CLI subcommands** (run via `go run ./cmd/server <command>`):
-- `create-admin --username=x --password=y` — Create admin user
-- `seed` — Manually run seed (also runs automatically on every server start, so rarely needed)
+**CLI subcommands**: None — all configuration is handled via the browser-based install wizard and `metis.yaml`.
 
 **Package manager**: Frontend uses **bun** (`bun run dev`, `bun run build`). No Go tests exist yet.
 
@@ -55,15 +52,16 @@ internal/handler/     → HTTP handlers, route registration, unified response (R
 internal/service/     → Business logic, custom error types (ErrUserNotFound, etc.)
 internal/repository/  → GORM data access, ListParams/ListResult for pagination
 internal/model/       → Domain structs (BaseModel for common fields, SystemConfig for K/V table)
-internal/database/    → GORM init, SQLite only (PostgreSQL stub exists but not wired)
+internal/config/      → metis.yaml config (MetisConfig struct, Load/Save)
+internal/database/    → GORM init, SQLite + PostgreSQL support
 internal/middleware/   → slog request logger, panic recovery, JWT auth, Casbin RBAC, audit logging
 internal/scheduler/   → Task engine: cron scheduling + async queue, GORM-backed persistence
-internal/seed/        → Auto-seed on startup: roles, menus, Casbin policies, default SystemConfig
+internal/seed/        → Install() for first-time setup, Sync() for incremental updates on restart
 internal/pkg/token/   → JWT generation/validation, password hashing (bcrypt), token blacklist
 internal/pkg/oauth/   → OAuth 2.0 providers (Google, GitHub), state manager for CSRF
 internal/casbin/      → Casbin enforcer init with RBAC model (keyMatch2 matcher), GORM adapter
 internal/channel/     → Message channels with driver pattern (email etc.)
-internal/telemetry/   → OpenTelemetry tracing with OTLP HTTP exporter, trace-aware slog
+internal/telemetry/   → OpenTelemetry tracing with OTLP HTTP exporter, config from DB SystemConfig
 ```
 
 All dependencies are registered as `do.Provide()` providers in main.go and resolved lazily. The database wrapper (`database.DB`) implements `do.Shutdowner` for graceful cleanup.
@@ -135,7 +133,7 @@ JWTAuth middleware → extracts UserID + Role from token → CasbinAuth middlewa
 
 ### OpenTelemetry
 
-通过环境变量启用（默认关闭）：`OTEL_ENABLED=true`、`OTEL_EXPORTER_OTLP_ENDPOINT`、`OTEL_SERVICE_NAME`、`OTEL_SAMPLE_RATE`。Trace ID/Span ID 自动注入 slog 日志。
+通过 DB SystemConfig 配置（默认关闭）：`otel.enabled`, `otel.exporter_endpoint`, `otel.service_name`, `otel.sample_rate`。在系统设置页面修改。Trace ID/Span ID 自动注入 slog 日志。
 
 ### Frontend Stack (`web/src/`)
 
@@ -179,18 +177,20 @@ function MyComponent({ data }) {
 
 - **API prefix**: `/api/v1/*`
 - **Response format**: `handler.OK(c, data)` / `handler.Fail(c, status, msg)` — returns `{"code":0,"message":"ok","data":...}`
-- **Database**: SQLite only (pure Go, CGO_ENABLED=0). Default DSN 使用 `_pragma=journal_mode(WAL)` 开启 WAL 模式。PostgreSQL driver stub exists in `database.go` but is not wired — returns error if selected.
+- **Database**: SQLite (default, pure Go, CGO_ENABLED=0) or PostgreSQL. Default SQLite DSN 使用 `_pragma=journal_mode(WAL)` 开启 WAL 模式。Database driver is selected during the install wizard and stored in `metis.yaml`.
+- **Configuration**: `metis.yaml` stores infrastructure config (db_driver, db_dsn, jwt_secret, license_key_secret). All other settings (server_port, OTel, site.name, etc.) are in DB `SystemConfig` table. No `.env` file is used.
+- **Install wizard**: On first run (no `metis.yaml`), the server enters install mode and serves only `/api/v1/install/*` + SPA. The frontend at `/install` guides database selection → site info → admin account creation. After install, the process hot-switches to normal mode.
+- **Seed pattern**: `seed.Install()` runs during first-time installation (full seed). `seed.Sync()` runs on every subsequent startup (incremental — adds missing roles/menus/policies only, never overwrites existing SystemConfig values).
 - **New kernel models**: Add struct in `internal/model/`, register in `database.go` AutoMigrate call, create repo → service → handler. Wire into IOC in `main.go` via `do.Provide()`.
 - **New app models**: 在 App 的 `Models()` 方法中返回，main.go 自动 AutoMigrate。
 - **BaseModel**: Embed `model.BaseModel` for auto ID + timestamps + soft delete. SystemConfig uses Key as PK instead.
 - **ToResponse pattern**: Models expose `.ToResponse()` methods to strip sensitive fields (e.g., User hides password hash).
 - **Pagination**: Backend `ListParams{Keyword, IsActive, Page, PageSize}` → `ListResult{Items, Total}`. Frontend `useListPage` hook wraps this with React Query.
 - **Error handling**: Services 定义包级 sentinel error（如 `ErrProductNotFound`），Handler 用 `errors.Is()` 匹配并转换为 HTTP status code。
-- **Environment**: `.env` auto-loaded via godotenv. Copy `.env.example` → `.env` for local config. Key vars: `SERVER_PORT`, `DB_DRIVER`, `DB_DSN`, `JWT_SECRET`（auto-generated if empty）, `OTEL_*`.
 - **Static embedding**: `embed.go` at project root embeds `web/dist/` via `//go:embed all:web/dist`. `embed_dev.go`（`//go:build dev`）提供空 FS 用于开发模式（`make dev` 不需要先构建前端）。SPA fallback serves `index.html` for non-API, non-file routes.
 - **Frontend path alias**: `@/` maps to `web/src/` in both Vite and TypeScript configs.
 - **Route registration**: Handler 的 `Register()` 返回已带 JWT+Casbin+Audit 中间件的 `*gin.RouterGroup`，App routes 挂载在此 group 下。
-- **Seed pattern**: 种子数据用 `db.Where("permission = ?", x).First(&existing)` 做幂等检查，只在记录不存在时创建。Casbin 策略用 `enforcer.HasPolicy()` 检查。
+- **Seed pattern**: 种子数据用 `db.Where("permission = ?", x).First(&existing)` 做幂等检查，只在记录不存在时创建。Casbin 策略用 `enforcer.HasPolicy()` 检查。Install() 为首次安装全量种子，Sync() 为后续启动增量同步。
 
 ## Do Not Modify
 

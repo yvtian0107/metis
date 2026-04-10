@@ -17,16 +17,23 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
-// Init initializes OpenTelemetry when OTEL_ENABLED=true.
+// OTelConfig holds OpenTelemetry settings read from DB SystemConfig.
+type OTelConfig struct {
+	Enabled          bool
+	ExporterEndpoint string
+	ServiceName      string
+	SampleRate       float64
+}
+
+// Init initializes OpenTelemetry from the provided config.
 // Returns a shutdown function that flushes pending spans.
 // When disabled, returns a no-op shutdown and nil error.
-func Init(ctx context.Context) (func(context.Context), error) {
-	if os.Getenv("OTEL_ENABLED") != "true" {
+func Init(ctx context.Context, cfg OTelConfig) (func(context.Context), error) {
+	if !cfg.Enabled {
 		return func(context.Context) {}, nil
 	}
 
-	// Service name
-	serviceName := os.Getenv("OTEL_SERVICE_NAME")
+	serviceName := cfg.ServiceName
 	if serviceName == "" {
 		serviceName = "metis"
 	}
@@ -38,7 +45,7 @@ func Init(ctx context.Context) (func(context.Context), error) {
 	)
 
 	// OTLP HTTP exporter
-	endpoint := os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
+	endpoint := cfg.ExporterEndpoint
 	if endpoint == "" {
 		endpoint = "http://localhost:4318"
 	}
@@ -47,7 +54,6 @@ func Init(ctx context.Context) (func(context.Context), error) {
 		return nil, err
 	}
 
-	// Build exporter options: host:port from URL, path appended with /v1/traces
 	urlPath := u.Path
 	if urlPath == "" || urlPath == "/" {
 		urlPath = "/v1/traces"
@@ -63,7 +69,6 @@ func Init(ctx context.Context) (func(context.Context), error) {
 		opts = append(opts, otlptracehttp.WithInsecure())
 	}
 
-	// Create exporter in goroutine — New() calls Start() which may block
 	type exporterResult struct {
 		exporter sdktrace.SpanExporter
 		err      error
@@ -89,10 +94,8 @@ func Init(ctx context.Context) (func(context.Context), error) {
 
 	// Sampler
 	sampler := sdktrace.ParentBased(sdktrace.AlwaysSample())
-	if rateStr := os.Getenv("OTEL_SAMPLE_RATE"); rateStr != "" {
-		if rate, err := strconv.ParseFloat(rateStr, 64); err == nil && rate >= 0 && rate <= 1 {
-			sampler = sdktrace.ParentBased(sdktrace.TraceIDRatioBased(rate))
-		}
+	if cfg.SampleRate >= 0 && cfg.SampleRate < 1 {
+		sampler = sdktrace.ParentBased(sdktrace.TraceIDRatioBased(cfg.SampleRate))
 	}
 
 	// TracerProvider
@@ -106,7 +109,7 @@ func Init(ctx context.Context) (func(context.Context), error) {
 	// W3C TraceContext propagator
 	otel.SetTextMapPropagator(propagation.TraceContext{})
 
-	// Wrap slog with trace-aware handler that writes to stderr
+	// Wrap slog with trace-aware handler
 	slog.SetDefault(slog.New(&traceHandler{inner: slog.NewTextHandler(os.Stderr, nil)}))
 
 	slog.Info("opentelemetry initialized",
@@ -120,6 +123,23 @@ func Init(ctx context.Context) (func(context.Context), error) {
 			slog.Error("otel shutdown error", "error", err)
 		}
 	}, nil
+}
+
+// LoadOTelConfigFromDB builds an OTelConfig from SystemConfig key-value pairs.
+// The getter function reads values from the DB.
+func LoadOTelConfigFromDB(getter func(key string) string) OTelConfig {
+	cfg := OTelConfig{
+		Enabled:          getter("otel.enabled") == "true",
+		ExporterEndpoint: getter("otel.exporter_endpoint"),
+		ServiceName:      getter("otel.service_name"),
+		SampleRate:       1.0,
+	}
+	if rateStr := getter("otel.sample_rate"); rateStr != "" {
+		if rate, err := strconv.ParseFloat(rateStr, 64); err == nil && rate >= 0 && rate <= 1 {
+			cfg.SampleRate = rate
+		}
+	}
+	return cfg
 }
 
 // traceHandler wraps a slog.Handler to inject trace_id and span_id from context.

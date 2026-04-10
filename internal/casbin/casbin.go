@@ -5,6 +5,7 @@ import (
 	"github.com/casbin/casbin/v2/model"
 	gormadapter "github.com/casbin/gorm-adapter/v3"
 	"github.com/samber/do/v2"
+	"gorm.io/gorm"
 
 	"metis/internal/database"
 )
@@ -28,8 +29,12 @@ m = g(r.sub, p.sub) && keyMatch2(r.obj, p.obj) && r.act == p.act
 
 func NewEnforcer(i do.Injector) (*casbin.Enforcer, error) {
 	db := do.MustInvoke[*database.DB](i)
+	return NewEnforcerWithDB(db.DB)
+}
 
-	adapter, err := gormadapter.NewAdapterByDB(db.DB)
+// NewEnforcerWithDB creates a Casbin enforcer with a specific gorm.DB instance.
+func NewEnforcerWithDB(db *gorm.DB) (*casbin.Enforcer, error) {
+	adapter, err := gormadapter.NewAdapterByDB(db)
 	if err != nil {
 		return nil, err
 	}

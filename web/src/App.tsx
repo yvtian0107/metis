@@ -11,6 +11,52 @@ import "@/apps/license/module"
 import LoginPage from "@/pages/login"
 import NotFoundPage from "@/pages/not-found"
 
+// ─── Install status guard ────────────────────────────────────────────────────
+
+let installChecked = false
+let isInstalled = true // default to true to avoid flash
+
+async function checkInstallStatus(): Promise<boolean> {
+  if (installChecked) return isInstalled
+  try {
+    const res = await fetch("/api/v1/install/status")
+    const body = await res.json()
+    isInstalled = body.data?.installed === true
+  } catch {
+    isInstalled = true // if check fails, assume installed
+  }
+  installChecked = true
+  return isInstalled
+}
+
+function InstallGuard() {
+  const [checked, setChecked] = useState(installChecked)
+  const [installed, setInstalled] = useState(isInstalled)
+
+  useEffect(() => {
+    if (!checked) {
+      checkInstallStatus().then((result) => {
+        setInstalled(result)
+        setChecked(true)
+      })
+    }
+  }, [checked])
+
+  if (!checked) {
+    return (
+      <div className="flex min-h-screen items-center justify-center text-muted-foreground">
+        加载中...
+      </div>
+    )
+  }
+
+  if (!installed) {
+    return <Navigate to="/install" replace />
+  }
+
+  return <LoginPage />
+}
+
 function AuthGuard() {
   const { user, initialized, requireTwoFactorSetup } = useAuthStore()
   const [tfaOpen, setTfaOpen] = useState(true)
@@ -74,8 +120,36 @@ function DefaultRedirect() {
 
 const router = createBrowserRouter([
   {
+    path: "/install",
+    async lazy() {
+      const { default: InstallPage } = await import("@/pages/install")
+      function InstallRoute() {
+        const [checked, setChecked] = useState(installChecked)
+        const [installed, setInstalled] = useState(isInstalled)
+        useEffect(() => {
+          if (!checked) {
+            checkInstallStatus().then((result) => {
+              setInstalled(result)
+              setChecked(true)
+            })
+          }
+        }, [checked])
+        if (!checked) {
+          return (
+            <div className="flex min-h-screen items-center justify-center text-muted-foreground">
+              加载中...
+            </div>
+          )
+        }
+        if (installed) return <Navigate to="/login" replace />
+        return <InstallPage />
+      }
+      return { element: <InstallRoute /> }
+    },
+  },
+  {
     path: "/login",
-    element: <LoginPage />,
+    element: <InstallGuard />,
   },
   {
     path: "/register",
