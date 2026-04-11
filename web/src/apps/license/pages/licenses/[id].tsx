@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react"
 import { useParams, useNavigate } from "react-router"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
+import { useTranslation } from "react-i18next"
 import { ArrowLeft, Ban, Check, Copy, Download, Loader2 } from "lucide-react"
 import { api } from "@/lib/api"
 import { usePermission } from "@/hooks/use-permission"
@@ -71,12 +72,13 @@ interface SignedActivationClaims {
   exp?: number | null
 }
 
-const STATUS_MAP: Record<string, { label: string; variant: "default" | "destructive" }> = {
-  issued: { label: "已签发", variant: "default" },
-  revoked: { label: "已吊销", variant: "destructive" },
+const STATUS_VARIANTS: Record<string, "default" | "destructive"> = {
+  issued: "default",
+  revoked: "destructive",
 }
 
 export function Component() {
+  const { t } = useTranslation(["license", "common"])
   const { id } = useParams()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
@@ -100,7 +102,7 @@ export function Component() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["license-license", id] })
       queryClient.invalidateQueries({ queryKey: ["license-licenses"] })
-      toast.success("许可已吊销")
+      toast.success(t("license:licenses.revokeSuccess"))
     },
     onError: (err) => toast.error(err.message),
   })
@@ -118,7 +120,7 @@ export function Component() {
       anchor.remove()
       URL.revokeObjectURL(url)
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "导出失败")
+      toast.error(err instanceof Error ? err.message : t("license:licenses.exportFailed"))
     }
   }
 
@@ -127,10 +129,10 @@ export function Component() {
     try {
       await navigator.clipboard.writeText(license.registrationCode)
       setCopied(true)
-      toast.success("注册码已复制")
+      toast.success(t("license:licenses.codeCopied"))
       window.setTimeout(() => setCopied(false), 1500)
     } catch {
-      toast.error("复制失败，请手动复制")
+      toast.error(t("license:licenses.copyFailed"))
     }
   }
 
@@ -190,11 +192,12 @@ export function Component() {
 
   if (!license) {
     return (
-      <div className="py-20 text-center text-muted-foreground">许可不存在</div>
+      <div className="py-20 text-center text-muted-foreground">{t("license:licenses.notFound")}</div>
     )
   }
 
-  const status = STATUS_MAP[license.status] ?? { label: license.status, variant: "default" as const }
+  const variant = STATUS_VARIANTS[license.status] ?? ("default" as const)
+  const statusKey = license.status as string
 
   return (
     <div className="space-y-6">
@@ -203,37 +206,37 @@ export function Component() {
           <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => navigate("/license/licenses")}>
             <ArrowLeft className="h-4 w-4" />
           </Button>
-          <h2 className="text-lg font-semibold">许可详情</h2>
-          <Badge variant={status.variant}>{status.label}</Badge>
+          <h2 className="text-lg font-semibold">{t("license:licenses.licenseDetail")}</h2>
+          <Badge variant={variant}>{t(`license:status.${statusKey}`, license.status)}</Badge>
         </div>
         {license.status === "issued" && (
           <div className="flex items-center gap-2">
             <Button variant="outline" size="sm" onClick={handleExport}>
               <Download className="mr-1.5 h-4 w-4" />
-              导出 .lic
+              {t("license:licenses.exportLic")}
             </Button>
             {canRevoke && (
               <AlertDialog>
                 <AlertDialogTrigger asChild>
                   <Button variant="destructive" size="sm">
                     <Ban className="mr-1.5 h-4 w-4" />
-                    吊销
+                    {t("license:licenses.revoke")}
                   </Button>
                 </AlertDialogTrigger>
                 <AlertDialogContent>
                   <AlertDialogHeader>
-                    <AlertDialogTitle>吊销许可</AlertDialogTitle>
+                    <AlertDialogTitle>{t("license:licenses.revokeTitle")}</AlertDialogTitle>
                     <AlertDialogDescription>
-                      确定要吊销此许可吗？吊销后已导出的 .lic 文件仍可离线使用。
+                      {t("license:licenses.revokeDesc")}
                     </AlertDialogDescription>
                   </AlertDialogHeader>
                   <AlertDialogFooter>
-                    <AlertDialogCancel>取消</AlertDialogCancel>
+                    <AlertDialogCancel>{t("common:cancel")}</AlertDialogCancel>
                     <AlertDialogAction
                       onClick={() => revokeMutation.mutate()}
                       disabled={revokeMutation.isPending}
                     >
-                      {revokeMutation.isPending ? "处理中..." : "确定吊销"}
+                      {revokeMutation.isPending ? t("common:processing") : t("license:licenses.confirmRevoke")}
                     </AlertDialogAction>
                   </AlertDialogFooter>
                 </AlertDialogContent>
@@ -246,13 +249,13 @@ export function Component() {
       <div className="grid gap-6 lg:grid-cols-2">
         {/* Basic Info */}
         <div className="rounded-lg border p-4 space-y-3">
-          <h3 className="text-sm font-medium text-muted-foreground">基本信息</h3>
+          <h3 className="text-sm font-medium text-muted-foreground">{t("license:licenses.basicInfo")}</h3>
           <dl className="space-y-2 text-sm">
-            <InfoRow label="商品" value={license.productName ? `${license.productName} (${license.productCode})` : "-"} />
-            <InfoRow label="授权主体" value={license.licenseeName ? `${license.licenseeName} (${license.licenseeCode})` : "-"} />
-            <InfoRow label="套餐" value={license.planName} />
+            <InfoRow label={t("license:licenses.product")} value={license.productName ? `${license.productName} (${license.productCode})` : "-"} />
+            <InfoRow label={t("license:licenses.licensee")} value={license.licenseeName ? `${license.licenseeName} (${license.licenseeCode})` : "-"} />
+            <InfoRow label={t("license:licenses.plan")} value={license.planName} />
             <div className="flex items-start justify-between gap-4">
-              <dt className="text-muted-foreground shrink-0">注册码</dt>
+              <dt className="text-muted-foreground shrink-0">{t("license:licenses.registrationCode")}</dt>
               <dd className="flex items-center gap-2">
                 <span className="text-right break-all font-mono text-xs">{license.registrationCode}</span>
                 <Button
@@ -263,7 +266,7 @@ export function Component() {
                   onClick={handleCopyRegistrationCode}
                 >
                   {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
-                  <span className="ml-1">{copied ? "已复制" : "复制"}</span>
+                  <span className="ml-1">{copied ? t("common:copied") : t("common:copy")}</span>
                 </Button>
               </dd>
             </div>
@@ -272,33 +275,33 @@ export function Component() {
 
         {/* Validity */}
         <div className="rounded-lg border p-4 space-y-3">
-          <h3 className="text-sm font-medium text-muted-foreground">有效期</h3>
+          <h3 className="text-sm font-medium text-muted-foreground">{t("license:licenses.validity")}</h3>
           <dl className="space-y-2 text-sm">
-            <InfoRow label="生效时间" value={new Date(license.validFrom).toLocaleString()} />
+            <InfoRow label={t("license:licenses.validFrom")} value={formatDateTime(license.validFrom)} />
             <InfoRow
-              label="过期时间"
-              value={license.validUntil ? new Date(license.validUntil).toLocaleString() : "永久有效"}
+              label={t("license:licenses.validUntil")}
+              value={license.validUntil ? formatDateTime(license.validUntil) : t("license:licenses.permanentValid")}
             />
           </dl>
         </div>
 
         {/* Issuance Info */}
         <div className="rounded-lg border p-4 space-y-3">
-          <h3 className="text-sm font-medium text-muted-foreground">签发信息</h3>
+          <h3 className="text-sm font-medium text-muted-foreground">{t("license:licenses.issuanceInfo")}</h3>
           <dl className="space-y-2 text-sm">
-            <InfoRow label="签发时间" value={formatDateTime(license.createdAt)} />
-            <InfoRow label="密钥版本" value={`v${license.keyVersion}`} />
-            {license.notes && <InfoRow label="备注" value={license.notes} />}
+            <InfoRow label={t("license:licenses.issuedAt")} value={formatDateTime(license.createdAt)} />
+            <InfoRow label={t("license:licenses.keyVersion")} value={`v${license.keyVersion}`} />
+            {license.notes && <InfoRow label={t("license:licenses.notes")} value={license.notes} />}
           </dl>
         </div>
 
         {signedClaims && (
           <div className="rounded-lg border p-4 space-y-3">
-            <h3 className="text-sm font-medium text-muted-foreground">激活码签名信息</h3>
+            <h3 className="text-sm font-medium text-muted-foreground">{t("license:licenses.activationClaims")}</h3>
             <dl className="space-y-2 text-sm">
-              <InfoRow label="产品编码" value={signedClaims.pid || license.productCode || "-"} mono />
-              <InfoRow label="授权主体" value={signedClaims.licn || license.licenseeName || "-"} />
-              <InfoRow label="主体编码" value={signedClaims.lic || license.licenseeCode || "-"} mono />
+              <InfoRow label={t("license:licenses.productCode")} value={signedClaims.pid || license.productCode || "-"} mono />
+              <InfoRow label={t("license:licenses.licensee")} value={signedClaims.licn || license.licenseeName || "-"} />
+              <InfoRow label={t("license:licenses.licenseeCode")} value={signedClaims.lic || license.licenseeCode || "-"} mono />
             </dl>
           </div>
         )}
@@ -306,9 +309,9 @@ export function Component() {
         {/* Revocation Info */}
         {license.status === "revoked" && (
           <div className="rounded-lg border border-destructive/20 bg-destructive/5 p-4 space-y-3">
-            <h3 className="text-sm font-medium text-destructive">吊销信息</h3>
+            <h3 className="text-sm font-medium text-destructive">{t("license:licenses.revocationInfo")}</h3>
             <dl className="space-y-2 text-sm">
-              <InfoRow label="吊销时间" value={license.revokedAt ? formatDateTime(license.revokedAt) : "-"} />
+              <InfoRow label={t("license:licenses.revokedAt")} value={license.revokedAt ? formatDateTime(license.revokedAt) : "-"} />
             </dl>
           </div>
         )}
@@ -317,7 +320,7 @@ export function Component() {
       {/* Constraint Values */}
       {modules.length > 0 && (
         <div className="rounded-lg border p-4 space-y-2.5">
-          <h3 className="text-sm font-medium text-muted-foreground">功能约束</h3>
+          <h3 className="text-sm font-medium text-muted-foreground">{t("license:licenses.constraintValues")}</h3>
           <div className="space-y-2">
             {modules.map((module) => {
               return (
@@ -325,7 +328,7 @@ export function Component() {
                   <div className="mb-1.5 flex items-center gap-2">
                     <span className="text-sm font-medium leading-5">{module.label}</span>
                     <Badge variant={module.isEnabled ? "default" : "outline"} className="text-[11px]">
-                      {module.isEnabled ? "已启用" : "未启用"}
+                      {module.isEnabled ? t("license:licenses.moduleEnabled") : t("license:licenses.moduleDisabled")}
                     </Badge>
                   </div>
                   {module.isEnabled && module.features.length > 0 && (
@@ -337,7 +340,7 @@ export function Component() {
                         >
                           <span className="truncate text-muted-foreground">{feature.label}</span>
                           <span className="min-w-16 pr-1 text-right font-mono tabular-nums text-foreground">
-                            {formatConstraintValue(feature.value)}
+                            {formatConstraintValue(feature.value, t)}
                           </span>
                         </div>
                       ))}
@@ -370,7 +373,7 @@ function decodeActivationClaims(activationCode?: string): SignedActivationClaims
   }
 }
 
-function formatConstraintValue(value: unknown): string {
+function formatConstraintValue(value: unknown, t: (key: string) => string): string {
   if (value == null) {
     return "-"
   }
@@ -378,7 +381,7 @@ function formatConstraintValue(value: unknown): string {
     return value.length > 0 ? value.join(", ") : "-"
   }
   if (typeof value === "boolean") {
-    return value ? "是" : "否"
+    return value ? t("common:yes") : t("common:no")
   }
   return String(value)
 }

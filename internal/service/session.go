@@ -11,8 +11,8 @@ import (
 )
 
 var (
-	ErrSessionNotFound = errors.New("session not found")
-	ErrCannotKickSelf  = errors.New("不能踢出当前会话")
+	ErrSessionNotFound = errors.New("error.session.not_found")
+	ErrCannotKickSelf  = errors.New("error.session.cannot_kick_self")
 )
 
 type SessionService struct {

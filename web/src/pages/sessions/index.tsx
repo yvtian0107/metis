@@ -1,4 +1,5 @@
 import { useState } from "react"
+import { useTranslation } from "react-i18next"
 import { Monitor, LogOut } from "lucide-react"
 import { usePermission } from "@/hooks/use-permission"
 import { useListPage } from "@/hooks/use-list-page"
@@ -36,6 +37,7 @@ interface Session {
 }
 
 export function Component() {
+  const { t } = useTranslation(["sessions", "common"])
   const [kickTarget, setKickTarget] = useState<{ id: number; username: string } | null>(null)
   const canDelete = usePermission("system:session:delete")
 
@@ -47,27 +49,27 @@ export function Component() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold">会话管理</h2>
-        <span className="text-sm text-muted-foreground">共 {total} 个活跃会话</span>
+        <h2 className="text-lg font-semibold">{t("sessions:title")}</h2>
+        <span className="text-sm text-muted-foreground">{t("sessions:activeSessions", { total })}</span>
       </div>
 
       <DataTableCard>
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead className="min-w-[160px]">用户</TableHead>
-              <TableHead className="w-[140px]">IP 地址</TableHead>
-              <TableHead className="min-w-[240px]">设备</TableHead>
-              <TableHead className="w-[150px]">登录时间</TableHead>
-              <TableHead className="w-[150px]">最后活跃</TableHead>
-              <DataTableActionsHead className="min-w-[96px]">操作</DataTableActionsHead>
+              <TableHead className="min-w-[160px]">{t("sessions:user")}</TableHead>
+              <TableHead className="w-[140px]">{t("sessions:ipAddress")}</TableHead>
+              <TableHead className="min-w-[240px]">{t("sessions:device")}</TableHead>
+              <TableHead className="w-[150px]">{t("sessions:loginTime")}</TableHead>
+              <TableHead className="w-[150px]">{t("sessions:lastActive")}</TableHead>
+              <DataTableActionsHead className="min-w-[96px]">{t("common:actions")}</DataTableActionsHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {isLoading ? (
               <DataTableLoadingRow colSpan={6} />
             ) : sessions.length === 0 ? (
-              <DataTableEmptyRow colSpan={6} icon={Monitor} title="暂无活跃会话" />
+              <DataTableEmptyRow colSpan={6} icon={Monitor} title={t("sessions:noSessions")} />
             ) : (
               sessions.map((session) => (
                 <TableRow key={session.id}>
@@ -75,7 +77,7 @@ export function Component() {
                     <div className="flex items-center gap-2">
                       {session.username}
                       {session.isCurrent && (
-                        <Badge variant="outline" className="text-xs">当前</Badge>
+                        <Badge variant="outline" className="text-xs">{t("sessions:current")}</Badge>
                       )}
                     </div>
                   </TableCell>
@@ -100,7 +102,7 @@ export function Component() {
                         onClick={() => setKickTarget({ id: session.id, username: session.username })}
                       >
                         <LogOut className="mr-1 h-3.5 w-3.5" />
-                        踢出
+                        {t("sessions:kick")}
                       </Button>
                     )}
                   </DataTableActionsCell>

@@ -1,4 +1,5 @@
 import { useEffect } from "react"
+import { useTranslation } from "react-i18next"
 import { useForm } from "react-hook-form"
 import { z } from "zod"
 import { zodResolver } from "@hookform/resolvers/zod"
@@ -37,22 +38,26 @@ interface RoleOption {
   code: string
 }
 
-const createSchema = z.object({
-  username: z.string().min(1, "用户名不能为空").max(64),
-  password: z.string().min(1, "密码不能为空"),
-  email: z.string().email("邮箱格式不正确").or(z.literal("")).optional(),
-  phone: z.string().max(32).optional(),
-  roleId: z.coerce.number().min(1, "请选择角色"),
-})
+function createCreateSchema(t: (key: string) => string) {
+  return z.object({
+    username: z.string().min(1, t("users:validation.usernameRequired")).max(64),
+    password: z.string().min(1, t("users:validation.passwordRequired")),
+    email: z.string().email(t("users:validation.emailInvalid")).or(z.literal("")).optional(),
+    phone: z.string().max(32).optional(),
+    roleId: z.coerce.number().min(1, t("users:validation.roleRequired")),
+  })
+}
 
-const editSchema = z.object({
-  email: z.string().email("邮箱格式不正确").or(z.literal("")).optional(),
-  phone: z.string().max(32).optional(),
-  roleId: z.coerce.number().min(1, "请选择角色"),
-})
+function createEditSchema(t: (key: string) => string) {
+  return z.object({
+    email: z.string().email(t("users:validation.emailInvalid")).or(z.literal("")).optional(),
+    phone: z.string().max(32).optional(),
+    roleId: z.coerce.number().min(1, t("users:validation.roleRequired")),
+  })
+}
 
-type CreateValues = z.infer<typeof createSchema>
-type EditValues = z.infer<typeof editSchema>
+type CreateValues = z.infer<ReturnType<typeof createCreateSchema>>
+type EditValues = z.infer<ReturnType<typeof createEditSchema>>
 
 interface UserSheetProps {
   open: boolean
@@ -61,6 +66,7 @@ interface UserSheetProps {
 }
 
 export function UserSheet({ open, onOpenChange, user }: UserSheetProps) {
+  const { t } = useTranslation(["users", "common"])
   const queryClient = useQueryClient()
   const isEditing = user !== null
 
@@ -75,7 +81,7 @@ export function UserSheet({ open, onOpenChange, user }: UserSheetProps) {
 
   const form = useForm<CreateValues>({
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    resolver: zodResolver((isEditing ? editSchema : createSchema) as any),
+    resolver: zodResolver((isEditing ? createEditSchema(t) : createCreateSchema(t)) as any),
     defaultValues: {
       username: "",
       password: "",
@@ -144,9 +150,9 @@ export function UserSheet({ open, onOpenChange, user }: UserSheetProps) {
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent className="sm:max-w-md">
         <SheetHeader>
-          <SheetTitle>{isEditing ? "编辑用户" : "新建用户"}</SheetTitle>
+          <SheetTitle>{isEditing ? t("users:editUser") : t("users:createUser")}</SheetTitle>
           <SheetDescription className="sr-only">
-            {isEditing ? "修改用户信息" : "填写用户信息以创建新用户"}
+            {isEditing ? t("users:editDescription") : t("users:createDescription")}
           </SheetDescription>
         </SheetHeader>
         <Form {...form}>
@@ -156,9 +162,9 @@ export function UserSheet({ open, onOpenChange, user }: UserSheetProps) {
               name="username"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>用户名</FormLabel>
+                  <FormLabel>{t("users:username")}</FormLabel>
                   <FormControl>
-                    <Input placeholder="用户名" disabled={isEditing} {...field} />
+                    <Input placeholder={t("users:usernamePlaceholder")} disabled={isEditing} {...field} />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -170,9 +176,9 @@ export function UserSheet({ open, onOpenChange, user }: UserSheetProps) {
                 name="password"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>密码</FormLabel>
+                    <FormLabel>{t("users:password")}</FormLabel>
                     <FormControl>
-                      <Input type="password" placeholder="密码" {...field} />
+                      <Input type="password" placeholder={t("users:passwordPlaceholder")} {...field} />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -184,9 +190,9 @@ export function UserSheet({ open, onOpenChange, user }: UserSheetProps) {
               name="email"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>邮箱</FormLabel>
+                  <FormLabel>{t("users:email")}</FormLabel>
                   <FormControl>
-                    <Input placeholder="邮箱（可选）" {...field} />
+                    <Input placeholder={t("users:emailPlaceholder")} {...field} />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -197,9 +203,9 @@ export function UserSheet({ open, onOpenChange, user }: UserSheetProps) {
               name="phone"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>手机号</FormLabel>
+                  <FormLabel>{t("users:phone")}</FormLabel>
                   <FormControl>
-                    <Input placeholder="手机号（可选）" {...field} />
+                    <Input placeholder={t("users:phonePlaceholder")} {...field} />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -210,14 +216,14 @@ export function UserSheet({ open, onOpenChange, user }: UserSheetProps) {
               name="roleId"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>角色</FormLabel>
+                  <FormLabel>{t("users:role")}</FormLabel>
                   <Select
                     value={field.value ? String(field.value) : ""}
                     onValueChange={(v) => field.onChange(Number(v))}
                   >
                     <FormControl>
                       <SelectTrigger>
-                        <SelectValue placeholder="请选择角色" />
+                        <SelectValue placeholder={t("users:selectRole")} />
                       </SelectTrigger>
                     </FormControl>
                     <SelectContent>
@@ -239,7 +245,7 @@ export function UserSheet({ open, onOpenChange, user }: UserSheetProps) {
 
             <SheetFooter>
               <Button type="submit" size="sm" disabled={isPending}>
-                {isPending ? "保存中..." : "保存"}
+                {isPending ? t("common:saving") : t("common:save")}
               </Button>
             </SheetFooter>
           </form>

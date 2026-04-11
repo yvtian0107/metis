@@ -1,0 +1,100 @@
+{
+  "pageTitle": "系统设置",
+  "tabs": {
+    "site": "站点信息",
+    "security": "安全设置",
+    "scheduler": "任务设置",
+    "connections": "账号关联"
+  },
+  "site": {
+    "title": "基本信息",
+    "description": "设置系统的显示名称，将在导航栏中展示",
+    "appName": "系统名称",
+    "appNamePlaceholder": "请输入系统名称",
+    "appNameRequired": "系统名称不能为空",
+    "appNameMaxLength": "系统名称不能超过 50 个字符"
+  },
+  "logo": {
+    "title": "系统 Logo",
+    "description": "上传系统 Logo，将在导航栏中展示（最大 2MB）",
+    "upload": "上传 Logo",
+    "change": "更换 Logo",
+    "remove": "移除",
+    "fileTooLarge": "图片大小不能超过 2MB",
+    "invalidFileType": "请选择图片文件"
+  },
+  "security": {
+    "saveSuccess": "安全设置已保存",
+    "saveFailed": "保存失败",
+    "password": {
+      "title": "密码策略",
+      "description": "设置密码复杂度和过期规则",
+      "minLength": "最小长度",
+      "requireUpper": "要求大写字母",
+      "requireLower": "要求小写字母",
+      "requireNumber": "要求数字",
+      "requireSpecial": "要求特殊字符",
+      "expiryDays": "密码过期天数",
+      "expiryDaysDescription": "设为 0 表示永不过期"
+    },
+    "login": {
+      "title": "登录安全",
+      "description": "登录失败锁定和验证码设置",
+      "maxAttempts": "最大失败次数",
+      "maxAttemptsDescription": "设为 0 表示不限制",
+      "lockoutMinutes": "锁定时长（分钟）",
+      "captchaProvider": "登录验证码",
+      "captchaPlaceholder": "选择验证码方式",
+      "captchaNone": "关闭",
+      "captchaImage": "图形验证码"
+    },
+    "session": {
+      "title": "会话管理",
+      "description": "控制用户会话行为",
+      "maxConcurrent": "最大并发会话数",
+      "maxConcurrentDescription": "设为 0 表示不限制",
+      "timeoutMinutes": "会话超时（分钟）"
+    },
+    "twoFactor": {
+      "title": "两步验证",
+      "description": "TOTP 两步验证全局策略",
+      "requireAll": "强制所有用户启用两步验证",
+      "requireAllDescription": "启用后未设置 2FA 的用户登录时会被要求配置"
+    },
+    "registration": {
+      "title": "注册设置",
+      "description": "控制用户自主注册",
+      "open": "开放注册",
+      "openDescription": "允许新用户自行注册账号",
+      "defaultRole": "默认角色",
+      "defaultRolePlaceholder": "选择角色",
+      "defaultRoleDescription": "新注册用户自动分配的角色"
+    },
+    "validation": {
+      "minLengthMin": "最小长度不能小于 1",
+      "numberMin": "不能小于 0",
+      "sessionTimeoutMin": "不能小于 1"
+    }
+  },
+  "scheduler": {
+    "title": "自动清理",
+    "description": "配置各类历史数据的保留天数，设为 0 表示永不清理",
+    "historyRetention": "任务执行历史",
+    "historyRetentionDescription": "定时任务执行记录",
+    "auditRetentionAuth": "登录活动日志",
+    "auditRetentionAuthDescription": "登录、登出等认证记录",
+    "auditRetentionOperation": "操作记录日志",
+    "auditRetentionOperationDescription": "用户增删改等操作记录",
+    "validation": {
+      "numberMin": "不能小于 0"
+    }
+  },
+  "connections": {
+    "title": "账号关联",
+    "description": "管理第三方登录账号的绑定与解绑",
+    "bind": "绑定",
+    "unbind": "解绑",
+    "unbound": "未绑定",
+    "noProviders": "暂无可用的认证源"
+  }
+}

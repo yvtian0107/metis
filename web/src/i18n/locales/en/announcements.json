@@ -1,0 +1,32 @@
+{
+  "title": "Announcements",
+  "create": "New Announcement",
+  "searchPlaceholder": "Search announcement title",
+  "tableTitle": "Title",
+  "tablePublisher": "Publisher",
+  "tablePublishTime": "Publish Time",
+  "emptyTitle": "No Announcements",
+  "emptyDescription": "Click \"New Announcement\" to publish the first announcement",
+  "confirmDeleteTitle": "Confirm Deletion",
+  "confirmDeleteDescription": "Are you sure you want to delete announcement \"{{name}}\"? This action cannot be undone.",
+  "sheet": {
+    "createTitle": "New Announcement",
+    "editTitle": "Edit Announcement",
+    "createDescription": "Fill in the information to publish a new announcement",
+    "editDescription": "Modify announcement content"
+  },
+  "form": {
+    "titleLabel": "Title",
+    "titlePlaceholder": "Announcement title",
+    "contentLabel": "Content",
+    "contentPlaceholder": "Announcement content (optional)"
+  },
+  "validation": {
+    "titleRequired": "Title is required"
+  },
+  "submit": {
+    "saving": "Saving...",
+    "save": "Save",
+    "publish": "Publish"
+  }
+}

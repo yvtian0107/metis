@@ -1,4 +1,5 @@
 import { useEffect, useMemo } from "react"
+import { useTranslation } from "react-i18next"
 import { useForm } from "react-hook-form"
 import { z } from "zod"
 import { zodResolver } from "@hookform/resolvers/zod"
@@ -34,7 +35,7 @@ import type { MenuItem } from "@/stores/menu"
 
 const schema = z.object({
   parentId: z.coerce.number().nullable(),
-  name: z.string().min(1, "菜单名称不能为空").max(64),
+  name: z.string().min(1).max(64),
   type: z.enum(["directory", "menu", "button"]),
   path: z.string().max(255).optional(),
   icon: z.string().max(64).optional(),
@@ -64,8 +65,13 @@ function flattenForSelect(menus: MenuItem[], depth = 0): { id: number; label: st
 }
 
 export function MenuSheet({ open, onOpenChange, menu, parentId }: MenuSheetProps) {
+  const { t } = useTranslation(["menus", "common"])
   const queryClient = useQueryClient()
   const isEditing = menu !== null
+
+  const localSchema = useMemo(() => schema.extend({
+    name: z.string().min(1, t("menus:validation.nameRequired")).max(64),
+  }), [t])
 
   const { data: menuTree } = useQuery({
     queryKey: ["menus", "tree"],
@@ -74,7 +80,7 @@ export function MenuSheet({ open, onOpenChange, menu, parentId }: MenuSheetProps
   })
 
   const form = useForm<FormValues>({
-    resolver: zodResolver(schema),
+    resolver: zodResolver(localSchema) as any,
     defaultValues: {
       parentId: null,
       name: "",
@@ -160,9 +166,9 @@ export function MenuSheet({ open, onOpenChange, menu, parentId }: MenuSheetProps
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent className="sm:max-w-md overflow-y-auto">
         <SheetHeader>
-          <SheetTitle>{isEditing ? "编辑菜单" : "新建菜单"}</SheetTitle>
+          <SheetTitle>{isEditing ? t("menus:sheet.editTitle") : t("menus:sheet.createTitle")}</SheetTitle>
           <SheetDescription className="sr-only">
-            {isEditing ? "修改菜单项信息" : "填写菜单信息以创建新菜单项"}
+            {isEditing ? t("menus:sheet.editDescription") : t("menus:sheet.createDescription")}
           </SheetDescription>
         </SheetHeader>
         <Form {...form}>
@@ -172,18 +178,18 @@ export function MenuSheet({ open, onOpenChange, menu, parentId }: MenuSheetProps
               name="parentId"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>上级菜单</FormLabel>
+                  <FormLabel>{t("menus:parentMenu")}</FormLabel>
                   <Select
                     value={field.value != null ? String(field.value) : ""}
                     onValueChange={(v) => field.onChange(v ? Number(v) : null)}
                   >
                     <FormControl>
                       <SelectTrigger>
-                        <SelectValue placeholder="顶级菜单" />
+                        <SelectValue placeholder={t("menus:topLevelMenu")} />
                       </SelectTrigger>
                     </FormControl>
                     <SelectContent>
-                      <SelectItem value="">顶级菜单</SelectItem>
+                      <SelectItem value="">{t("menus:topLevelMenu")}</SelectItem>
                       {parentOptions.map((opt) => (
                         <SelectItem key={opt.id} value={String(opt.id)}>{opt.label}</SelectItem>
                       ))}
@@ -198,7 +204,7 @@ export function MenuSheet({ open, onOpenChange, menu, parentId }: MenuSheetProps
               name="type"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>类型</FormLabel>
+                  <FormLabel>{t("common:type")}</FormLabel>
                   <Select value={field.value} onValueChange={field.onChange}>
                     <FormControl>
                       <SelectTrigger>
@@ -206,9 +212,9 @@ export function MenuSheet({ open, onOpenChange, menu, parentId }: MenuSheetProps
                       </SelectTrigger>
                     </FormControl>
                     <SelectContent>
-                      <SelectItem value="directory">目录</SelectItem>
-                      <SelectItem value="menu">菜单</SelectItem>
-                      <SelectItem value="button">按钮</SelectItem>
+                      <SelectItem value="directory">{t("menus:menuType.directory")}</SelectItem>
+                      <SelectItem value="menu">{t("menus:menuType.menu")}</SelectItem>
+                      <SelectItem value="button">{t("menus:menuType.button")}</SelectItem>
                     </SelectContent>
                   </Select>
                   <FormMessage />
@@ -220,9 +226,9 @@ export function MenuSheet({ open, onOpenChange, menu, parentId }: MenuSheetProps
               name="name"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>名称</FormLabel>
+                  <FormLabel>{t("common:name")}</FormLabel>
                   <FormControl>
-                    <Input placeholder="菜单名称" {...field} />
+                    <Input placeholder={t("menus:form.namePlaceholder")} {...field} />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -235,9 +241,9 @@ export function MenuSheet({ open, onOpenChange, menu, parentId }: MenuSheetProps
                   name="path"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>路径</FormLabel>
+                      <FormLabel>{t("menus:path")}</FormLabel>
                       <FormControl>
-                        <Input placeholder="路由路径，如 /users" {...field} />
+                        <Input placeholder={t("menus:form.pathPlaceholder")} {...field} />
                       </FormControl>
                       <FormMessage />
                     </FormItem>
@@ -248,9 +254,9 @@ export function MenuSheet({ open, onOpenChange, menu, parentId }: MenuSheetProps
                   name="icon"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>图标</FormLabel>
+                      <FormLabel>{t("menus:icon")}</FormLabel>
                       <FormControl>
-                        <Input placeholder="图标名称（可选）" {...field} />
+                        <Input placeholder={t("menus:form.iconPlaceholder")} {...field} />
                       </FormControl>
                       <FormMessage />
                     </FormItem>
@@ -263,9 +269,9 @@ export function MenuSheet({ open, onOpenChange, menu, parentId }: MenuSheetProps
               name="permission"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>权限标识</FormLabel>
+                  <FormLabel>{t("menus:permission")}</FormLabel>
                   <FormControl>
-                    <Input placeholder="如 system:user:list" {...field} />
+                    <Input placeholder={t("menus:form.permissionPlaceholder")} {...field} />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -282,7 +288,7 @@ export function MenuSheet({ open, onOpenChange, menu, parentId }: MenuSheetProps
                       onCheckedChange={field.onChange}
                     />
                   </FormControl>
-                  <FormLabel className="!mt-0">隐藏菜单</FormLabel>
+                  <FormLabel className="!mt-0">{t("menus:hideMenu")}</FormLabel>
                 </FormItem>
               )}
             />
@@ -293,7 +299,7 @@ export function MenuSheet({ open, onOpenChange, menu, parentId }: MenuSheetProps
 
             <SheetFooter>
               <Button type="submit" size="sm" disabled={isPending}>
-                {isPending ? "保存中..." : "保存"}
+                {isPending ? t("common:saving") : t("common:save")}
               </Button>
             </SheetFooter>
           </form>

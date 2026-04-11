@@ -15,6 +15,8 @@ export interface PaginatedResponse<T> {
 export interface SiteInfo {
   appName: string;
   hasLogo: boolean;
+  locale: string;
+  timezone: string;
   version: string;
   gitCommit: string;
   buildTime: string;

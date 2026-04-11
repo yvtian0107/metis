@@ -65,6 +65,7 @@ func New(i do.Injector) (*Handler, error) {
 		auditSvc:    auditSvc,
 		auth: &AuthHandler{
 			auth:        authSvc,
+			userSvc:     userSvc,
 			menuSvc:     menuSvc,
 			providerSvc: providerSvc,
 			connSvc:     connSvc,
@@ -125,6 +126,7 @@ func (h *Handler) Register(r *gin.Engine, jwtSecret []byte, enforcer *casbin.Enf
 		authed.POST("/auth/logout", h.auth.Logout)
 		authed.GET("/auth/me", h.auth.GetMe)
 		authed.PUT("/auth/password", h.auth.ChangePassword)
+		authed.PUT("/auth/profile", h.auth.UpdateProfile)
 
 		// 2FA management (whitelisted in CasbinAuth)
 		authed.POST("/auth/2fa/setup", h.twoFactor.Setup)

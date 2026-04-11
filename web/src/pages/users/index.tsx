@@ -1,4 +1,5 @@
 import { useState } from "react"
+import { useTranslation } from "react-i18next"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { Plus, Search, Pencil, Power, Trash2, Users, KeyRound } from "lucide-react"
 import { api } from "@/lib/api"
@@ -69,10 +70,10 @@ const providerLabels: Record<string, string> = {
   google: "Google",
 }
 
-function LoginMethodIcons({ user }: { user: UserWithAuth }) {
+function LoginMethodIcons({ user, t }: { user: UserWithAuth; t: (key: string) => string }) {
   const methods: { key: string; label: string }[] = []
   if (user.hasPassword !== false) {
-    methods.push({ key: "password", label: "密码" })
+    methods.push({ key: "password", label: t("users:password") })
   }
   if (user.connections) {
     for (const conn of user.connections) {
@@ -113,6 +114,7 @@ function LoginMethodIcons({ user }: { user: UserWithAuth }) {
 }
 
 export function Component() {
+  const { t } = useTranslation(["users", "common"])
   const queryClient = useQueryClient()
   const [sheetOpen, setSheetOpen] = useState(false)
   const [editing, setEditing] = useState<User | null>(null)
@@ -149,10 +151,10 @@ export function Component() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold">用户管理</h2>
+        <h2 className="text-lg font-semibold">{t("users:title")}</h2>
         <Button size="sm" onClick={handleCreate} disabled={!canCreate}>
           <Plus className="mr-1.5 h-4 w-4" />
-          新建用户
+          {t("users:createUser")}
         </Button>
       </div>
 
@@ -162,14 +164,14 @@ export function Component() {
             <div className="relative w-full sm:max-w-sm">
               <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
               <Input
-                placeholder="搜索用户名、邮箱、手机号"
+                placeholder={t("users:searchPlaceholder")}
                 value={keyword}
                 onChange={(e) => setKeyword(e.target.value)}
                 className="pl-8"
               />
             </div>
             <Button type="submit" variant="outline">
-              搜索
+              {t("common:search")}
             </Button>
           </form>
         </DataTableToolbarGroup>
@@ -180,14 +182,14 @@ export function Component() {
           <TableHeader>
             <TableRow>
               <TableHead className="w-16">ID</TableHead>
-              <TableHead className="min-w-[180px]">用户名</TableHead>
-              <TableHead className="min-w-[180px]">邮箱</TableHead>
-              <TableHead className="min-w-[140px]">手机号</TableHead>
-              <TableHead className="w-[110px] text-center">角色</TableHead>
-              <TableHead className="w-[120px] text-center">登录方式</TableHead>
-              <TableHead className="w-[100px] text-center">状态</TableHead>
-              <TableHead className="w-[150px] text-center">创建时间</TableHead>
-              <DataTableActionsHead className="min-w-[208px]">操作</DataTableActionsHead>
+              <TableHead className="min-w-[180px]">{t("users:username")}</TableHead>
+              <TableHead className="min-w-[180px]">{t("users:email")}</TableHead>
+              <TableHead className="min-w-[140px]">{t("users:phone")}</TableHead>
+              <TableHead className="w-[110px] text-center">{t("users:role")}</TableHead>
+              <TableHead className="w-[120px] text-center">{t("users:loginMethod")}</TableHead>
+              <TableHead className="w-[100px] text-center">{t("common:status")}</TableHead>
+              <TableHead className="w-[150px] text-center">{t("common:createdAt")}</TableHead>
+              <DataTableActionsHead className="min-w-[208px]">{t("common:actions")}</DataTableActionsHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -197,8 +199,8 @@ export function Component() {
               <DataTableEmptyRow
                 colSpan={9}
                 icon={Users}
-                title="暂无用户"
-                description="点击「新建用户」添加第一个用户"
+                title={t("users:noUsers")}
+                description={t("users:noUsersDescription")}
               />
             ) : (
               users.map((user) => (
@@ -219,17 +221,17 @@ export function Component() {
                   </TableCell>
                   <TableCell className="text-center">
                     <Badge variant={user.role?.code === "admin" ? "default" : "secondary"}>
-                      {user.role?.name || "未分配"}
+                      {user.role?.name || t("users:noRoleAssigned")}
                     </Badge>
                   </TableCell>
                   <TableCell className="text-center">
                     <div className="flex justify-center">
-                      <LoginMethodIcons user={user} />
+                      <LoginMethodIcons user={user} t={t} />
                     </div>
                   </TableCell>
                   <TableCell className="text-center">
                     <Badge variant={user.isActive ? "default" : "outline"}>
-                      {user.isActive ? "正常" : "停用"}
+                      {user.isActive ? t("common:active") : t("common:inactive")}
                     </Badge>
                   </TableCell>
                   <TableCell className="text-center text-sm text-muted-foreground whitespace-nowrap tabular-nums">
@@ -240,7 +242,7 @@ export function Component() {
                       {canUpdate && (
                         <Button variant="ghost" size="sm" className="px-2.5" onClick={() => handleEdit(user)}>
                           <Pencil className="mr-1 h-3.5 w-3.5" />
-                          编辑
+                          {t("common:edit")}
                         </Button>
                       )}
                       {canUpdate && (
@@ -256,7 +258,7 @@ export function Component() {
                           }
                         >
                           <Power className="mr-1 h-3.5 w-3.5" />
-                          {user.isActive ? "停用" : "启用"}
+                          {user.isActive ? t("common:disable") : t("common:enable")}
                         </Button>
                       )}
                       {canDelete && (
@@ -268,20 +270,20 @@ export function Component() {
                               className="px-2.5 text-destructive hover:text-destructive"
                             >
                               <Trash2 className="mr-1 h-3.5 w-3.5" />
-                              删除
+                              {t("common:delete")}
                             </Button>
                           </AlertDialogTrigger>
                           <AlertDialogContent>
                             <AlertDialogHeader>
-                              <AlertDialogTitle>确认删除</AlertDialogTitle>
+                              <AlertDialogTitle>{t("users:confirmDelete")}</AlertDialogTitle>
                               <AlertDialogDescription>
-                                确定要删除用户 &ldquo;{user.username}&rdquo; 吗？此操作不可撤销。
+                                {t("users:deleteConfirm", { name: user.username })}
                               </AlertDialogDescription>
                             </AlertDialogHeader>
                             <AlertDialogFooter>
-                              <AlertDialogCancel>取消</AlertDialogCancel>
+                              <AlertDialogCancel>{t("common:cancel")}</AlertDialogCancel>
                               <AlertDialogAction onClick={() => deleteMutation.mutate(user.id)}>
-                                删除
+                                {t("common:delete")}
                               </AlertDialogAction>
                             </AlertDialogFooter>
                           </AlertDialogContent>

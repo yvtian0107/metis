@@ -1,4 +1,5 @@
 import { useEffect } from "react"
+import { useTranslation } from "react-i18next"
 import { useForm } from "react-hook-form"
 import { z } from "zod"
 import { zodResolver } from "@hookform/resolvers/zod"
@@ -33,12 +34,10 @@ interface Announcement {
   creatorUsername: string
 }
 
-const schema = z.object({
-  title: z.string().min(1, "标题不能为空").max(255),
-  content: z.string().optional(),
-})
-
-type FormValues = z.infer<typeof schema>
+type FormValues = {
+  title: string
+  content?: string
+}
 
 interface AnnouncementSheetProps {
   open: boolean
@@ -47,8 +46,14 @@ interface AnnouncementSheetProps {
 }
 
 export function AnnouncementSheet({ open, onOpenChange, announcement }: AnnouncementSheetProps) {
+  const { t } = useTranslation(["announcements", "common"])
   const queryClient = useQueryClient()
   const isEditing = announcement !== null
+
+  const schema = z.object({
+    title: z.string().min(1, t("validation.titleRequired")).max(255),
+    content: z.string().optional(),
+  })
 
   const form = useForm<FormValues>({
     resolver: zodResolver(schema),
@@ -98,9 +103,9 @@ export function AnnouncementSheet({ open, onOpenChange, announcement }: Announce
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent className="sm:max-w-md">
         <SheetHeader>
-          <SheetTitle>{isEditing ? "编辑公告" : "新建公告"}</SheetTitle>
+          <SheetTitle>{isEditing ? t("sheet.editTitle") : t("sheet.createTitle")}</SheetTitle>
           <SheetDescription className="sr-only">
-            {isEditing ? "修改公告内容" : "填写公告信息以发布新公告"}
+            {isEditing ? t("sheet.editDescription") : t("sheet.createDescription")}
           </SheetDescription>
         </SheetHeader>
         <Form {...form}>
@@ -110,9 +115,9 @@ export function AnnouncementSheet({ open, onOpenChange, announcement }: Announce
               name="title"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>标题</FormLabel>
+                  <FormLabel>{t("form.titleLabel")}</FormLabel>
                   <FormControl>
-                    <Input placeholder="公告标题" {...field} />
+                    <Input placeholder={t("form.titlePlaceholder")} {...field} />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -123,10 +128,10 @@ export function AnnouncementSheet({ open, onOpenChange, announcement }: Announce
               name="content"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>内容</FormLabel>
+                  <FormLabel>{t("form.contentLabel")}</FormLabel>
                   <FormControl>
                     <Textarea
-                      placeholder="公告内容（可选）"
+                      placeholder={t("form.contentPlaceholder")}
                       rows={6}
                       {...field}
                     />
@@ -142,7 +147,7 @@ export function AnnouncementSheet({ open, onOpenChange, announcement }: Announce
 
             <SheetFooter>
               <Button type="submit" size="sm" disabled={isPending}>
-                {isPending ? "保存中..." : isEditing ? "保存" : "发布"}
+                {isPending ? t("submit.saving") : isEditing ? t("submit.save") : t("submit.publish")}
               </Button>
             </SheetFooter>
           </form>

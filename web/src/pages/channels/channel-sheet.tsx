@@ -1,4 +1,5 @@
 import { useEffect, useMemo } from "react"
+import { useTranslation } from "react-i18next"
 import { useForm } from "react-hook-form"
 import { z } from "zod"
 import { zodResolver } from "@hookform/resolvers/zod"
@@ -44,13 +45,15 @@ export interface ChannelItem {
   updatedAt: string
 }
 
-const schema = z.object({
-  name: z.string().min(1, "通道名称不能为空"),
-  type: z.string().min(1, "请选择通道类型"),
-  config: z.record(z.string(), z.unknown()),
-})
+type FormValues = z.infer<ReturnType<typeof createSchema>>
 
-type FormValues = z.infer<typeof schema>
+function createSchema(nameRequired: string, typeRequired: string) {
+  return z.object({
+    name: z.string().min(1, nameRequired),
+    type: z.string().min(1, typeRequired),
+    config: z.record(z.string(), z.unknown()),
+  })
+}
 
 interface ChannelSheetProps {
   open: boolean
@@ -59,8 +62,14 @@ interface ChannelSheetProps {
 }
 
 export function ChannelSheet({ open, onOpenChange, channel }: ChannelSheetProps) {
+  const { t } = useTranslation(["channels", "common"])
   const queryClient = useQueryClient()
   const isEditing = channel !== null
+
+  const schema = useMemo(
+    () => createSchema(t("validation.nameRequired"), t("validation.typeRequired")),
+    [t],
+  )
 
   const form = useForm<FormValues>({
     resolver: zodResolver(schema),
@@ -119,7 +128,7 @@ export function ChannelSheet({ open, onOpenChange, channel }: ChannelSheetProps)
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["channels"] })
       onOpenChange(false)
-      toast.success("通道创建成功")
+      toast.success(t("toast.createSuccess"))
     },
     onError: (err) => toast.error(err.message),
   })
@@ -133,22 +142,22 @@ export function ChannelSheet({ open, onOpenChange, channel }: ChannelSheetProps)
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["channels"] })
       onOpenChange(false)
-      toast.success("通道更新成功")
+      toast.success(t("toast.updateSuccess"))
     },
     onError: (err) => toast.error(err.message),
   })
 
   const testMutation = useMutation({
     mutationFn: async () => {
-      if (!channel) throw new Error("请先保存通道后再测试")
+      if (!channel) throw new Error(t("validation.saveFirst"))
       const res = await api.post<{ success: boolean; error?: string }>(
         `/api/v1/channels/${channel.id}/test`,
       )
-      if (!res.success) throw new Error(res.error || "测试失败")
+      if (!res.success) throw new Error(res.error || t("toast.testFailed"))
       return res
     },
-    onSuccess: () => toast.success("连接测试成功"),
-    onError: (err) => toast.error(`连接测试失败: ${err.message}`),
+    onSuccess: () => toast.success(t("toast.testConnSuccess")),
+    onError: (err) => toast.error(t("toast.testConnFailed", { message: err.message })),
   })
 
   function onSubmit(values: FormValues) {
@@ -165,9 +174,9 @@ export function ChannelSheet({ open, onOpenChange, channel }: ChannelSheetProps)
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent className="sm:max-w-md">
         <SheetHeader>
-          <SheetTitle>{isEditing ? "编辑通道" : "新建通道"}</SheetTitle>
+          <SheetTitle>{isEditing ? t("sheet.editTitle") : t("sheet.createTitle")}</SheetTitle>
           <SheetDescription className="sr-only">
-            {isEditing ? "修改消息通道配置" : "配置新的消息通道"}
+            {isEditing ? t("sheet.editDescription") : t("sheet.createDescription")}
           </SheetDescription>
         </SheetHeader>
         <Form {...form}>
@@ -177,9 +186,9 @@ export function ChannelSheet({ open, onOpenChange, channel }: ChannelSheetProps)
               name="name"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>通道名称</FormLabel>
+                  <FormLabel>{t("form.nameLabel")}</FormLabel>
                   <FormControl>
-                    <Input placeholder="例如：系统邮件" {...field} />
+                    <Input placeholder={t("form.namePlaceholder")} {...field} />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -190,26 +199,26 @@ export function ChannelSheet({ open, onOpenChange, channel }: ChannelSheetProps)
               name="type"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>通道类型</FormLabel>
+                  <FormLabel>{t("form.typeLabel")}</FormLabel>
                   {isEditing ? (
                     <div>
                       <Input
-                        value={CHANNEL_TYPES[field.value]?.label ?? field.value}
+                        value={t(CHANNEL_TYPES[field.value]?.labelKey ?? field.value)}
                         disabled
                       />
-                      <p className="text-xs text-muted-foreground mt-1">通道类型创建后不可更改</p>
+                      <p className="text-xs text-muted-foreground mt-1">{t("form.typeImmutable")}</p>
                     </div>
                   ) : (
                     <Select value={field.value} onValueChange={field.onChange}>
                       <FormControl>
                         <SelectTrigger>
-                          <SelectValue placeholder="请选择通道类型" />
+                          <SelectValue placeholder={t("form.typePlaceholder")} />
                         </SelectTrigger>
                       </FormControl>
                       <SelectContent>
                         {Object.entries(CHANNEL_TYPES).map(([key, def]) => (
                           <SelectItem key={key} value={key}>
-                            {def.label}
+                            {t(def.labelKey)}
                           </SelectItem>
                         ))}
                       </SelectContent>
@@ -222,7 +231,7 @@ export function ChannelSheet({ open, onOpenChange, channel }: ChannelSheetProps)
 
             {configSchema.length > 0 && (
               <div className="space-y-3 rounded-lg border p-4">
-                <p className="text-sm font-medium">连接配置</p>
+                <p className="text-sm font-medium">{t("form.connectionConfig")}</p>
                 {configSchema.map((field) => (
                   <ConfigFieldInput
                     key={field.key}
@@ -248,11 +257,11 @@ export function ChannelSheet({ open, onOpenChange, channel }: ChannelSheetProps)
                   ) : (
                     <Plug className="mr-1.5 h-3.5 w-3.5" />
                   )}
-                  测试连接
+                  {t("testConnection")}
                 </Button>
               )}
               <Button type="submit" size="sm" disabled={isPending}>
-                {isPending ? "保存中..." : "保存"}
+                {isPending ? t("common:saving") : t("common:save")}
               </Button>
             </SheetFooter>
           </form>
@@ -271,6 +280,7 @@ function ConfigFieldInput({
   form: ReturnType<typeof useForm<FormValues>>
   isEditing: boolean
 }) {
+  const { t } = useTranslation("channels")
   const name = `config.${field.key}` as const
 
   if (field.type === "boolean") {
@@ -280,7 +290,7 @@ function ConfigFieldInput({
         name={name}
         render={({ field: formField }) => (
           <FormItem className="flex items-center justify-between">
-            <FormLabel className="mt-0">{field.label}</FormLabel>
+            <FormLabel className="mt-0">{t(field.labelKey)}</FormLabel>
             <FormControl>
               <Switch
                 checked={!!formField.value}
@@ -293,21 +303,23 @@ function ConfigFieldInput({
     )
   }
 
+  const placeholderText = field.sensitive && isEditing
+    ? t("form.sensitiveHint")
+    : field.placeholderKey
+      ? (field.placeholderKey.includes(".") ? t(field.placeholderKey) : field.placeholderKey)
+      : ""
+
   return (
     <FormField
       control={form.control}
       name={name}
       render={({ field: formField }) => (
         <FormItem>
-          <FormLabel>{field.label}</FormLabel>
+          <FormLabel>{t(field.labelKey)}</FormLabel>
           <FormControl>
             <Input
               type={field.sensitive ? "password" : field.type === "number" ? "number" : "text"}
-              placeholder={
-                field.sensitive && isEditing
-                  ? "留空则不修改"
-                  : field.placeholder || ""
-              }
+              placeholder={placeholderText}
               value={
                 field.sensitive && isEditing && formField.value === "******"
                   ? ""

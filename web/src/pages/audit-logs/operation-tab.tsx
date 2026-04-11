@@ -1,4 +1,5 @@
 import { useState } from "react"
+import { useTranslation } from "react-i18next"
 import { useQuery } from "@tanstack/react-query"
 import { Search, ClipboardList } from "lucide-react"
 import { api, type PaginatedResponse } from "@/lib/api"
@@ -43,46 +44,19 @@ interface AuditLog {
   ipAddress: string
 }
 
-const actionLabels: Record<string, string> = {
-  "user.create": "创建用户",
-  "user.update": "更新用户",
-  "user.delete": "删除用户",
-  "user.reset_password": "重置密码",
-  "user.activate": "启用用户",
-  "user.deactivate": "禁用用户",
-  "role.create": "创建角色",
-  "role.update": "更新角色",
-  "role.delete": "删除角色",
-  "role.set_permissions": "设置权限",
-  "menu.create": "创建菜单",
-  "menu.update": "更新菜单",
-  "menu.delete": "删除菜单",
-  "menu.reorder": "调整排序",
-  "settings.update": "更新设置",
-  "announcement.create": "创建公告",
-  "announcement.update": "更新公告",
-  "announcement.delete": "删除公告",
-  "channel.create": "创建通道",
-  "channel.update": "更新通道",
-  "channel.delete": "删除通道",
-  "channel.toggle": "切换通道",
-  "auth_provider.update": "更新认证源",
-  "auth_provider.toggle": "切换认证源",
-  "session.kick": "踢出会话",
-}
-
-const resourceTypes = [
-  { value: "user", label: "用户" },
-  { value: "role", label: "角色" },
-  { value: "menu", label: "菜单" },
-  { value: "settings", label: "设置" },
-  { value: "announcement", label: "公告" },
-  { value: "channel", label: "通道" },
-  { value: "auth_provider", label: "认证源" },
-  { value: "session", label: "会话" },
-]
+const resourceTypeKeys = [
+  "user",
+  "role",
+  "menu",
+  "settings",
+  "announcement",
+  "channel",
+  "auth_provider",
+  "session",
+] as const
 
 export function OperationTab() {
+  const { t } = useTranslation(["audit", "common"])
   const [keyword, setKeyword] = useState("")
   const [searchKeyword, setSearchKeyword] = useState("")
   const [resource, setResource] = useState("")
@@ -122,24 +96,24 @@ export function OperationTab() {
       <DataTableToolbar className="flex-wrap items-center gap-2">
         <form onSubmit={handleSearch} className="flex items-center gap-2">
           <Input
-            placeholder="搜索摘要..."
+            placeholder={t("audit:operation.searchPlaceholder")}
             value={keyword}
             onChange={(e) => setKeyword(e.target.value)}
             className="h-8 w-48"
           />
           <Button type="submit" variant="outline">
             <Search className="mr-1 h-3.5 w-3.5" />
-            搜索
+            {t("common:search")}
           </Button>
         </form>
         <Select value={resource} onValueChange={(v) => { setResource(v === "all" ? "" : v); setPage(1) }}>
           <SelectTrigger size="sm" className="w-32">
-            <SelectValue placeholder="资源类型" />
+            <SelectValue placeholder={t("audit:operation.resourceType")} />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">全部</SelectItem>
-            {resourceTypes.map((r) => (
-              <SelectItem key={r.value} value={r.value}>{r.label}</SelectItem>
+            <SelectItem value="all">{t("audit:all")}</SelectItem>
+            {resourceTypeKeys.map((key) => (
+              <SelectItem key={key} value={key}>{t(`audit:operation.resources.${key}`)}</SelectItem>
             ))}
           </SelectContent>
         </Select>
@@ -149,7 +123,7 @@ export function OperationTab() {
           onChange={(e) => { setDateFrom(e.target.value); setPage(1) }}
           className="h-8 w-36"
         />
-        <span className="text-muted-foreground text-sm">至</span>
+        <span className="text-muted-foreground text-sm">{t("audit:dateTo")}</span>
         <Input
           type="date"
           value={dateTo}
@@ -162,18 +136,18 @@ export function OperationTab() {
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead className="w-[150px]">时间</TableHead>
-              <TableHead className="w-[140px]">操作者</TableHead>
-              <TableHead className="w-[120px]">操作</TableHead>
-              <TableHead className="w-[120px]">资源类型</TableHead>
-              <TableHead className="min-w-[260px]">摘要</TableHead>
+              <TableHead className="w-[150px]">{t("audit:operation.columns.time")}</TableHead>
+              <TableHead className="w-[140px]">{t("audit:operation.columns.operator")}</TableHead>
+              <TableHead className="w-[120px]">{t("audit:operation.columns.action")}</TableHead>
+              <TableHead className="w-[120px]">{t("audit:operation.columns.resourceType")}</TableHead>
+              <TableHead className="min-w-[260px]">{t("audit:operation.columns.summary")}</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {isLoading ? (
               <DataTableLoadingRow colSpan={5} />
             ) : items.length === 0 ? (
-              <DataTableEmptyRow colSpan={5} icon={ClipboardList} title="暂无操作记录" />
+              <DataTableEmptyRow colSpan={5} icon={ClipboardList} title={t("audit:operation.empty")} />
             ) : (
               items.map((log) => (
                 <TableRow key={log.id}>
@@ -183,11 +157,11 @@ export function OperationTab() {
                   <TableCell className="font-medium">{log.username || "-"}</TableCell>
                   <TableCell>
                     <Badge variant="outline">
-                      {actionLabels[log.action] ?? log.action}
+                      {t(`audit:operation.actions.${log.action}`, { defaultValue: log.action })}
                     </Badge>
                   </TableCell>
                   <TableCell className="text-sm">
-                    {resourceTypes.find((r) => r.value === log.resource)?.label ?? log.resource ?? "-"}
+                    {t(`audit:operation.resources.${log.resource}`, { defaultValue: log.resource ?? "-" })}
                   </TableCell>
                   <TableCell className="text-sm text-muted-foreground max-w-[300px] truncate">
                     {log.summary}

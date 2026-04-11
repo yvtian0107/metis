@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { Toaster } from "sonner"
+import "./i18n"
 import "./styles/globals.css"
 
 import App from "./App"

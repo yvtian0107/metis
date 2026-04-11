@@ -12,12 +12,12 @@ import (
 )
 
 var (
-	ErrProductNotFound       = errors.New("product not found")
-	ErrProductCodeExists     = errors.New("product code already exists")
-	ErrInvalidStatusTransition = errors.New("invalid status transition")
-	ErrPlanNotFound          = errors.New("plan not found")
-	ErrPlanNameExists        = errors.New("plan name already exists in this product")
-	ErrInvalidConstraintSchema = errors.New("invalid constraint schema")
+	ErrProductNotFound       = errors.New("error.license.product_not_found")
+	ErrProductCodeExists     = errors.New("error.license.product_code_exists")
+	ErrInvalidStatusTransition = errors.New("error.license.invalid_status_transition")
+	ErrPlanNotFound          = errors.New("error.license.plan_not_found")
+	ErrPlanNameExists        = errors.New("error.license.plan_name_exists")
+	ErrInvalidConstraintSchema = errors.New("error.license.invalid_constraint_schema")
 	ErrInvalidConstraintValues = errors.New("invalid constraint values")
 )
 

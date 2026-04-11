@@ -14,10 +14,10 @@ import (
 )
 
 var (
-	ErrUsernameExists    = errors.New("username already exists")
-	ErrUserNotFound      = errors.New("user not found")
-	ErrCannotSelf        = errors.New("cannot perform this action on yourself")
-	ErrPasswordViolation = errors.New("password policy violation")
+	ErrUsernameExists    = errors.New("error.user.username_exists")
+	ErrUserNotFound      = errors.New("error.user.not_found")
+	ErrCannotSelf        = errors.New("error.user.cannot_self")
+	ErrPasswordViolation = errors.New("error.user.password_violation")
 )
 
 type UserService struct {
@@ -93,6 +93,8 @@ type UpdateUserParams struct {
 	Email    *string
 	Phone    *string
 	Avatar   *string
+	Locale   *string
+	Timezone *string
 	RoleID   *uint
 	IsActive *bool
 }
@@ -119,6 +121,12 @@ func (s *UserService) Update(id, currentUserID uint, params UpdateUserParams) (*
 	}
 	if params.Avatar != nil {
 		user.Avatar = *params.Avatar
+	}
+	if params.Locale != nil {
+		user.Locale = *params.Locale
+	}
+	if params.Timezone != nil {
+		user.Timezone = *params.Timezone
 	}
 	if params.RoleID != nil {
 		user.RoleID = *params.RoleID
@@ -224,4 +232,9 @@ func (s *UserService) Deactivate(id, currentUserID uint) (*model.User, error) {
 
 	_ = s.refreshTokenRepo.RevokeAllForUser(id)
 	return user, nil
+}
+
+// UpdateProfile updates only profile fields (locale, timezone) for self-service.
+func (s *UserService) UpdateProfile(user *model.User) error {
+	return s.userRepo.Update(user)
 }

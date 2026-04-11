@@ -1,0 +1,15 @@
+{
+  "title": "Session Management",
+  "activeSessions": "{{total}} active sessions",
+  "user": "User",
+  "ipAddress": "IP Address",
+  "device": "Device",
+  "loginTime": "Login Time",
+  "lastActive": "Last Active",
+  "current": "Current",
+  "kick": "Kick",
+  "kickTitle": "Kick Session",
+  "kickConfirm": "Are you sure you want to forcefully log out user \"{{username}}\"? The user will be logged out immediately.",
+  "confirmKick": "Confirm Kick",
+  "noSessions": "No active sessions"
+}

@@ -180,6 +180,8 @@ var defaultConfigs = []model.SystemConfig{
 	{Key: "otel.sample_rate", Value: "1.0", Remark: "Trace 采样率 (0-1)"},
 	// Site
 	{Key: "system.app_name", Value: "Metis", Remark: "站点名称"},
+	{Key: "system.locale", Value: "zh-CN", Remark: "系统默认语言"},
+	{Key: "system.timezone", Value: "UTC", Remark: "系统默认时区"},
 }
 
 func seedDefaultConfigs(db *gorm.DB) {
@@ -218,6 +220,21 @@ func seedAuthProviders(db *gorm.DB) {
 // SetSiteName updates the system.app_name config during installation.
 func SetSiteName(db *gorm.DB, name string) error {
 	return db.Where("`key` = ?", "system.app_name").Assign(model.SystemConfig{Value: name}).FirstOrCreate(&model.SystemConfig{Key: "system.app_name"}).Error
+}
+
+// SetLocaleTimezone updates the system.locale and system.timezone configs during installation.
+func SetLocaleTimezone(db *gorm.DB, locale, timezone string) error {
+	if locale != "" {
+		if err := db.Where("`key` = ?", "system.locale").Assign(model.SystemConfig{Value: locale}).FirstOrCreate(&model.SystemConfig{Key: "system.locale"}).Error; err != nil {
+			return err
+		}
+	}
+	if timezone != "" {
+		if err := db.Where("`key` = ?", "system.timezone").Assign(model.SystemConfig{Value: timezone}).FirstOrCreate(&model.SystemConfig{Key: "system.timezone"}).Error; err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // SetInstalled marks the system as installed.

@@ -1,4 +1,5 @@
 import { useEffect } from "react"
+import { useTranslation } from "react-i18next"
 import { useForm } from "react-hook-form"
 import { z } from "zod"
 import { zodResolver } from "@hookform/resolvers/zod"
@@ -24,13 +25,13 @@ import {
 } from "@/components/ui/form"
 import type { Role } from "./types"
 
-const schema = z.object({
-  name: z.string().min(1, "角色名称不能为空").max(64),
-  code: z.string().min(1, "角色编码不能为空").max(64),
+const schema = (t: (key: string) => string) => z.object({
+  name: z.string().min(1, t("roles:validation.nameRequired")).max(64),
+  code: z.string().min(1, t("roles:validation.codeRequired")).max(64),
   description: z.string().max(255).optional(),
 })
 
-type FormValues = z.infer<typeof schema>
+type FormValues = z.infer<ReturnType<typeof schema>>
 
 interface RoleSheetProps {
   open: boolean
@@ -39,11 +40,12 @@ interface RoleSheetProps {
 }
 
 export function RoleSheet({ open, onOpenChange, role }: RoleSheetProps) {
+  const { t } = useTranslation(["roles", "common"])
   const queryClient = useQueryClient()
   const isEditing = role !== null
 
   const form = useForm<FormValues>({
-    resolver: zodResolver(schema),
+    resolver: zodResolver(schema(t)),
     defaultValues: { name: "", code: "", description: "" },
   })
 
@@ -93,9 +95,9 @@ export function RoleSheet({ open, onOpenChange, role }: RoleSheetProps) {
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent className="sm:max-w-md">
         <SheetHeader>
-          <SheetTitle>{isEditing ? "编辑角色" : "新建角色"}</SheetTitle>
+          <SheetTitle>{isEditing ? t("roles:sheet.editTitle") : t("roles:sheet.createTitle")}</SheetTitle>
           <SheetDescription className="sr-only">
-            {isEditing ? "修改角色信息" : "填写角色信息以创建新角色"}
+            {isEditing ? t("roles:sheet.editDescription") : t("roles:sheet.createDescription")}
           </SheetDescription>
         </SheetHeader>
         <Form {...form}>
@@ -105,9 +107,9 @@ export function RoleSheet({ open, onOpenChange, role }: RoleSheetProps) {
               name="name"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>角色名称</FormLabel>
+                  <FormLabel>{t("roles:roleName")}</FormLabel>
                   <FormControl>
-                    <Input placeholder="如：管理员" {...field} />
+                    <Input placeholder={t("roles:form.namePlaceholder")} {...field} />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -118,10 +120,10 @@ export function RoleSheet({ open, onOpenChange, role }: RoleSheetProps) {
               name="code"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>角色编码</FormLabel>
+                  <FormLabel>{t("roles:roleCode")}</FormLabel>
                   <FormControl>
                     <Input
-                      placeholder="如：admin"
+                      placeholder={t("roles:form.codePlaceholder")}
                       disabled={isEditing && role?.isSystem}
                       {...field}
                     />
@@ -135,9 +137,9 @@ export function RoleSheet({ open, onOpenChange, role }: RoleSheetProps) {
               name="description"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>描述</FormLabel>
+                  <FormLabel>{t("common:description")}</FormLabel>
                   <FormControl>
-                    <Input placeholder="角色描述（可选）" {...field} />
+                    <Input placeholder={t("roles:form.descriptionPlaceholder")} {...field} />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -150,10 +152,10 @@ export function RoleSheet({ open, onOpenChange, role }: RoleSheetProps) {
 
             <SheetFooter>
               <Button variant="outline" size="sm" type="button" onClick={() => onOpenChange(false)}>
-                取消
+                {t("common:cancel")}
               </Button>
               <Button type="submit" size="sm" disabled={isPending}>
-                {isPending ? "保存中..." : "保存"}
+                {isPending ? t("common:saving") : t("common:save")}
               </Button>
             </SheetFooter>
           </form>

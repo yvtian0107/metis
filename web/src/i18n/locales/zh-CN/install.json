@@ -1,0 +1,87 @@
+{
+  "title": "安装向导",
+  "poweredBy": "Powered by Metis",
+  "steps": {
+    "language": "语言",
+    "database": "数据库",
+    "site": "站点信息",
+    "admin": "管理员",
+    "complete": "完成"
+  },
+  "language": {
+    "title": "选择语言与时区",
+    "description": "设置系统默认语言与时区",
+    "selectLanguage": "系统语言",
+    "selectTimezone": "系统时区",
+    "timezoneSearch": "搜索时区...",
+    "next": "下一步"
+  },
+  "database": {
+    "title": "选择数据库",
+    "description": "选择用于存储数据的数据库类型",
+    "sqlite": "SQLite",
+    "sqliteDesc": "零配置，适合小型部署",
+    "postgres": "PostgreSQL",
+    "postgresDesc": "高性能，适合生产环境",
+    "host": "主机地址",
+    "port": "端口",
+    "username": "用户名",
+    "password": "密码",
+    "dbName": "数据库名",
+    "testConnection": "测试连接",
+    "testing": "测试中...",
+    "connectionSuccess": "连接成功",
+    "connectionFailed": "连接失败",
+    "next": "下一步"
+  },
+  "site": {
+    "title": "站点信息",
+    "description": "为你的站点起一个名字",
+    "siteName": "站点名称",
+    "siteNameHint": "显示在登录页和浏览器标题中",
+    "advanced": "高级设置",
+    "otel": "OpenTelemetry",
+    "enableTracing": "启用追踪",
+    "enableTracingDesc": "启用 OpenTelemetry 分布式追踪",
+    "exportEndpoint": "导出端点",
+    "serviceName": "服务名称",
+    "sampleRate": "采样率",
+    "next": "下一步",
+    "prev": "上一步"
+  },
+  "admin": {
+    "title": "管理员账号",
+    "description": "创建超级管理员账号",
+    "username": "用户名",
+    "email": "邮箱",
+    "password": "密码",
+    "passwordHint": "至少 8 个字符",
+    "confirmPassword": "确认密码",
+    "confirmPasswordHint": "再次输入密码",
+    "usernameMinLength": "用户名至少 3 个字符",
+    "passwordMinLength": "密码至少 8 个字符",
+    "passwordMismatch": "两次密码不一致",
+    "emailInvalid": "请输入有效的邮箱地址",
+    "next": "下一步",
+    "prev": "上一步"
+  },
+  "confirm": {
+    "title": "确认安装",
+    "description": "请确认以下配置信息",
+    "database": "数据库",
+    "siteName": "站点名称",
+    "language": "语言",
+    "timezone": "时区",
+    "administrator": "管理员",
+    "email": "邮箱",
+    "install": "开始安装",
+    "installing": "安装中...",
+    "prev": "上一步",
+    "installFailed": "安装失败"
+  },
+  "done": {
+    "title": "安装完成",
+    "description": "{{name}} 已准备就绪",
+    "enter": "进入系统"
+  }
+}

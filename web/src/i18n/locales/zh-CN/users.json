@@ -1,0 +1,30 @@
+{
+  "title": "用户管理",
+  "createUser": "新建用户",
+  "editUser": "编辑用户",
+  "searchPlaceholder": "搜索用户名、邮箱、手机号",
+  "username": "用户名",
+  "email": "邮箱",
+  "phone": "手机号",
+  "role": "角色",
+  "loginMethod": "登录方式",
+  "password": "密码",
+  "noUsers": "暂无用户",
+  "noUsersDescription": "点击「新建用户」添加第一个用户",
+  "noRoleAssigned": "未分配",
+  "confirmDelete": "确认删除",
+  "deleteConfirm": "确定要删除用户 \"{{name}}\" 吗？此操作不可撤销。",
+  "editDescription": "修改用户信息",
+  "createDescription": "填写用户信息以创建新用户",
+  "emailPlaceholder": "邮箱（可选）",
+  "phonePlaceholder": "手机号（可选）",
+  "usernamePlaceholder": "用户名",
+  "passwordPlaceholder": "密码",
+  "selectRole": "请选择角色",
+  "validation": {
+    "usernameRequired": "用户名不能为空",
+    "passwordRequired": "密码不能为空",
+    "emailInvalid": "邮箱格式不正确",
+    "roleRequired": "请选择角色"
+  }
+}

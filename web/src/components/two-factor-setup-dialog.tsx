@@ -1,4 +1,5 @@
 import { useState } from "react"
+import { useTranslation } from "react-i18next"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import QRCode from "react-qr-code"
 import { api } from "@/lib/api"
@@ -38,6 +39,7 @@ export function TwoFactorSetupDialog({
   const [code, setCode] = useState("")
   const [backupCodes, setBackupCodes] = useState<string[]>([])
   const [error, setError] = useState("")
+  const { t } = useTranslation("auth")
 
   const setupMutation = useMutation({
     mutationFn: () => api.post<SetupData>("/api/v1/auth/2fa/setup", {}),
@@ -63,7 +65,7 @@ export function TwoFactorSetupDialog({
   const disableMutation = useMutation({
     mutationFn: () => api.delete("/api/v1/auth/2fa"),
     onSuccess: () => {
-      toast.success("两步验证已关闭")
+      toast.success(t("twoFactorSetup.disabled"))
       queryClient.invalidateQueries({ queryKey: ["auth", "me"] })
       handleClose()
     },
@@ -83,9 +85,9 @@ export function TwoFactorSetupDialog({
     <Dialog open={open} onOpenChange={handleClose}>
       <DialogContent className="max-w-md">
         <DialogHeader>
-          <DialogTitle>两步验证</DialogTitle>
+          <DialogTitle>{t("twoFactorSetup.title")}</DialogTitle>
           <DialogDescription>
-            {enabled ? "管理两步验证设置" : "启用 TOTP 两步验证以增强账户安全"}
+            {enabled ? t("twoFactorSetup.descEnabled") : t("twoFactorSetup.descDisabled")}
           </DialogDescription>
         </DialogHeader>
 
@@ -95,26 +97,26 @@ export function TwoFactorSetupDialog({
             {enabled ? (
               <div className="space-y-3">
                 <p className="text-sm text-muted-foreground">
-                  两步验证已启用。关闭后登录时将不再需要验证码。
+                  {t("twoFactorSetup.enabledMessage")}
                 </p>
                 <Button
                   variant="destructive"
                   onClick={() => disableMutation.mutate()}
                   disabled={disableMutation.isPending}
                 >
-                  {disableMutation.isPending ? "关闭中..." : "关闭两步验证"}
+                  {disableMutation.isPending ? t("twoFactorSetup.disabling") : t("twoFactorSetup.disable")}
                 </Button>
               </div>
             ) : (
               <div className="space-y-3">
                 <p className="text-sm text-muted-foreground">
-                  启用两步验证后，每次登录都需要输入验证器应用生成的验证码。
+                  {t("twoFactorSetup.enableMessage")}
                 </p>
                 <Button
                   onClick={() => setupMutation.mutate()}
                   disabled={setupMutation.isPending}
                 >
-                  {setupMutation.isPending ? "生成中..." : "开始设置"}
+                  {setupMutation.isPending ? t("twoFactorSetup.generating") : t("twoFactorSetup.startSetup")}
                 </Button>
               </div>
             )}
@@ -125,22 +127,22 @@ export function TwoFactorSetupDialog({
         {step === "qr" && setupData && (
           <div className="space-y-4">
             <p className="text-sm text-muted-foreground">
-              使用验证器应用（如 Google Authenticator、Authy）扫描下方二维码：
+              {t("twoFactorSetup.scanQR")}
             </p>
             <div className="flex justify-center rounded-lg border bg-white p-4">
               <QRCode value={setupData.qrUri} size={200} />
             </div>
             <details className="text-xs text-muted-foreground">
-              <summary className="cursor-pointer">无法扫码？手动输入密钥</summary>
+              <summary className="cursor-pointer">{t("twoFactorSetup.cantScan")}</summary>
               <code className="mt-1 block break-all rounded bg-muted p-2 font-mono text-xs">
                 {setupData.secret}
               </code>
             </details>
             <div className="space-y-2">
-              <Label htmlFor="totp-code">输入验证码以确认</Label>
+              <Label htmlFor="totp-code">{t("twoFactorSetup.enterCode")}</Label>
               <Input
                 id="totp-code"
-                placeholder="6 位验证码"
+                placeholder={t("twoFactorSetup.codePlaceholder")}
                 value={code}
                 onChange={(e) => setCode(e.target.value)}
                 autoComplete="one-time-code"
@@ -152,7 +154,7 @@ export function TwoFactorSetupDialog({
               onClick={() => confirmMutation.mutate()}
               disabled={!code || confirmMutation.isPending}
             >
-              {confirmMutation.isPending ? "验证中..." : "确认启用"}
+              {confirmMutation.isPending ? t("twoFactorSetup.confirming") : t("twoFactorSetup.confirm")}
             </Button>
           </div>
         )}
@@ -161,10 +163,10 @@ export function TwoFactorSetupDialog({
         {step === "backup" && (
           <div className="space-y-4">
             <p className="text-sm font-medium text-green-600">
-              两步验证已启用！
+              {t("twoFactorSetup.enabledSuccess")}
             </p>
             <p className="text-sm text-muted-foreground">
-              请妥善保存以下恢复码。当无法使用验证器时，可以使用恢复码登录。每个恢复码只能使用一次。
+              {t("twoFactorSetup.saveRecoveryCodes")}
             </p>
             <div className="grid grid-cols-2 gap-2 rounded-lg border bg-muted p-3">
               {backupCodes.map((c) => (
@@ -174,7 +176,7 @@ export function TwoFactorSetupDialog({
               ))}
             </div>
             <Button className="w-full" onClick={handleClose}>
-              我已保存，完成
+              {t("twoFactorSetup.done")}
             </Button>
           </div>
         )}

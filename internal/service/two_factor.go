@@ -16,9 +16,9 @@ import (
 )
 
 var (
-	ErrTwoFactorAlreadyEnabled = errors.New("2FA already enabled")
-	ErrTwoFactorNotSetup       = errors.New("2FA not set up")
-	ErrTwoFactorInvalidCode    = errors.New("invalid 2FA code")
+	ErrTwoFactorAlreadyEnabled = errors.New("error.2fa.already_enabled")
+	ErrTwoFactorNotSetup       = errors.New("error.2fa.not_setup")
+	ErrTwoFactorInvalidCode    = errors.New("error.2fa.invalid_code")
 )
 
 type TwoFactorService struct {

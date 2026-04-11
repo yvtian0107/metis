@@ -1,4 +1,5 @@
 import { useEffect } from "react"
+import { useTranslation } from "react-i18next"
 import { useForm } from "react-hook-form"
 import { z } from "zod"
 import { zodResolver } from "@hookform/resolvers/zod"
@@ -48,47 +49,53 @@ export interface IdentitySourceItem {
   updatedAt: string
 }
 
-const oidcConfigSchema = z.object({
-  issuerUrl: z.string().min(1, "Issuer URL 不能为空"),
-  clientId: z.string().min(1, "Client ID 不能为空"),
-  clientSecret: z.string().optional().default(""),
-  callbackUrl: z.string().optional().default(""),
-  usePkce: z.boolean().default(true),
-  scopes: z.string().optional().default("openid,profile,email"),
-})
+function createOidcConfigSchema(t: (key: string) => string) {
+  return z.object({
+    issuerUrl: z.string().min(1, t("validation.issuerUrlRequired")),
+    clientId: z.string().min(1, t("validation.clientIdRequired")),
+    clientSecret: z.string().optional().default(""),
+    callbackUrl: z.string().optional().default(""),
+    usePkce: z.boolean().default(true),
+    scopes: z.string().optional().default("openid,profile,email"),
+  })
+}
 
-const ldapConfigSchema = z.object({
-  serverUrl: z.string().min(1, "Server URL 不能为空"),
-  bindDn: z.string().min(1, "Bind DN 不能为空"),
-  bindPassword: z.string().optional().default(""),
-  searchBase: z.string().min(1, "Search Base 不能为空"),
-  userFilter: z.string().optional().default("(uid={{username}})"),
-  useTls: z.boolean().default(false),
-  skipVerify: z.boolean().default(false),
-})
+function createLdapConfigSchema(t: (key: string) => string) {
+  return z.object({
+    serverUrl: z.string().min(1, t("validation.serverUrlRequired")),
+    bindDn: z.string().min(1, t("validation.bindDnRequired")),
+    bindPassword: z.string().optional().default(""),
+    searchBase: z.string().min(1, t("validation.searchBaseRequired")),
+    userFilter: z.string().optional().default("(uid={{username}})"),
+    useTls: z.boolean().default(false),
+    skipVerify: z.boolean().default(false),
+  })
+}
 
-const schema = z.discriminatedUnion("type", [
-  z.object({
-    type: z.literal("oidc"),
-    name: z.string().min(1, "名称不能为空"),
-    domains: z.string().min(1, "域名不能为空"),
-    forceSso: z.boolean().default(false),
-    defaultRoleId: z.coerce.number().default(0),
-    conflictStrategy: z.string().default("fail"),
-    config: oidcConfigSchema,
-  }),
-  z.object({
-    type: z.literal("ldap"),
-    name: z.string().min(1, "名称不能为空"),
-    domains: z.string().min(1, "域名不能为空"),
-    forceSso: z.boolean().default(false),
-    defaultRoleId: z.coerce.number().default(0),
-    conflictStrategy: z.string().default("fail"),
-    config: ldapConfigSchema,
-  }),
-])
+function createSchema(t: (key: string) => string) {
+  return z.discriminatedUnion("type", [
+    z.object({
+      type: z.literal("oidc"),
+      name: z.string().min(1, t("validation.nameRequired")),
+      domains: z.string().min(1, t("validation.domainRequired")),
+      forceSso: z.boolean().default(false),
+      defaultRoleId: z.coerce.number().default(0),
+      conflictStrategy: z.string().default("fail"),
+      config: createOidcConfigSchema(t),
+    }),
+    z.object({
+      type: z.literal("ldap"),
+      name: z.string().min(1, t("validation.nameRequired")),
+      domains: z.string().min(1, t("validation.domainRequired")),
+      forceSso: z.boolean().default(false),
+      defaultRoleId: z.coerce.number().default(0),
+      conflictStrategy: z.string().default("fail"),
+      config: createLdapConfigSchema(t),
+    }),
+  ])
+}
 
-type FormValues = z.infer<typeof schema>
+type FormValues = z.infer<ReturnType<typeof createSchema>>
 
 interface IdentitySourceSheetProps {
   open: boolean
@@ -116,11 +123,14 @@ const LDAP_DEFAULTS = {
 }
 
 export function IdentitySourceSheet({ open, onOpenChange, source }: IdentitySourceSheetProps) {
+  const { t } = useTranslation(["identitySources", "common"])
   const queryClient = useQueryClient()
   const isEditing = source !== null
 
+  const schema = createSchema(t)
+
   const form = useForm<FormValues>({
-    resolver: zodResolver(schema),
+    resolver: zodResolver(schema) as any,
     defaultValues: {
       type: "oidc",
       name: "",
@@ -145,7 +155,7 @@ export function IdentitySourceSheet({ open, onOpenChange, source }: IdentitySour
           defaultRoleId: source.defaultRoleId,
           conflictStrategy: source.conflictStrategy,
           config: source.config as FormValues["config"],
-        })
+        } as FormValues)
       } else {
         form.reset({
           type: "oidc",
@@ -177,7 +187,7 @@ export function IdentitySourceSheet({ open, onOpenChange, source }: IdentitySour
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["identity-sources"] })
       onOpenChange(false)
-      toast.success("身份源创建成功")
+      toast.success(t("createSuccess"))
     },
     onError: (err) => toast.error(err.message),
   })
@@ -188,22 +198,22 @@ export function IdentitySourceSheet({ open, onOpenChange, source }: IdentitySour
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["identity-sources"] })
       onOpenChange(false)
-      toast.success("身份源更新成功")
+      toast.success(t("updateSuccess"))
     },
     onError: (err) => toast.error(err.message),
   })
 
   const testMutation = useMutation({
     mutationFn: async () => {
-      if (!source) throw new Error("请先保存身份源后再测试")
+      if (!source) throw new Error(t("saveFirstBeforeTest"))
       const res = await api.post<{ success: boolean; message: string }>(
         `/api/v1/identity-sources/${source.id}/test`,
       )
-      if (!res.success) throw new Error(res.message || "测试失败")
+      if (!res.success) throw new Error(res.message || t("testFailed"))
       return res
     },
-    onSuccess: (res) => toast.success(res.message || "连接测试成功"),
-    onError: (err) => toast.error(`连接测试失败: ${err.message}`),
+    onSuccess: (res) => toast.success(res.message || t("testConnectionSuccess")),
+    onError: (err) => toast.error(t("testConnectionFailedDetail", { message: err.message })),
   })
 
   function onSubmit(values: FormValues) {
@@ -220,9 +230,9 @@ export function IdentitySourceSheet({ open, onOpenChange, source }: IdentitySour
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent className="sm:max-w-lg overflow-y-auto">
         <SheetHeader>
-          <SheetTitle>{isEditing ? "编辑身份源" : "新建身份源"}</SheetTitle>
+          <SheetTitle>{isEditing ? t("sheet.editTitle") : t("sheet.createTitle")}</SheetTitle>
           <SheetDescription className="sr-only">
-            {isEditing ? "修改身份源配置" : "配置新的身份源"}
+            {isEditing ? t("sheet.editDescription") : t("sheet.createDescription")}
           </SheetDescription>
         </SheetHeader>
         <Form {...form}>
@@ -233,9 +243,9 @@ export function IdentitySourceSheet({ open, onOpenChange, source }: IdentitySour
               name="name"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>名称</FormLabel>
+                  <FormLabel>{t("common:name")}</FormLabel>
                   <FormControl>
-                    <Input placeholder="例如：公司 Okta SSO" {...field} />
+                    <Input placeholder={t("form.namePlaceholder")} {...field} />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -247,17 +257,17 @@ export function IdentitySourceSheet({ open, onOpenChange, source }: IdentitySour
               name="type"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>类型</FormLabel>
+                  <FormLabel>{t("common:type")}</FormLabel>
                   {isEditing ? (
                     <div>
                       <Input value={field.value.toUpperCase()} disabled />
-                      <p className="text-xs text-muted-foreground mt-1">类型创建后不可更改</p>
+                      <p className="text-xs text-muted-foreground mt-1">{t("form.typeImmutable")}</p>
                     </div>
                   ) : (
                     <Select value={field.value} onValueChange={field.onChange}>
                       <FormControl>
                         <SelectTrigger>
-                          <SelectValue placeholder="请选择类型" />
+                          <SelectValue placeholder={t("form.typePlaceholder")} />
                         </SelectTrigger>
                       </FormControl>
                       <SelectContent>
@@ -276,11 +286,11 @@ export function IdentitySourceSheet({ open, onOpenChange, source }: IdentitySour
               name="domains"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>域名</FormLabel>
+                  <FormLabel>{t("domain")}</FormLabel>
                   <FormControl>
-                    <Input placeholder="例如：acme.com（多个用逗号分隔）" {...field} />
+                    <Input placeholder={t("form.domainPlaceholder")} {...field} />
                   </FormControl>
-                  <FormDescription>匹配邮箱域名的用户将使用此身份源登录</FormDescription>
+                  <FormDescription>{t("form.domainDescription")}</FormDescription>
                   <FormMessage />
                 </FormItem>
               )}
@@ -291,7 +301,7 @@ export function IdentitySourceSheet({ open, onOpenChange, source }: IdentitySour
               name="conflictStrategy"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>账号冲突策略</FormLabel>
+                  <FormLabel>{t("form.conflictStrategy")}</FormLabel>
                   <Select value={field.value} onValueChange={field.onChange}>
                     <FormControl>
                       <SelectTrigger>
@@ -299,8 +309,8 @@ export function IdentitySourceSheet({ open, onOpenChange, source }: IdentitySour
                       </SelectTrigger>
                     </FormControl>
                     <SelectContent>
-                      <SelectItem value="fail">拒绝登录</SelectItem>
-                      <SelectItem value="link">自动关联</SelectItem>
+                      <SelectItem value="fail">{t("form.conflictFail")}</SelectItem>
+                      <SelectItem value="link">{t("form.conflictLink")}</SelectItem>
                     </SelectContent>
                   </Select>
                   <FormMessage />
@@ -313,11 +323,11 @@ export function IdentitySourceSheet({ open, onOpenChange, source }: IdentitySour
               name="defaultRoleId"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>默认角色 ID</FormLabel>
+                  <FormLabel>{t("form.defaultRoleId")}</FormLabel>
                   <FormControl>
                     <Input
                       type="number"
-                      placeholder="0 表示使用系统默认角色"
+                      placeholder={t("form.defaultRoleIdPlaceholder")}
                       {...field}
                       onChange={(e) => field.onChange(Number(e.target.value))}
                     />
@@ -338,7 +348,7 @@ export function IdentitySourceSheet({ open, onOpenChange, source }: IdentitySour
                       onCheckedChange={field.onChange}
                     />
                   </FormControl>
-                  <FormLabel className="!mt-0">强制 SSO 登录</FormLabel>
+                  <FormLabel className="!mt-0">{t("form.forceSso")}</FormLabel>
                   <FormMessage />
                 </FormItem>
               )}
@@ -347,7 +357,7 @@ export function IdentitySourceSheet({ open, onOpenChange, source }: IdentitySour
             {/* Dynamic config section */}
             <div className="space-y-3 rounded-lg border p-4">
               <p className="text-sm font-medium">
-                {selectedType === "oidc" ? "OIDC 配置" : "LDAP 配置"}
+                {selectedType === "oidc" ? t("oidc.title") : t("ldap.title")}
               </p>
 
               {selectedType === "oidc" && <OidcConfigFields form={form} isEditing={isEditing} />}
@@ -368,11 +378,11 @@ export function IdentitySourceSheet({ open, onOpenChange, source }: IdentitySour
                   ) : (
                     <Plug className="mr-1.5 h-3.5 w-3.5" />
                   )}
-                  测试连接
+                  {t("testConnection")}
                 </Button>
               )}
               <Button type="submit" size="sm" disabled={isPending}>
-                {isPending ? "保存中..." : "保存"}
+                {isPending ? t("common:saving") : t("common:save")}
               </Button>
             </SheetFooter>
           </form>
@@ -386,9 +396,12 @@ function OidcConfigFields({
   form,
   isEditing,
 }: {
-  form: ReturnType<typeof useForm<FormValues>>
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  form: any
   isEditing: boolean
 }) {
+  const { t } = useTranslation("identitySources")
+
   return (
     <>
       <FormField
@@ -396,7 +409,7 @@ function OidcConfigFields({
         name="config.issuerUrl"
         render={({ field }) => (
           <FormItem>
-            <FormLabel>Issuer URL</FormLabel>
+            <FormLabel>{t("oidc.issuerUrl")}</FormLabel>
             <FormControl>
               <Input placeholder="https://accounts.google.com" {...field} value={field.value as string ?? ""} />
             </FormControl>
@@ -409,7 +422,7 @@ function OidcConfigFields({
         name="config.clientId"
         render={({ field }) => (
           <FormItem>
-            <FormLabel>Client ID</FormLabel>
+            <FormLabel>{t("oidc.clientId")}</FormLabel>
             <FormControl>
               <Input placeholder="your-client-id" {...field} value={field.value as string ?? ""} />
             </FormControl>
@@ -422,11 +435,11 @@ function OidcConfigFields({
         name="config.clientSecret"
         render={({ field }) => (
           <FormItem>
-            <FormLabel>Client Secret</FormLabel>
+            <FormLabel>{t("oidc.clientSecret")}</FormLabel>
             <FormControl>
               <Input
                 type="password"
-                placeholder={isEditing ? "留空则不修改" : "your-client-secret"}
+                placeholder={isEditing ? t("oidc.clientSecretPlaceholderEdit") : t("oidc.clientSecretPlaceholderCreate")}
                 value={field.value === "\u2022\u2022\u2022\u2022\u2022\u2022" ? "" : (field.value as string ?? "")}
                 onChange={field.onChange}
                 onBlur={field.onBlur}
@@ -443,7 +456,7 @@ function OidcConfigFields({
         name="config.callbackUrl"
         render={({ field }) => (
           <FormItem>
-            <FormLabel>Callback URL</FormLabel>
+            <FormLabel>{t("oidc.callbackUrl")}</FormLabel>
             <FormControl>
               <Input
                 readOnly
@@ -452,7 +465,7 @@ function OidcConfigFields({
                 value={field.value as string || `${window.location.origin}/sso/callback`}
               />
             </FormControl>
-            <FormDescription>此地址需要配置到 OIDC 提供商</FormDescription>
+            <FormDescription>{t("oidc.callbackUrlDescription")}</FormDescription>
             <FormMessage />
           </FormItem>
         )}
@@ -468,7 +481,7 @@ function OidcConfigFields({
                 onCheckedChange={field.onChange}
               />
             </FormControl>
-            <FormLabel className="!mt-0">启用 PKCE</FormLabel>
+            <FormLabel className="!mt-0">{t("oidc.usePkce")}</FormLabel>
           </FormItem>
         )}
       />
@@ -477,11 +490,11 @@ function OidcConfigFields({
         name="config.scopes"
         render={({ field }) => (
           <FormItem>
-            <FormLabel>Scopes</FormLabel>
+            <FormLabel>{t("oidc.scopes")}</FormLabel>
             <FormControl>
               <Input placeholder="openid,profile,email" {...field} value={field.value as string ?? ""} />
             </FormControl>
-            <FormDescription>多个 scope 用逗号分隔</FormDescription>
+            <FormDescription>{t("oidc.scopesDescription")}</FormDescription>
             <FormMessage />
           </FormItem>
         )}
@@ -494,9 +507,12 @@ function LdapConfigFields({
   form,
   isEditing,
 }: {
-  form: ReturnType<typeof useForm<FormValues>>
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  form: any
   isEditing: boolean
 }) {
+  const { t } = useTranslation("identitySources")
+
   return (
     <>
       <FormField
@@ -504,7 +520,7 @@ function LdapConfigFields({
         name="config.serverUrl"
         render={({ field }) => (
           <FormItem>
-            <FormLabel>Server URL</FormLabel>
+            <FormLabel>{t("ldap.serverUrl")}</FormLabel>
             <FormControl>
               <Input placeholder="ldaps://ldap.corp.com:636" {...field} value={field.value as string ?? ""} />
             </FormControl>
@@ -517,7 +533,7 @@ function LdapConfigFields({
         name="config.bindDn"
         render={({ field }) => (
           <FormItem>
-            <FormLabel>Bind DN</FormLabel>
+            <FormLabel>{t("ldap.bindDn")}</FormLabel>
             <FormControl>
               <Input placeholder="cn=admin,dc=example,dc=com" {...field} value={field.value as string ?? ""} />
             </FormControl>
@@ -530,11 +546,11 @@ function LdapConfigFields({
         name="config.bindPassword"
         render={({ field }) => (
           <FormItem>
-            <FormLabel>Bind Password</FormLabel>
+            <FormLabel>{t("ldap.bindPassword")}</FormLabel>
             <FormControl>
               <Input
                 type="password"
-                placeholder={isEditing ? "留空则不修改" : "bind password"}
+                placeholder={isEditing ? t("ldap.bindPasswordPlaceholderEdit") : t("ldap.bindPasswordPlaceholderCreate")}
                 value={field.value === "\u2022\u2022\u2022\u2022\u2022\u2022" ? "" : (field.value as string ?? "")}
                 onChange={field.onChange}
                 onBlur={field.onBlur}
@@ -551,7 +567,7 @@ function LdapConfigFields({
         name="config.searchBase"
         render={({ field }) => (
           <FormItem>
-            <FormLabel>Search Base</FormLabel>
+            <FormLabel>{t("ldap.searchBase")}</FormLabel>
             <FormControl>
               <Input placeholder="ou=users,dc=example,dc=com" {...field} value={field.value as string ?? ""} />
             </FormControl>
@@ -564,7 +580,7 @@ function LdapConfigFields({
         name="config.userFilter"
         render={({ field }) => (
           <FormItem>
-            <FormLabel>User Filter</FormLabel>
+            <FormLabel>{t("ldap.userFilter")}</FormLabel>
             <FormControl>
               <Input placeholder="(uid={{username}})" {...field} value={field.value as string ?? ""} />
             </FormControl>
@@ -583,7 +599,7 @@ function LdapConfigFields({
                 onCheckedChange={field.onChange}
               />
             </FormControl>
-            <FormLabel className="!mt-0">启用 TLS</FormLabel>
+            <FormLabel className="!mt-0">{t("ldap.useTls")}</FormLabel>
           </FormItem>
         )}
       />
@@ -598,7 +614,7 @@ function LdapConfigFields({
                 onCheckedChange={field.onChange}
               />
             </FormControl>
-            <FormLabel className="!mt-0">跳过证书验证</FormLabel>
+            <FormLabel className="!mt-0">{t("ldap.skipVerify")}</FormLabel>
           </FormItem>
         )}
       />

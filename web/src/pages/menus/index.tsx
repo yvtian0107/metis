@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useCallback } from "react"
+import { useTranslation } from "react-i18next"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import {
   DndContext,
@@ -50,14 +51,13 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog"
+import { addKernelNamespace } from "@/i18n"
+import zhCNMenus from "@/i18n/locales/zh-CN/menus.json"
+import enMenus from "@/i18n/locales/en/menus.json"
 import { MenuSheet } from "./menu-sheet"
 import type { MenuItem } from "@/stores/menu"
 
-const typeLabel: Record<string, string> = {
-  directory: "目录",
-  menu: "菜单",
-  button: "按钮",
-}
+addKernelNamespace("menus", zhCNMenus, enMenus)
 
 const typeIconClass: Record<string, string> = {
   directory: "text-muted-foreground",
@@ -139,6 +139,7 @@ function SortableMenuRow({
   onToggleExpand, onEdit, onCreate, onDelete,
   canCreate, canUpdate, canDelete,
 }: SortableRowProps) {
+  const { t } = useTranslation(["menus", "common"])
   const {
     attributes,
     listeners,
@@ -189,7 +190,7 @@ function SortableMenuRow({
         </div>
       </TableCell>
       <TableCell>
-        <Badge variant="outline">{typeLabel[menu.type] || menu.type}</Badge>
+        <Badge variant="outline">{t(`menus:menuType.${menu.type}`, menu.type)}</Badge>
       </TableCell>
       <TableCell className="font-mono text-sm text-muted-foreground">
         {menu.path || "-"}
@@ -198,39 +199,39 @@ function SortableMenuRow({
         {menu.permission || "-"}
       </TableCell>
       <TableCell>
-        {menu.isHidden && <Badge variant="secondary">隐藏</Badge>}
+        {menu.isHidden && <Badge variant="secondary">{t("menus:hidden")}</Badge>}
       </TableCell>
       <DataTableActionsCell>
         <DataTableActions>
           {canCreate && menu.type !== "button" && (
             <Button variant="ghost" size="sm" className="px-2.5" onClick={() => onCreate(menu.id)}>
-              添加子项
+              {t("menus:addChild")}
             </Button>
           )}
           {canUpdate && (
             <Button variant="ghost" size="sm" className="px-2.5" onClick={() => onEdit(menu)}>
-              编辑
+              {t("common:edit")}
             </Button>
           )}
           {canDelete && (
             <AlertDialog>
               <AlertDialogTrigger asChild>
                 <Button variant="ghost" size="sm" className="px-2.5 text-destructive">
-                  删除
+                  {t("common:delete")}
                 </Button>
               </AlertDialogTrigger>
               <AlertDialogContent>
                 <AlertDialogHeader>
-                  <AlertDialogTitle>确认删除</AlertDialogTitle>
+                  <AlertDialogTitle>{t("menus:deleteConfirm.title")}</AlertDialogTitle>
                   <AlertDialogDescription>
-                    确定要删除菜单 &ldquo;{menu.name}&rdquo; 吗？
-                    {hasChildren && "该菜单包含子项，请先删除子项。"}
+                    {t("menus:deleteConfirm.description", { name: menu.name })}
+                    {hasChildren && t("menus:deleteConfirm.hasChildren")}
                   </AlertDialogDescription>
                 </AlertDialogHeader>
                 <AlertDialogFooter>
-                  <AlertDialogCancel>取消</AlertDialogCancel>
+                  <AlertDialogCancel>{t("common:cancel")}</AlertDialogCancel>
                   <AlertDialogAction onClick={() => onDelete(menu.id)}>
-                    删除
+                    {t("common:delete")}
                   </AlertDialogAction>
                 </AlertDialogFooter>
               </AlertDialogContent>
@@ -257,6 +258,7 @@ function DragPreview({ menu }: { menu: MenuItem }) {
 // ── Page Component ────────────────────────────────────────────────────
 
 export function Component() {
+  const { t } = useTranslation(["menus", "common"])
   const queryClient = useQueryClient()
   const [sheetOpen, setSheetOpen] = useState(false)
   const [editing, setEditing] = useState<MenuItem | null>(null)
@@ -416,7 +418,7 @@ export function Component() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold">菜单管理</h2>
+        <h2 className="text-lg font-semibold">{t("menus:title")}</h2>
         <div className="flex items-center gap-2">
           <Button
             variant="outline"
@@ -428,11 +430,11 @@ export function Component() {
               }
             }}
           >
-            {expanded.size > 0 ? "全部收起" : "全部展开"}
+            {expanded.size > 0 ? t("menus:collapseAll") : t("menus:expandAll")}
           </Button>
           <Button size="sm" onClick={() => handleCreate()} disabled={!canCreate}>
             <Plus className="mr-1.5 h-4 w-4" />
-            新建菜单
+            {t("menus:createMenu")}
           </Button>
         </div>
       </div>
@@ -448,12 +450,12 @@ export function Component() {
             <TableHeader>
               <TableRow>
                 <TableHead className="w-9" />
-                <TableHead className="min-w-[220px]">名称</TableHead>
-                <TableHead className="w-[100px]">类型</TableHead>
-                <TableHead className="min-w-[180px]">路径</TableHead>
-                <TableHead className="min-w-[180px]">权限标识</TableHead>
-                <TableHead className="w-[100px]">状态</TableHead>
-                <DataTableActionsHead className="min-w-[210px]">操作</DataTableActionsHead>
+                <TableHead className="min-w-[220px]">{t("common:name")}</TableHead>
+                <TableHead className="w-[100px]">{t("common:type")}</TableHead>
+                <TableHead className="min-w-[180px]">{t("menus:path")}</TableHead>
+                <TableHead className="min-w-[180px]">{t("menus:permission")}</TableHead>
+                <TableHead className="w-[100px]">{t("common:status")}</TableHead>
+                <DataTableActionsHead className="min-w-[210px]">{t("common:actions")}</DataTableActionsHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -464,8 +466,8 @@ export function Component() {
                   <DataTableEmptyRow
                     colSpan={7}
                     icon={Menu}
-                    title="暂无菜单"
-                    description="点击「新建菜单」添加第一个菜单项"
+                    title={t("menus:empty.title")}
+                    description={t("menus:empty.description")}
                   />
                 ) : (
                   renderRows(menuTree)

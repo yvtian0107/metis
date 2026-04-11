@@ -1,0 +1,44 @@
+{
+  "title": "Menus",
+  "createMenu": "Create Menu",
+  "editMenu": "Edit Menu",
+  "addChild": "Add Child",
+  "collapseAll": "Collapse All",
+  "expandAll": "Expand All",
+  "path": "Path",
+  "permission": "Permission",
+  "hidden": "Hidden",
+  "hideMenu": "Hide Menu",
+  "parentMenu": "Parent Menu",
+  "topLevelMenu": "Top Level",
+  "icon": "Icon",
+  "menuType": {
+    "directory": "Directory",
+    "menu": "Menu",
+    "button": "Button"
+  },
+  "empty": {
+    "title": "No menus",
+    "description": "Click \"Create Menu\" to add the first menu item"
+  },
+  "deleteConfirm": {
+    "title": "Confirm Delete",
+    "description": "Are you sure you want to delete menu \"{{name}}\"?",
+    "hasChildren": "This menu has child items. Please delete them first."
+  },
+  "sheet": {
+    "editTitle": "Edit Menu",
+    "createTitle": "Create Menu",
+    "editDescription": "Modify menu item information",
+    "createDescription": "Fill in the menu information to create a new menu item"
+  },
+  "form": {
+    "namePlaceholder": "Menu name",
+    "pathPlaceholder": "Route path, e.g. /users",
+    "iconPlaceholder": "Icon name (optional)",
+    "permissionPlaceholder": "e.g. system:user:list"
+  },
+  "validation": {
+    "nameRequired": "Menu name is required"
+  }
+}

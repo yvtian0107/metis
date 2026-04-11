@@ -11,7 +11,7 @@ import (
 )
 
 var (
-	ErrNotificationNotFound = errors.New("notification not found")
+	ErrNotificationNotFound = errors.New("error.notification.not_found")
 )
 
 type NotificationService struct {

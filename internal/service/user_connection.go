@@ -11,10 +11,10 @@ import (
 )
 
 var (
-	ErrAlreadyBound        = errors.New("already bound to this provider")
-	ErrExternalIDBound     = errors.New("this account is already bound to another user")
-	ErrLastLoginMethod     = errors.New("cannot unbind last login method, please set a password first")
-	ErrConnectionNotFound  = errors.New("connection not found")
+	ErrAlreadyBound        = errors.New("error.connection.already_bound")
+	ErrExternalIDBound     = errors.New("error.connection.external_id_bound")
+	ErrLastLoginMethod     = errors.New("error.connection.last_login_method")
+	ErrConnectionNotFound  = errors.New("error.connection.not_found")
 )
 
 type UserConnectionService struct {

@@ -1,15 +1,15 @@
 import { useMemo } from "react"
 import { useLocation } from "react-router"
+import { useTranslation } from "react-i18next"
 import { useMenuStore, type MenuItem } from "@/stores/menu"
 import { Separator } from "@/components/ui/separator"
 
-function buildPathLabels(menuTree: MenuItem[]): Record<string, string> {
+function buildPathLabels(menuTree: MenuItem[], t: (key: string, opts?: Record<string, unknown>) => string): Record<string, string> {
   const labels: Record<string, string> = {}
   function walk(items: MenuItem[]) {
     for (const m of items) {
       if (m.path) {
-        // Use full path as key so cumulative breadcrumb lookup works
-        labels[m.path] = m.name
+        labels[m.path] = t(`layout:menu.${m.permission ?? ""}`, { defaultValue: m.name })
       }
       if (m.children) walk(m.children)
     }
@@ -19,10 +19,11 @@ function buildPathLabels(menuTree: MenuItem[]): Record<string, string> {
 }
 
 export function Header() {
+  const { t } = useTranslation("layout")
   const { pathname } = useLocation()
   const menuTree = useMenuStore((s) => s.menuTree)
 
-  const pathLabels = useMemo(() => buildPathLabels(menuTree), [menuTree])
+  const pathLabels = useMemo(() => buildPathLabels(menuTree, t), [menuTree, t])
 
   const segments = pathname.split("/").filter(Boolean)
   const crumbs = segments.map((seg, i) => {

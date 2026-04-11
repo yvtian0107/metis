@@ -1,4 +1,5 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query"
+import { useTranslation } from "react-i18next"
 import { api } from "@/lib/api"
 import {
   AlertDialog,
@@ -19,6 +20,7 @@ interface KickDialogProps {
 }
 
 export function KickDialog({ open, onOpenChange, sessionId, username }: KickDialogProps) {
+  const { t } = useTranslation(["sessions", "common"])
   const queryClient = useQueryClient()
 
   const mutation = useMutation({
@@ -33,18 +35,18 @@ export function KickDialog({ open, onOpenChange, sessionId, username }: KickDial
     <AlertDialog open={open} onOpenChange={onOpenChange}>
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>踢出会话</AlertDialogTitle>
+          <AlertDialogTitle>{t("sessions:kickTitle")}</AlertDialogTitle>
           <AlertDialogDescription>
-            确定要强制下线用户 &ldquo;{username}&rdquo; 的这个会话吗？该用户将立即被登出。
+            {t("sessions:kickConfirm", { username })}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel disabled={mutation.isPending}>取消</AlertDialogCancel>
+          <AlertDialogCancel disabled={mutation.isPending}>{t("common:cancel")}</AlertDialogCancel>
           <AlertDialogAction
             onClick={() => sessionId && mutation.mutate(sessionId)}
             disabled={mutation.isPending}
           >
-            {mutation.isPending ? "处理中..." : "确认踢出"}
+            {mutation.isPending ? t("common:processing") : t("sessions:confirmKick")}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>

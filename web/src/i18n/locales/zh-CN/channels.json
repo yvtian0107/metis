@@ -1,0 +1,65 @@
+{
+  "title": "消息通道",
+  "create": "新建通道",
+  "searchPlaceholder": "搜索通道名称",
+  "emptyTitle": "暂无消息通道",
+  "emptyDescription": "点击「新建通道」配置第一个消息通道",
+  "confirmDeleteTitle": "确认删除",
+  "confirmDeleteDescription": "确定要删除通道 \u201c{{name}}\u201d 吗？此操作不可撤销。",
+  "toast": {
+    "deleted": "通道已删除",
+    "createSuccess": "通道创建成功",
+    "updateSuccess": "通道更新成功",
+    "testConnSuccess": "连接测试成功",
+    "testConnFailed": "连接测试失败: {{message}}",
+    "sendSuccess": "测试邮件发送成功",
+    "sendFailed": "发送失败: {{message}}",
+    "testFailed": "测试失败",
+    "sendError": "发送失败"
+  },
+  "sheet": {
+    "createTitle": "新建通道",
+    "editTitle": "编辑通道",
+    "createDescription": "配置新的消息通道",
+    "editDescription": "修改消息通道配置"
+  },
+  "form": {
+    "nameLabel": "通道名称",
+    "namePlaceholder": "例如：系统邮件",
+    "typeLabel": "通道类型",
+    "typePlaceholder": "请选择通道类型",
+    "typeImmutable": "通道类型创建后不可更改",
+    "connectionConfig": "连接配置",
+    "sensitiveHint": "留空则不修改"
+  },
+  "validation": {
+    "nameRequired": "通道名称不能为空",
+    "typeRequired": "请选择通道类型",
+    "saveFirst": "请先保存通道后再测试"
+  },
+  "testConnection": "测试连接",
+  "sendTest": "测试发送",
+  "sendTestDialog": {
+    "title": "发送测试邮件",
+    "description": "发送一封测试邮件以验证通道配置是否正常工作",
+    "recipient": "收件人",
+    "subject": "主题",
+    "body": "内容",
+    "send": "发送",
+    "defaultSubject": "Metis 测试邮件",
+    "defaultBody": "这是一封来自 Metis 系统的测试邮件。"
+  },
+  "channelType": {
+    "email": "邮件 (SMTP)",
+    "smtpHost": "SMTP 服务器",
+    "port": "端口",
+    "sslTls": "SSL/TLS",
+    "username": "用户名",
+    "password": "密码",
+    "from": "发件人",
+    "fromPlaceholder": "系统通知 <noreply@example.com>"
+  },
+  "validation_email": "请输入有效的邮箱地址",
+  "validation_subjectRequired": "主题不能为空",
+  "validation_bodyRequired": "内容不能为空"
+}

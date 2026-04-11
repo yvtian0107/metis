@@ -1,0 +1,87 @@
+{
+  "title": "Installation Wizard",
+  "poweredBy": "Powered by Metis",
+  "steps": {
+    "language": "Language",
+    "database": "Database",
+    "site": "Site Info",
+    "admin": "Admin",
+    "complete": "Done"
+  },
+  "language": {
+    "title": "Language & Timezone",
+    "description": "Set the default system language and timezone",
+    "selectLanguage": "System Language",
+    "selectTimezone": "System Timezone",
+    "timezoneSearch": "Search timezone...",
+    "next": "Next"
+  },
+  "database": {
+    "title": "Select Database",
+    "description": "Choose the database for storing data",
+    "sqlite": "SQLite",
+    "sqliteDesc": "Zero config, ideal for small deployments",
+    "postgres": "PostgreSQL",
+    "postgresDesc": "High performance, for production use",
+    "host": "Host",
+    "port": "Port",
+    "username": "Username",
+    "password": "Password",
+    "dbName": "Database Name",
+    "testConnection": "Test Connection",
+    "testing": "Testing...",
+    "connectionSuccess": "Connection successful",
+    "connectionFailed": "Connection failed",
+    "next": "Next"
+  },
+  "site": {
+    "title": "Site Information",
+    "description": "Give your site a name",
+    "siteName": "Site Name",
+    "siteNameHint": "Shown on the login page and browser title",
+    "advanced": "Advanced Settings",
+    "otel": "OpenTelemetry",
+    "enableTracing": "Enable Tracing",
+    "enableTracingDesc": "Enable OpenTelemetry distributed tracing",
+    "exportEndpoint": "Export Endpoint",
+    "serviceName": "Service Name",
+    "sampleRate": "Sample Rate",
+    "next": "Next",
+    "prev": "Previous"
+  },
+  "admin": {
+    "title": "Admin Account",
+    "description": "Create the super admin account",
+    "username": "Username",
+    "email": "Email",
+    "password": "Password",
+    "passwordHint": "At least 8 characters",
+    "confirmPassword": "Confirm Password",
+    "confirmPasswordHint": "Enter password again",
+    "usernameMinLength": "Username must be at least 3 characters",
+    "passwordMinLength": "Password must be at least 8 characters",
+    "passwordMismatch": "Passwords do not match",
+    "emailInvalid": "Please enter a valid email address",
+    "next": "Next",
+    "prev": "Previous"
+  },
+  "confirm": {
+    "title": "Confirm Installation",
+    "description": "Review the configuration before installing",
+    "database": "Database",
+    "siteName": "Site Name",
+    "language": "Language",
+    "timezone": "Timezone",
+    "administrator": "Administrator",
+    "email": "Email",
+    "install": "Install",
+    "installing": "Installing...",
+    "prev": "Previous",
+    "installFailed": "Installation failed"
+  },
+  "done": {
+    "title": "Installation Complete",
+    "description": "{{name}} is ready",
+    "enter": "Enter System"
+  }
+}

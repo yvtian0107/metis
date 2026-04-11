@@ -1,5 +1,6 @@
 import { useState } from "react"
 import { useNavigate, Navigate, Link } from "react-router"
+import { useTranslation } from "react-i18next"
 import { useAuthStore } from "@/stores/auth"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -9,6 +10,7 @@ export function Component() {
   const navigate = useNavigate()
   const user = useAuthStore((s) => s.user)
   const oauthLogin = useAuthStore((s) => s.oauthLogin)
+  const { t } = useTranslation("auth")
 
   const [username, setUsername] = useState("")
   const [password, setPassword] = useState("")
@@ -26,7 +28,7 @@ export function Component() {
     setError("")
 
     if (password !== confirmPassword) {
-      setError("两次输入的密码不一致")
+      setError(t("register.passwordMismatch"))
       return
     }
 
@@ -40,14 +42,14 @@ export function Component() {
 
       const body = await res.json()
       if (!res.ok || body.code !== 0) {
-        throw new Error(body.message || "注册失败")
+        throw new Error(body.message || t("register.registerFailed"))
       }
 
       // Auto-login after registration
       await oauthLogin(body.data)
       navigate("/", { replace: true })
     } catch (err) {
-      setError(err instanceof Error ? err.message : "注册失败")
+      setError(err instanceof Error ? err.message : t("register.registerFailed"))
     } finally {
       setLoading(false)
     }
@@ -57,16 +59,16 @@ export function Component() {
     <div className="flex min-h-screen items-center justify-center bg-background">
       <div className="w-full max-w-sm space-y-6 px-4">
         <div className="space-y-2 text-center">
-          <h1 className="text-2xl font-semibold tracking-tight">注册账号</h1>
-          <p className="text-sm text-muted-foreground">创建一个新账号</p>
+          <h1 className="text-2xl font-semibold tracking-tight">{t("register.title")}</h1>
+          <p className="text-sm text-muted-foreground">{t("register.subtitle")}</p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-2">
-            <Label htmlFor="username">用户名</Label>
+            <Label htmlFor="username">{t("register.username")}</Label>
             <Input
               id="username"
-              placeholder="请输入用户名"
+              placeholder={t("register.usernamePlaceholder")}
               value={username}
               onChange={(e) => setUsername(e.target.value)}
               required
@@ -74,32 +76,32 @@ export function Component() {
             />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="email">邮箱（可选）</Label>
+            <Label htmlFor="email">{t("register.email")}</Label>
             <Input
               id="email"
               type="email"
-              placeholder="请输入邮箱"
+              placeholder={t("register.emailPlaceholder")}
               value={email}
               onChange={(e) => setEmail(e.target.value)}
             />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="password">密码</Label>
+            <Label htmlFor="password">{t("register.password")}</Label>
             <Input
               id="password"
               type="password"
-              placeholder="请输入密码"
+              placeholder={t("register.passwordPlaceholder")}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
             />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="confirmPassword">确认密码</Label>
+            <Label htmlFor="confirmPassword">{t("register.confirmPassword")}</Label>
             <Input
               id="confirmPassword"
               type="password"
-              placeholder="再次输入密码"
+              placeholder={t("register.confirmPasswordPlaceholder")}
               value={confirmPassword}
               onChange={(e) => setConfirmPassword(e.target.value)}
               required
@@ -109,14 +111,14 @@ export function Component() {
           {error && <p className="text-sm text-destructive">{error}</p>}
 
           <Button type="submit" className="w-full" disabled={loading}>
-            {loading ? "注册中..." : "注册"}
+            {loading ? t("register.submitting") : t("register.submit")}
           </Button>
         </form>
 
         <p className="text-center text-sm text-muted-foreground">
-          已有账号？{" "}
+          {t("register.hasAccount")}{" "}
           <Link to="/login" className="text-primary hover:underline">
-            登录
+            {t("register.login")}
           </Link>
         </p>
       </div>

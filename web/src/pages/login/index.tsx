@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react"
+import { useTranslation } from "react-i18next"
 import { useQuery } from "@tanstack/react-query"
 import { useNavigate, Navigate, Link } from "react-router"
 
@@ -37,6 +38,7 @@ function ProviderIcon({ provider }: { provider: string }) {
 }
 
 export default function LoginPage() {
+  const { t } = useTranslation("auth")
   const navigate = useNavigate()
   const login = useAuthStore((s) => s.login)
   const user = useAuthStore((s) => s.user)
@@ -88,9 +90,9 @@ export default function LoginPage() {
         return
       }
       if (err instanceof AccountLockedError) {
-        setError("账号已锁定，请稍后再试")
+        setError(t("login.accountLocked"))
       } else {
-        setError(err instanceof Error ? err.message : "登录失败")
+        setError(err instanceof Error ? err.message : t("login.loginFailed"))
       }
       loadCaptcha()
     } finally {
@@ -105,12 +107,11 @@ export default function LoginPage() {
       sessionStorage.setItem("oauth_provider", providerKey)
       window.location.assign(data.authURL)
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to initiate OAuth")
+      setError(err instanceof Error ? err.message : t("login.oauthFailed"))
     }
   }
 
   const appName = siteInfo?.appName ?? "Metis"
-  const hasLogo = siteInfo?.hasLogo ?? false
 
   if (user) {
     return <Navigate to="/" replace />
@@ -123,10 +124,10 @@ export default function LoginPage() {
           {/* Heading */}
           <div className="mb-6 text-center">
             <h2 className="text-lg font-semibold tracking-[-0.02em] text-slate-900">
-              登录到 {appName}
+              {t("login.title", { appName })}
             </h2>
             <p className="mt-1 text-[13px] text-slate-400">
-              输入你的账号继续
+              {t("login.subtitle")}
             </p>
           </div>
 
@@ -135,7 +136,7 @@ export default function LoginPage() {
             <div className="space-y-3">
               <div>
                 <Label htmlFor="username" className="mb-1.5 block text-[13px] font-medium text-slate-500">
-                  用户名
+                  {t("login.username")}
                 </Label>
                 <Input
                   id="username"
@@ -150,7 +151,7 @@ export default function LoginPage() {
 
               <div>
                 <Label htmlFor="password" className="mb-1.5 block text-[13px] font-medium text-slate-500">
-                  密码
+                  {t("login.password")}
                 </Label>
                 <Input
                   id="password"
@@ -166,12 +167,12 @@ export default function LoginPage() {
               {captcha?.enabled && (
                 <div>
                   <Label htmlFor="captcha" className="mb-1.5 block text-[13px] font-medium text-slate-500">
-                    验证码
+                    {t("login.captcha")}
                   </Label>
                   <div className="flex items-center gap-2">
                     <Input
                       id="captcha"
-                      placeholder="输入验证码"
+                      placeholder={t("login.captchaPlaceholder")}
                       value={captchaAnswer}
                       onChange={(e) => setCaptchaAnswer(e.target.value)}
                       className="auth-input flex-1"
@@ -183,7 +184,7 @@ export default function LoginPage() {
                         alt="captcha"
                         className="h-10 w-24 cursor-pointer rounded-xl border border-slate-200/60 bg-white object-cover"
                         onClick={loadCaptcha}
-                        title="点击刷新"
+                        title={t("login.captchaRefresh")}
                       />
                     )}
                   </div>
@@ -203,7 +204,7 @@ export default function LoginPage() {
                 className="h-[2.625rem] w-full rounded-xl border-0 bg-slate-900 text-sm font-medium tracking-[-0.01em] text-white shadow-[0_1px_2px_rgba(0,0,0,0.05),inset_0_1px_0_rgba(255,255,255,0.06)] hover:bg-slate-800 active:scale-[0.985]"
                 disabled={loading}
               >
-                {loading ? "登录中..." : "继续"}
+                {loading ? t("login.loggingIn") : t("login.submit")}
               </Button>
 
               {providers.length > 0 && (
@@ -214,7 +215,7 @@ export default function LoginPage() {
                     </div>
                     <div className="relative flex justify-center">
                       <span className="bg-white/60 px-2.5 text-[11px] font-medium tracking-wide text-slate-300 uppercase">
-                        或
+                        {t("login.or")}
                       </span>
                     </div>
                   </div>
@@ -241,13 +242,13 @@ export default function LoginPage() {
           <div className="mt-6 text-center text-[12.5px] text-slate-400">
             {registrationOpen ? (
               <p>
-                没有账号？{" "}
+                {t("login.noAccount")}{" "}
                 <Link to="/register" className="font-medium text-slate-600 transition hover:text-slate-900">
-                  创建账号
+                  {t("login.createAccount")}
                 </Link>
               </p>
             ) : (
-              <p>无法登录？联系管理员</p>
+              <p>{t("login.contactAdmin")}</p>
             )}
           </div>
         </div>

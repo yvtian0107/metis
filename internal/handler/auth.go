@@ -14,6 +14,7 @@ import (
 
 type AuthHandler struct {
 	auth        *service.AuthService
+	userSvc     *service.UserService
 	menuSvc     *service.MenuService
 	providerSvc *service.AuthProviderService
 	connSvc     *service.UserConnectionService
@@ -45,13 +46,13 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		switch {
 		case errors.Is(err, service.ErrInvalidCredentials):
 			reason = "invalid_credentials"
-			Fail(c, http.StatusUnauthorized, "invalid credentials")
+			Fail(c, http.StatusUnauthorized, err.Error())
 		case errors.Is(err, service.ErrAccountDisabled):
 			reason = "account_disabled"
-			Fail(c, http.StatusUnauthorized, "account disabled")
+			Fail(c, http.StatusUnauthorized, err.Error())
 		case errors.Is(err, service.ErrAccountLocked):
 			reason = "account_locked"
-			Fail(c, http.StatusLocked, "account locked")
+			Fail(c, http.StatusLocked, err.Error())
 		case errors.Is(err, service.ErrCaptchaRequired):
 			reason = "captcha_required"
 			Fail(c, http.StatusBadRequest, err.Error())
@@ -126,13 +127,13 @@ func (h *AuthHandler) Register(c *gin.Context) {
 	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrRegistrationClosed):
-			Fail(c, http.StatusForbidden, "registration is closed")
+			Fail(c, http.StatusForbidden, err.Error())
 		case errors.Is(err, service.ErrUsernameExists):
-			Fail(c, http.StatusBadRequest, "username already exists")
+			Fail(c, http.StatusBadRequest, err.Error())
 		case errors.Is(err, service.ErrPasswordViolation):
 			Fail(c, http.StatusBadRequest, err.Error())
 		case errors.Is(err, service.ErrDefaultRoleNotFound):
-			Fail(c, http.StatusInternalServerError, "default role not configured")
+			Fail(c, http.StatusInternalServerError, err.Error())
 		default:
 			Fail(c, http.StatusInternalServerError, err.Error())
 		}
@@ -260,7 +261,7 @@ func (h *AuthHandler) ChangePassword(c *gin.Context) {
 	userID := c.GetUint("userId")
 	if err := h.auth.ChangePassword(userID, req.OldPassword, req.NewPassword); err != nil {
 		if errors.Is(err, service.ErrOldPasswordWrong) {
-			Fail(c, http.StatusBadRequest, "old password incorrect")
+			Fail(c, http.StatusBadRequest, err.Error())
 			return
 		}
 		Fail(c, http.StatusInternalServerError, err.Error())
@@ -268,6 +269,40 @@ func (h *AuthHandler) ChangePassword(c *gin.Context) {
 	}
 
 	OK(c, nil)
+}
+
+type updateProfileReq struct {
+	Locale   *string `json:"locale"`
+	Timezone *string `json:"timezone"`
+}
+
+func (h *AuthHandler) UpdateProfile(c *gin.Context) {
+	var req updateProfileReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		Fail(c, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	userID := c.GetUint("userId")
+	user, err := h.auth.GetCurrentUser(userID)
+	if err != nil {
+		Fail(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	if req.Locale != nil {
+		user.Locale = *req.Locale
+	}
+	if req.Timezone != nil {
+		user.Timezone = *req.Timezone
+	}
+
+	if err := h.userSvc.UpdateProfile(user); err != nil {
+		Fail(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	OK(c, user.ToResponse())
 }
 
 // --- OAuth endpoints ---

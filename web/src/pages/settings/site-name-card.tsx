@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next"
 import { useForm } from "react-hook-form"
 import { z } from "zod"
 import { zodResolver } from "@hookform/resolvers/zod"
@@ -21,14 +22,15 @@ import {
   FormMessage,
 } from "@/components/ui/form"
 
-const schema = z.object({
-  appName: z.string().min(1, "系统名称不能为空").max(50, "系统名称不能超过 50 个字符"),
-})
-
-type FormValues = z.infer<typeof schema>
-
 export function SiteNameCard({ appName }: { appName: string }) {
+  const { t } = useTranslation(["settings", "common"])
   const queryClient = useQueryClient()
+
+  const schema = z.object({
+    appName: z.string().min(1, t("settings:site.appNameRequired")).max(50, t("settings:site.appNameMaxLength")),
+  })
+
+  type FormValues = z.infer<typeof schema>
 
   const form = useForm<FormValues>({
     resolver: zodResolver(schema),
@@ -46,8 +48,8 @@ export function SiteNameCard({ appName }: { appName: string }) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>基本信息</CardTitle>
-        <CardDescription>设置系统的显示名称，将在导航栏中展示</CardDescription>
+        <CardTitle>{t("settings:site.title")}</CardTitle>
+        <CardDescription>{t("settings:site.description")}</CardDescription>
       </CardHeader>
       <CardContent>
         <Form {...form}>
@@ -57,9 +59,9 @@ export function SiteNameCard({ appName }: { appName: string }) {
               name="appName"
               render={({ field }) => (
                 <FormItem className="flex-1">
-                  <FormLabel>系统名称</FormLabel>
+                  <FormLabel>{t("settings:site.appName")}</FormLabel>
                   <FormControl>
-                    <Input placeholder="请输入系统名称" {...field} />
+                    <Input placeholder={t("settings:site.appNamePlaceholder")} {...field} />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -69,7 +71,7 @@ export function SiteNameCard({ appName }: { appName: string }) {
               type="submit"
               disabled={!form.formState.isDirty || mutation.isPending}
             >
-              {mutation.isPending ? "保存中..." : "保存"}
+              {mutation.isPending ? t("common:saving") : t("common:save")}
             </Button>
           </form>
         </Form>

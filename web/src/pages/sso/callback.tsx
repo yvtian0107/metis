@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react"
 import { useNavigate, useSearchParams, Link } from "react-router"
+import { useTranslation } from "react-i18next"
 import { useAuthStore } from "@/stores/auth"
 import { api } from "@/lib/api"
 
 export function Component() {
+  const { t } = useTranslation()
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const oauthLogin = useAuthStore((s) => s.oauthLogin)
@@ -30,13 +32,13 @@ export function Component() {
         await oauthLogin(data)
         navigate("/", { replace: true })
       } catch (err) {
-        const msg = err instanceof Error ? err.message : "SSO 登录失败"
+        const msg = err instanceof Error ? err.message : t("ssoLoginFailed")
         setError(msg)
       }
     }
 
     run()
-  }, [searchParams, navigate, oauthLogin])
+  }, [searchParams, navigate, oauthLogin, t])
 
   if (error) {
     return (
@@ -47,7 +49,7 @@ export function Component() {
             to="/login"
             className="text-sm text-primary underline underline-offset-4 hover:text-primary/80"
           >
-            返回登录页
+            {t("backToLogin")}
           </Link>
         </div>
       </div>
@@ -56,7 +58,7 @@ export function Component() {
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-background">
-      <p className="text-sm text-muted-foreground">正在登录...</p>
+      <p className="text-sm text-muted-foreground">{t("loggingIn")}</p>
     </div>
   )
 }

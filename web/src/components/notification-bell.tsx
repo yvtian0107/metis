@@ -1,7 +1,9 @@
 import { useState } from "react"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
+import { useTranslation } from "react-i18next"
 import { Bell, Megaphone, Check } from "lucide-react"
 import { api } from "@/lib/api"
+import { formatDateTime } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { ScrollArea } from "@/components/ui/scroll-area"
@@ -24,16 +26,16 @@ interface NotificationListResponse {
   pageSize: number
 }
 
-function formatRelativeTime(dateStr: string): string {
+function formatRelativeTime(dateStr: string, t: (key: string, opts?: Record<string, unknown>) => string): string {
   const now = Date.now()
   const date = new Date(dateStr).getTime()
   const diff = Math.floor((now - date) / 1000)
 
-  if (diff < 60) return "刚刚"
-  if (diff < 3600) return `${Math.floor(diff / 60)} 分钟前`
-  if (diff < 86400) return `${Math.floor(diff / 3600)} 小时前`
-  if (diff < 604800) return `${Math.floor(diff / 86400)} 天前`
-  return new Date(dateStr).toLocaleDateString("zh-CN")
+  if (diff < 60) return t("layout:notifications.justNow")
+  if (diff < 3600) return t("layout:notifications.minutesAgo", { count: Math.floor(diff / 60) })
+  if (diff < 86400) return t("layout:notifications.hoursAgo", { count: Math.floor(diff / 3600) })
+  if (diff < 604800) return t("layout:notifications.daysAgo", { count: Math.floor(diff / 86400) })
+  return formatDateTime(dateStr, { dateOnly: true })
 }
 
 function NotificationIcon({ type }: { type: string }) {
@@ -46,6 +48,7 @@ function NotificationIcon({ type }: { type: string }) {
 }
 
 export function NotificationBell() {
+  const { t } = useTranslation("layout")
   const queryClient = useQueryClient()
   const [open, setOpen] = useState(false)
 
@@ -103,7 +106,7 @@ export function NotificationBell() {
       </PopoverTrigger>
       <PopoverContent align="end" className="w-96 p-0">
         <div className="flex items-center justify-between border-b px-4 py-3">
-          <h4 className="text-sm font-semibold">通知中心</h4>
+          <h4 className="text-sm font-semibold">{t("notifications.title")}</h4>
           {hasUnread && (
             <Button
               variant="ghost"
@@ -113,7 +116,7 @@ export function NotificationBell() {
               disabled={markAllReadMutation.isPending}
             >
               <Check className="mr-1 h-3 w-3" />
-              全部已读
+              {t("notifications.markAllRead")}
             </Button>
           )}
         </div>
@@ -121,12 +124,12 @@ export function NotificationBell() {
         <ScrollArea className="max-h-96">
           {isLoading ? (
             <div className="flex items-center justify-center py-8 text-sm text-muted-foreground">
-              加载中...
+              {t("common:loading")}
             </div>
           ) : items.length === 0 ? (
             <div className="flex flex-col items-center justify-center gap-2 py-12 text-muted-foreground">
               <Bell className="h-8 w-8 stroke-1" />
-              <span className="text-sm">暂无通知</span>
+              <span className="text-sm">{t("notifications.noNotifications")}</span>
             </div>
           ) : (
             <div className="divide-y">
@@ -154,7 +157,7 @@ export function NotificationBell() {
                       </p>
                     )}
                     <p className="mt-1 text-xs text-muted-foreground/60">
-                      {formatRelativeTime(item.createdAt)}
+                      {formatRelativeTime(item.createdAt, t)}
                     </p>
                   </div>
                 </button>

@@ -1,0 +1,42 @@
+{
+  "passwordExpired": "密码已过期，请修改密码",
+  "changePassword": "修改密码",
+  "twoFactor": "两步验证",
+  "preferences": "偏好设置",
+  "logout": "退出登录",
+  "pref": {
+    "title": "偏好设置",
+    "description": "设置您的语言和时区",
+    "language": "语言",
+    "timezone": "时区",
+    "timezonePlaceholder": "搜索时区...",
+    "saved": "偏好设置已保存"
+  },
+  "notifications": {
+    "title": "通知中心",
+    "markAllRead": "全部已读",
+    "noNotifications": "暂无通知",
+    "justNow": "刚刚",
+    "minutesAgo": "{{count}} 分钟前",
+    "hoursAgo": "{{count}} 小时前",
+    "daysAgo": "{{count}} 天前"
+  },
+  "menu": {
+    "system": "系统管理",
+    "system:user:list": "用户管理",
+    "system:role:list": "角色管理",
+    "system:menu:list": "菜单管理",
+    "system:session:list": "会话管理",
+    "system:settings:list": "系统设置",
+    "system:task:list": "任务管理",
+    "system:announcement:list": "公告管理",
+    "system:channel:list": "通知渠道",
+    "system:auth-provider:list": "认证源",
+    "system:audit-log:list": "审计日志",
+    "system:identity-source:list": "身份源",
+    "license": "许可管理",
+    "license:product:list": "商品管理",
+    "license:licensee:list": "授权主体",
+    "license:license:list": "许可签发"
+  }
+}

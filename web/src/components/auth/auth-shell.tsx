@@ -1,6 +1,7 @@
 import type { ReactNode } from "react"
 
 import { cn } from "@/lib/utils"
+import { LanguageSwitcher } from "@/components/language-switcher"
 
 interface AuthShellProps {
   aside?: ReactNode
@@ -31,6 +32,11 @@ export function AuthShell({ aside, children, className }: AuthShellProps) {
         <main className="flex min-h-screen items-center justify-center px-4 py-6 sm:px-6 lg:px-8">
           {children}
         </main>
+      </div>
+
+      {/* Language switcher */}
+      <div className="absolute bottom-4 right-4">
+        <LanguageSwitcher />
       </div>
     </div>
   )

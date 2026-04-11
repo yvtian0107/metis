@@ -12,15 +12,19 @@ import (
 )
 
 const (
-	keySiteAppName = "system.app_name"
-	keySiteLogo    = "system.logo"
-	defaultAppName = "Metis"
-	maxLogoBytes   = 2 * 1024 * 1024 // 2MB
+	keySiteAppName  = "system.app_name"
+	keySiteLogo     = "system.logo"
+	keySiteLocale   = "system.locale"
+	keySiteTimezone = "system.timezone"
+	defaultAppName  = "Metis"
+	maxLogoBytes    = 2 * 1024 * 1024 // 2MB
 )
 
 type siteInfoResp struct {
 	AppName   string `json:"appName"`
 	HasLogo   bool   `json:"hasLogo"`
+	Locale    string `json:"locale"`
+	Timezone  string `json:"timezone"`
 	Version   string `json:"version"`
 	GitCommit string `json:"gitCommit"`
 	BuildTime string `json:"buildTime"`
@@ -37,9 +41,21 @@ func (h *Handler) GetSiteInfo(c *gin.Context) {
 		hasLogo = true
 	}
 
+	locale := "zh-CN"
+	if cfg, err := h.sysCfg.Get(keySiteLocale); err == nil && cfg.Value != "" {
+		locale = cfg.Value
+	}
+
+	timezone := "UTC"
+	if cfg, err := h.sysCfg.Get(keySiteTimezone); err == nil && cfg.Value != "" {
+		timezone = cfg.Value
+	}
+
 	OK(c, siteInfoResp{
 		AppName:   appName,
 		HasLogo:   hasLogo,
+		Locale:    locale,
+		Timezone:  timezone,
 		Version:   version.Version,
 		GitCommit: version.GitCommit,
 		BuildTime: version.BuildTime,

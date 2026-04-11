@@ -1,0 +1,15 @@
+{
+  "title": "会话管理",
+  "activeSessions": "共 {{total}} 个活跃会话",
+  "user": "用户",
+  "ipAddress": "IP 地址",
+  "device": "设备",
+  "loginTime": "登录时间",
+  "lastActive": "最后活跃",
+  "current": "当前",
+  "kick": "踢出",
+  "kickTitle": "踢出会话",
+  "kickConfirm": "确定要强制下线用户 \"{{username}}\" 的这个会话吗？该用户将立即被登出。",
+  "confirmKick": "确认踢出",
+  "noSessions": "暂无活跃会话"
+}

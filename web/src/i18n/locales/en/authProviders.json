@@ -1,0 +1,26 @@
+{
+  "title": "Auth Providers",
+  "provider": "Provider",
+  "clientId": "Client ID",
+  "clientSecret": "Client Secret",
+  "callbackUrl": "Callback URL",
+  "emptyTitle": "No auth providers",
+  "sheet": {
+    "editTitle": "Edit Provider — {{name}}",
+    "editDescription": "Configure {{name}} OAuth parameters"
+  },
+  "form": {
+    "clientIdPlaceholder": "OAuth Client ID",
+    "clientSecretPlaceholderConfigured": "Leave blank to keep unchanged",
+    "clientSecretPlaceholderEmpty": "OAuth Client Secret",
+    "clientSecretConfigured": "Configured. Leave blank to keep current value",
+    "clientSecretNotConfigured": "Not configured",
+    "scopesPlaceholder": "e.g. user:email,read:user",
+    "scopesDescription": "Separate multiple scopes with commas. Leave blank for defaults",
+    "callbackUrlPlaceholder": "https://your-domain.com/oauth/callback",
+    "callbackUrlDescription": "OAuth callback URL, must match the OAuth App configuration"
+  },
+  "validation": {
+    "clientIdRequired": "Client ID is required"
+  }
+}

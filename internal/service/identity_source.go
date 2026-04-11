@@ -19,8 +19,8 @@ import (
 )
 
 var (
-	ErrUnsupportedType = errors.New("unsupported identity source type, must be oidc or ldap")
-	ErrSourceNotFound  = errors.New("identity source not found")
+	ErrUnsupportedType = errors.New("error.identity.unsupported_type")
+	ErrSourceNotFound  = errors.New("error.identity.not_found")
 )
 
 // DomainCheckResult is the result of checking an email domain against identity sources.
@@ -392,14 +392,14 @@ func (s *IdentitySourceService) AuthenticateByPassword(username, password string
 		return user, nil
 	}
 
-	return nil, errors.New("no matching LDAP source authenticated this user")
+	return nil, errors.New("error.identity.ldap_auth_failed")
 }
 
 // CheckDomain checks if the email domain matches an enabled identity source.
 func (s *IdentitySourceService) CheckDomain(email string) (*DomainCheckResult, error) {
 	domain := ExtractDomain(email)
 	if domain == "" {
-		return nil, errors.New("invalid email")
+		return nil, errors.New("error.identity.invalid_email")
 	}
 
 	source, err := s.repo.FindByDomain(domain)

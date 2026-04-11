@@ -13,6 +13,8 @@ export interface User {
   email: string
   phone: string
   avatar: string
+  locale: string
+  timezone: string
   role: RoleInfo
   isActive: boolean
   twoFactorEnabled: boolean

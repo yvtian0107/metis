@@ -108,6 +108,8 @@ type ExecuteRequest struct {
 
 	// Site
 	SiteName string `json:"site_name" binding:"required"`
+	Locale   string `json:"locale"`
+	Timezone string `json:"timezone"`
 
 	// Admin
 	AdminUsername string `json:"admin_username" binding:"required"`
@@ -202,6 +204,12 @@ func (h *InstallHandler) Execute(c *gin.Context) {
 	// 7. Set site name
 	if err := seed.SetSiteName(db.DB, req.SiteName); err != nil {
 		Fail(c, http.StatusInternalServerError, "failed to set site name: "+err.Error())
+		return
+	}
+
+	// Set locale and timezone
+	if err := seed.SetLocaleTimezone(db.DB, req.Locale, req.Timezone); err != nil {
+		Fail(c, http.StatusInternalServerError, "failed to set locale/timezone: "+err.Error())
 		return
 	}
 

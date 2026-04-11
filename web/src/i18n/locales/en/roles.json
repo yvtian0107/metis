@@ -1,0 +1,34 @@
+{
+  "title": "Role Management",
+  "createRole": "New Role",
+  "editRole": "Edit Role",
+  "searchPlaceholder": "Search role name or code",
+  "roleName": "Role Name",
+  "roleCode": "Role Code",
+  "emptyTitle": "No Roles",
+  "emptyDescription": "Click \"New Role\" to add the first role",
+  "builtIn": "Built-in",
+  "custom": "Custom",
+  "permissions": "Permissions",
+  "confirmDeleteTitle": "Confirm Deletion",
+  "confirmDeleteDescription": "Are you sure you want to delete role \"{{name}}\"? This action cannot be undone.",
+  "sheet": {
+    "createTitle": "New Role",
+    "editTitle": "Edit Role",
+    "createDescription": "Fill in the role information to create a new role",
+    "editDescription": "Modify role information"
+  },
+  "form": {
+    "namePlaceholder": "e.g. Administrator",
+    "codePlaceholder": "e.g. admin",
+    "descriptionPlaceholder": "Role description (optional)"
+  },
+  "validation": {
+    "nameRequired": "Role name is required",
+    "codeRequired": "Role code is required"
+  },
+  "permission": {
+    "title": "Assign Permissions — {{name}}",
+    "selectedCount": "{{checked}} / {{total}} selected"
+  }
+}

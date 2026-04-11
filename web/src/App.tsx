@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react"
+import { useTranslation } from "react-i18next"
 import { createBrowserRouter, Navigate, RouterProvider } from "react-router"
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { PermissionGuard } from "@/components/permission-guard"
@@ -6,6 +7,8 @@ import { useAuthStore } from "@/stores/auth"
 import { useMenuStore } from "@/stores/menu"
 import { TwoFactorSetupDialog } from "@/components/two-factor-setup-dialog"
 import { getAppRoutes } from "@/apps/registry"
+import { setSiteLocaleTimezone } from "@/lib/utils"
+import { changeLocale } from "@/i18n"
 // Pluggable app module imports — must be after registry is defined
 import "@/apps/license/module"
 import LoginPage from "@/pages/login"
@@ -30,6 +33,7 @@ async function checkInstallStatus(): Promise<boolean> {
 }
 
 function InstallGuard() {
+  const { t } = useTranslation()
   const [checked, setChecked] = useState(installChecked)
   const [installed, setInstalled] = useState(isInstalled)
 
@@ -45,7 +49,7 @@ function InstallGuard() {
   if (!checked) {
     return (
       <div className="flex min-h-screen items-center justify-center text-muted-foreground">
-        加载中...
+        {t("loading")}
       </div>
     )
   }
@@ -58,13 +62,14 @@ function InstallGuard() {
 }
 
 function AuthGuard() {
+  const { t } = useTranslation()
   const { user, initialized, requireTwoFactorSetup } = useAuthStore()
   const [tfaOpen, setTfaOpen] = useState(true)
 
   if (!initialized) {
     return (
       <div className="flex min-h-screen items-center justify-center text-muted-foreground">
-        加载中...
+        {t("loading")}
       </div>
     )
   }
@@ -78,9 +83,9 @@ function AuthGuard() {
     return (
       <div className="flex min-h-screen items-center justify-center bg-background">
         <div className="text-center space-y-4">
-          <h2 className="text-lg font-semibold">需要设置两步验证</h2>
+          <h2 className="text-lg font-semibold">{t("twoFactorRequired.title")}</h2>
           <p className="text-sm text-muted-foreground">
-            系统管理员要求所有用户启用两步验证后才能继续使用。
+            {t("twoFactorRequired.description")}
           </p>
           <TwoFactorSetupDialog
             open={tfaOpen}
@@ -124,6 +129,7 @@ const router = createBrowserRouter([
     async lazy() {
       const { default: InstallPage } = await import("@/pages/install")
       function InstallRoute() {
+        const { t } = useTranslation()
         const [checked, setChecked] = useState(installChecked)
         const [installed, setInstalled] = useState(isInstalled)
         useEffect(() => {
@@ -137,7 +143,7 @@ const router = createBrowserRouter([
         if (!checked) {
           return (
             <div className="flex min-h-screen items-center justify-center text-muted-foreground">
-              加载中...
+              {t("loading")}
             </div>
           )
         }
@@ -289,12 +295,30 @@ const router = createBrowserRouter([
 function AppInit({ children }: { children: React.ReactNode }) {
   const init = useAuthStore((s) => s.init)
   const initialized = useAuthStore((s) => s.initialized)
+  const user = useAuthStore((s) => s.user)
 
   useEffect(() => {
     if (!initialized) {
       init()
     }
   }, [init, initialized])
+
+  // Fetch site-info to get system locale/timezone
+  useEffect(() => {
+    fetch("/api/v1/site-info")
+      .then((res) => res.json())
+      .then((body) => {
+        if (body.data) {
+          setSiteLocaleTimezone(body.data.locale || "", body.data.timezone || "")
+          // Apply locale: user.locale → system.locale → keep current
+          const effectiveLocale = user?.locale || body.data.locale
+          if (effectiveLocale) {
+            changeLocale(effectiveLocale)
+          }
+        }
+      })
+      .catch(() => {})
+  }, [user?.locale])
 
   return <>{children}</>
 }

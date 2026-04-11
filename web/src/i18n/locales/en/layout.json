@@ -1,0 +1,42 @@
+{
+  "passwordExpired": "Your password has expired, please change it",
+  "changePassword": "Change Password",
+  "twoFactor": "Two-Factor Auth",
+  "preferences": "Preferences",
+  "logout": "Logout",
+  "pref": {
+    "title": "Preferences",
+    "description": "Set your language and timezone",
+    "language": "Language",
+    "timezone": "Timezone",
+    "timezonePlaceholder": "Search timezone...",
+    "saved": "Preferences saved"
+  },
+  "notifications": {
+    "title": "Notifications",
+    "markAllRead": "Mark All Read",
+    "noNotifications": "No notifications",
+    "justNow": "Just now",
+    "minutesAgo": "{{count}} min ago",
+    "hoursAgo": "{{count}} hr ago",
+    "daysAgo": "{{count}} days ago"
+  },
+  "menu": {
+    "system": "System",
+    "system:user:list": "Users",
+    "system:role:list": "Roles",
+    "system:menu:list": "Menus",
+    "system:session:list": "Sessions",
+    "system:settings:list": "Settings",
+    "system:task:list": "Tasks",
+    "system:announcement:list": "Announcements",
+    "system:channel:list": "Channels",
+    "system:auth-provider:list": "Auth Providers",
+    "system:audit-log:list": "Audit Logs",
+    "system:identity-source:list": "Identity Sources",
+    "license": "License",
+    "license:product:list": "Products",
+    "license:licensee:list": "Licensees",
+    "license:license:list": "Licenses"
+  }
+}

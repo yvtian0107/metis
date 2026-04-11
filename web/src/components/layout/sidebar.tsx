@@ -1,6 +1,7 @@
 import { useMemo } from "react"
 import { useLocation, useNavigate } from "react-router"
 import { useQuery } from "@tanstack/react-query"
+import { useTranslation } from "react-i18next"
 import { Info } from "lucide-react"
 import { useMenuStore, type MenuItem } from "@/stores/menu"
 import { useUiStore } from "@/stores/ui"
@@ -18,6 +19,7 @@ interface NavApp {
   label: string
   icon: string
   path: string
+  permission: string
   children: MenuItem[]
 }
 
@@ -36,6 +38,7 @@ function buildNavApps(menuTree: MenuItem[]): NavApp[] {
         label: item.name,
         icon: item.icon,
         path: firstPath,
+        permission: item.permission,
         children,
       })
     } else if (item.type === "menu") {
@@ -45,6 +48,7 @@ function buildNavApps(menuTree: MenuItem[]): NavApp[] {
         label: item.name,
         icon: item.icon,
         path: item.path || "/",
+        permission: item.permission,
         children: [item],
       })
     }
@@ -74,6 +78,7 @@ function findActiveNavApp(apps: NavApp[], pathname: string): NavApp | null {
 }
 
 export function Sidebar() {
+  const { t } = useTranslation("layout")
   const { pathname } = useLocation()
   const navigate = useNavigate()
   const collapsed = useUiStore((s) => s.sidebarCollapsed)
@@ -119,7 +124,7 @@ export function Sidebar() {
                 </button>
               </TooltipTrigger>
               <TooltipContent side="right" sideOffset={8}>
-                {app.label}
+                {t(`menu.${app.permission}`, { defaultValue: app.label })}
               </TooltipContent>
             </Tooltip>
           )
@@ -161,7 +166,7 @@ export function Sidebar() {
               )}
             >
               <Icon className="h-4 w-4 shrink-0" />
-              <span className="truncate">{item.name}</span>
+              <span className="truncate">{t(`menu.${item.permission ?? ""}`, { defaultValue: item.name })}</span>
             </button>
           )
         })}

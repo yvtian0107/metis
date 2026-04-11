@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react"
 import { useForm } from "react-hook-form"
+import { useTranslation } from "react-i18next"
 import { z } from "zod"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
@@ -47,21 +48,24 @@ export interface LicenseeItem {
   updatedAt: string
 }
 
-const schema = z.object({
-  name: z.string().min(1, "名称不能为空").max(128),
-  contactName: z.string().max(64).optional().default(""),
-  contactPhone: z.string().max(32).optional().default(""),
-  contactEmail: z.string().max(128).optional().default(""),
-  notes: z.string().optional().default(""),
-  address: z.string().optional().default(""),
-  taxId: z.string().optional().default(""),
-  bankName: z.string().optional().default(""),
-  bankAccount: z.string().optional().default(""),
-  swift: z.string().optional().default(""),
-  iban: z.string().optional().default(""),
-})
+function useLicenseeSchema() {
+  const { t } = useTranslation("license")
+  return z.object({
+    name: z.string().min(1, t("validation.nameRequired")).max(128),
+    contactName: z.string().max(64).optional().default(""),
+    contactPhone: z.string().max(32).optional().default(""),
+    contactEmail: z.string().max(128).optional().default(""),
+    notes: z.string().optional().default(""),
+    address: z.string().optional().default(""),
+    taxId: z.string().optional().default(""),
+    bankName: z.string().optional().default(""),
+    bankAccount: z.string().optional().default(""),
+    swift: z.string().optional().default(""),
+    iban: z.string().optional().default(""),
+  })
+}
 
-type FormValues = z.infer<typeof schema>
+type FormValues = z.infer<ReturnType<typeof useLicenseeSchema>>
 
 interface LicenseeSheetProps {
   open: boolean
@@ -70,15 +74,17 @@ interface LicenseeSheetProps {
 }
 
 export function LicenseeSheet({ open, onOpenChange, licensee }: LicenseeSheetProps) {
+  const { t } = useTranslation(["license", "common"])
   const queryClient = useQueryClient()
   const isEditing = licensee !== null
+  const schema = useLicenseeSchema()
 
   const bi = licensee?.businessInfo
   const hasBizData = !!(bi?.address || bi?.taxId || bi?.bankName || bi?.bankAccount || bi?.swift || bi?.iban)
   const [bizOpen, setBizOpen] = useState(hasBizData)
 
   const form = useForm<FormValues>({
-    resolver: zodResolver(schema),
+    resolver: zodResolver(schema) as any,
     defaultValues: {
       name: "", contactName: "", contactPhone: "", contactEmail: "",
       notes: "", address: "", taxId: "", bankName: "", bankAccount: "", swift: "", iban: "",
@@ -129,7 +135,7 @@ export function LicenseeSheet({ open, onOpenChange, licensee }: LicenseeSheetPro
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["license-licensees"] })
       onOpenChange(false)
-      toast.success("授权主体创建成功")
+      toast.success(t("license:licensees.createSuccess"))
     },
     onError: (err) => toast.error(err.message),
   })
@@ -145,7 +151,7 @@ export function LicenseeSheet({ open, onOpenChange, licensee }: LicenseeSheetPro
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["license-licensees"] })
       onOpenChange(false)
-      toast.success("授权主体更新成功")
+      toast.success(t("license:licensees.updateSuccess"))
     },
     onError: (err) => toast.error(err.message),
   })
@@ -164,9 +170,9 @@ export function LicenseeSheet({ open, onOpenChange, licensee }: LicenseeSheetPro
     <Sheet open={open} onOpenChange={handleOpenChange}>
       <SheetContent className="sm:max-w-lg overflow-y-auto">
         <SheetHeader>
-          <SheetTitle>{isEditing ? "编辑授权主体" : "新增授权主体"}</SheetTitle>
+          <SheetTitle>{isEditing ? t("license:licensees.editLicensee") : t("license:licensees.create")}</SheetTitle>
           <SheetDescription className="sr-only">
-            {isEditing ? "编辑授权主体" : "新增授权主体"}
+            {isEditing ? t("license:licensees.editLicensee") : t("license:licensees.create")}
           </SheetDescription>
         </SheetHeader>
         <Form {...form}>
@@ -177,9 +183,9 @@ export function LicenseeSheet({ open, onOpenChange, licensee }: LicenseeSheetPro
               name="name"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>主体名称</FormLabel>
+                  <FormLabel>{t("license:licensees.entityName")}</FormLabel>
                   <FormControl>
-                    <Input placeholder="例如：某某科技有限公司" {...field} />
+                    <Input placeholder={t("license:licensees.entityNamePlaceholder")} {...field} />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -190,9 +196,9 @@ export function LicenseeSheet({ open, onOpenChange, licensee }: LicenseeSheetPro
               name="notes"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>备注</FormLabel>
+                  <FormLabel>{t("license:licenses.notes")}</FormLabel>
                   <FormControl>
-                    <Textarea placeholder="备注信息（可选）" rows={2} {...field} />
+                    <Textarea placeholder={t("license:licensees.notesPlaceholder")} rows={2} {...field} />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -201,16 +207,16 @@ export function LicenseeSheet({ open, onOpenChange, licensee }: LicenseeSheetPro
 
             {/* Contact info */}
             <div className="space-y-3">
-              <h4 className="text-sm font-medium text-muted-foreground">联系信息</h4>
+              <h4 className="text-sm font-medium text-muted-foreground">{t("license:licensees.contactInfo")}</h4>
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <FormField
                   control={form.control}
                   name="contactName"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>联系人</FormLabel>
+                      <FormLabel>{t("license:licensees.contactNameLabel")}</FormLabel>
                       <FormControl>
-                        <Input placeholder="姓名" {...field} />
+                        <Input placeholder={t("license:licensees.contactNamePlaceholder")} {...field} />
                       </FormControl>
                       <FormMessage />
                     </FormItem>
@@ -221,9 +227,9 @@ export function LicenseeSheet({ open, onOpenChange, licensee }: LicenseeSheetPro
                   name="contactPhone"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>电话</FormLabel>
+                      <FormLabel>{t("license:licensees.phone")}</FormLabel>
                       <FormControl>
-                        <Input placeholder="电话号码" {...field} />
+                        <Input placeholder={t("license:licensees.phonePlaceholder")} {...field} />
                       </FormControl>
                       <FormMessage />
                     </FormItem>
@@ -235,7 +241,7 @@ export function LicenseeSheet({ open, onOpenChange, licensee }: LicenseeSheetPro
                 name="contactEmail"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>邮箱</FormLabel>
+                    <FormLabel>{t("license:licensees.email")}</FormLabel>
                     <FormControl>
                       <Input placeholder="email@example.com" {...field} />
                     </FormControl>
@@ -253,7 +259,7 @@ export function LicenseeSheet({ open, onOpenChange, licensee }: LicenseeSheetPro
                 onClick={() => setBizOpen(!bizOpen)}
               >
                 <ChevronDown className={`h-4 w-4 transition-transform ${bizOpen ? "" : "-rotate-90"}`} />
-                企业信息
+                {t("license:licensees.businessInfo")}
               </button>
               {bizOpen && (
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -262,9 +268,9 @@ export function LicenseeSheet({ open, onOpenChange, licensee }: LicenseeSheetPro
                     name="address"
                     render={({ field }) => (
                       <FormItem className="sm:col-span-2">
-                        <FormLabel>地址</FormLabel>
+                        <FormLabel>{t("license:licensees.address")}</FormLabel>
                         <FormControl>
-                          <Input placeholder="企业地址" {...field} />
+                          <Input placeholder={t("license:licensees.addressPlaceholder")} {...field} />
                         </FormControl>
                         <FormMessage />
                       </FormItem>
@@ -275,9 +281,9 @@ export function LicenseeSheet({ open, onOpenChange, licensee }: LicenseeSheetPro
                     name="taxId"
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel>税号</FormLabel>
+                        <FormLabel>{t("license:licensees.taxId")}</FormLabel>
                         <FormControl>
-                          <Input placeholder="税号 / EIN / VAT" {...field} />
+                          <Input placeholder={t("license:licensees.taxIdPlaceholder")} {...field} />
                         </FormControl>
                         <FormMessage />
                       </FormItem>
@@ -288,9 +294,9 @@ export function LicenseeSheet({ open, onOpenChange, licensee }: LicenseeSheetPro
                     name="bankName"
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel>开户行</FormLabel>
+                        <FormLabel>{t("license:licensees.bankName")}</FormLabel>
                         <FormControl>
-                          <Input placeholder="银行名称" {...field} />
+                          <Input placeholder={t("license:licensees.bankNamePlaceholder")} {...field} />
                         </FormControl>
                         <FormMessage />
                       </FormItem>
@@ -301,9 +307,9 @@ export function LicenseeSheet({ open, onOpenChange, licensee }: LicenseeSheetPro
                     name="bankAccount"
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel>银行账号</FormLabel>
+                        <FormLabel>{t("license:licensees.bankAccount")}</FormLabel>
                         <FormControl>
-                          <Input placeholder="银行账号" {...field} />
+                          <Input placeholder={t("license:licensees.bankAccountPlaceholder")} {...field} />
                         </FormControl>
                         <FormMessage />
                       </FormItem>
@@ -316,7 +322,7 @@ export function LicenseeSheet({ open, onOpenChange, licensee }: LicenseeSheetPro
                       <FormItem>
                         <FormLabel>SWIFT</FormLabel>
                         <FormControl>
-                          <Input placeholder="SWIFT 代码" {...field} />
+                          <Input placeholder={t("license:licensees.swiftPlaceholder")} {...field} />
                         </FormControl>
                         <FormMessage />
                       </FormItem>
@@ -341,7 +347,7 @@ export function LicenseeSheet({ open, onOpenChange, licensee }: LicenseeSheetPro
 
             <SheetFooter>
               <Button type="submit" size="sm" disabled={isPending}>
-                {isPending ? "保存中..." : isEditing ? "保存" : "创建"}
+                {isPending ? t("common:saving") : isEditing ? t("common:save") : t("common:create")}
               </Button>
             </SheetFooter>
           </form>

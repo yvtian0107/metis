@@ -1,0 +1,71 @@
+{
+  "title": "身份源管理",
+  "createSource": "新建身份源",
+  "domain": "域名",
+  "emptyTitle": "暂无身份源",
+  "emptyDescription": "点击「新建身份源」配置第一个身份源",
+  "testConnection": "测试连接",
+  "testConnectionSuccess": "连接测试成功",
+  "testConnectionFailed": "连接测试失败",
+  "testConnectionFailedDetail": "连接测试失败: {{message}}",
+  "deleteSuccess": "身份源已删除",
+  "createSuccess": "身份源创建成功",
+  "updateSuccess": "身份源更新成功",
+  "saveFirstBeforeTest": "请先保存身份源后再测试",
+  "testFailed": "测试失败",
+  "confirmDeleteTitle": "确认删除",
+  "confirmDeleteDescription": "确定要删除身份源 \u201c{{name}}\u201d 吗？此操作不可撤销。",
+  "sheet": {
+    "createTitle": "新建身份源",
+    "editTitle": "编辑身份源",
+    "createDescription": "配置新的身份源",
+    "editDescription": "修改身份源配置"
+  },
+  "form": {
+    "namePlaceholder": "例如：公司 Okta SSO",
+    "typeImmutable": "类型创建后不可更改",
+    "typePlaceholder": "请选择类型",
+    "domainPlaceholder": "例如：acme.com（多个用逗号分隔）",
+    "domainDescription": "匹配邮箱域名的用户将使用此身份源登录",
+    "conflictStrategy": "账号冲突策略",
+    "conflictFail": "拒绝登录",
+    "conflictLink": "自动关联",
+    "defaultRoleId": "默认角色 ID",
+    "defaultRoleIdPlaceholder": "0 表示使用系统默认角色",
+    "forceSso": "强制 SSO 登录"
+  },
+  "oidc": {
+    "title": "OIDC 配置",
+    "issuerUrl": "Issuer URL",
+    "clientId": "Client ID",
+    "clientSecret": "Client Secret",
+    "clientSecretPlaceholderEdit": "留空则不修改",
+    "clientSecretPlaceholderCreate": "your-client-secret",
+    "callbackUrl": "Callback URL",
+    "callbackUrlDescription": "此地址需要配置到 OIDC 提供商",
+    "usePkce": "启用 PKCE",
+    "scopes": "Scopes",
+    "scopesDescription": "多个 scope 用逗号分隔"
+  },
+  "ldap": {
+    "title": "LDAP 配置",
+    "serverUrl": "Server URL",
+    "bindDn": "Bind DN",
+    "bindPassword": "Bind Password",
+    "bindPasswordPlaceholderEdit": "留空则不修改",
+    "bindPasswordPlaceholderCreate": "bind password",
+    "searchBase": "Search Base",
+    "userFilter": "User Filter",
+    "useTls": "启用 TLS",
+    "skipVerify": "跳过证书验证"
+  },
+  "validation": {
+    "nameRequired": "名称不能为空",
+    "domainRequired": "域名不能为空",
+    "issuerUrlRequired": "Issuer URL 不能为空",
+    "clientIdRequired": "Client ID 不能为空",
+    "serverUrlRequired": "Server URL 不能为空",
+    "bindDnRequired": "Bind DN 不能为空",
+    "searchBaseRequired": "Search Base 不能为空"
+  }
+}

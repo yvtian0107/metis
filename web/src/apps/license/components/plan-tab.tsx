@@ -1,5 +1,6 @@
 import { useState } from "react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
+import { useTranslation } from "react-i18next"
 import { AlertTriangle, Pencil, Plus, Star, Trash2 } from "lucide-react"
 import { api } from "@/lib/api"
 import { toast } from "sonner"
@@ -54,6 +55,7 @@ type ModuleValues = { enabled?: boolean; [featureKey: string]: unknown }
 function getCompatibilityWarnings(
   values: Record<string, unknown>,
   schema: ConstraintModule[],
+  t: (key: string, opts?: Record<string, string>) => string,
 ): string[] {
   const warnings: string[] = []
   const schemaKeys = new Set(schema.map((m) => m.key))
@@ -62,12 +64,12 @@ function getCompatibilityWarnings(
   for (const key of schemaKeys) {
     if (!valueKeys.has(key)) {
       const mod = schema.find((m) => m.key === key)
-      warnings.push(`缺少模块: ${mod?.label ?? key}`)
+      warnings.push(t("license:plans.missingModule", { label: mod?.label ?? key }))
     }
   }
   for (const key of valueKeys) {
     if (!schemaKeys.has(key)) {
-      warnings.push(`多余模块: ${key}`)
+      warnings.push(t("license:plans.extraModule", { key }))
     }
   }
   return warnings
@@ -76,17 +78,18 @@ function getCompatibilityWarnings(
 function constraintPreview(
   values: Record<string, ModuleValues>,
   schema: ConstraintModule[],
+  t: (key: string, opts?: Record<string, string>) => string,
 ): string {
   const parts: string[] = []
   for (const mod of schema) {
     const modValues = values[mod.key]
     if (!modValues) continue
     if (!modValues.enabled) {
-      parts.push(`${mod.label}: 关`)
+      parts.push(t("license:plans.moduleOff", { label: mod.label }))
       continue
     }
     if (mod.features.length === 0) {
-      parts.push(`${mod.label}: 开`)
+      parts.push(t("license:plans.moduleOn", { label: mod.label }))
     } else {
       const featureParts = mod.features
         .filter((f) => modValues[f.key] !== undefined)
@@ -98,7 +101,7 @@ function constraintPreview(
       parts.push(`${mod.label}(${featureParts.join(", ")})`)
     }
   }
-  return parts.join(" | ") || "无配置"
+  return parts.join(" | ") || t("license:plans.noConfig")
 }
 
 export function PlanTab({
@@ -108,6 +111,7 @@ export function PlanTab({
   canManage,
   onRequestDefineConstraints,
 }: PlanTabProps) {
+  const { t } = useTranslation(["license", "common"])
   const queryClient = useQueryClient()
   const [formOpen, setFormOpen] = useState(false)
   const [editing, setEditing] = useState<PlanItem | null>(null)
@@ -119,7 +123,7 @@ export function PlanTab({
     mutationFn: (id: number) => api.delete(`/api/v1/license/plans/${id}`),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["license-product"] })
-      toast.success("套餐已删除")
+      toast.success(t("license:plans.deleteSuccess"))
       setDeleteTarget(null)
     },
     onError: (err) => toast.error(err.message),
@@ -130,7 +134,7 @@ export function PlanTab({
       api.patch(`/api/v1/license/plans/${id}/default`, { isDefault: true }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["license-product"] })
-      toast.success("已设为默认套餐")
+      toast.success(t("license:plans.setDefaultSuccess"))
     },
     onError: (err) => toast.error(err.message),
   })
@@ -153,12 +157,12 @@ export function PlanTab({
           <>
             {!hasSchema && onRequestDefineConstraints && (
               <Button variant="outline" size="sm" onClick={onRequestDefineConstraints}>
-                约束定义
+                {t("license:products.constraintDef")}
               </Button>
             )}
             <Button size="sm" onClick={handleCreate} disabled={!hasSchema}>
               <Plus className="mr-1.5 h-4 w-4" />
-              添加套餐
+              {t("license:plans.addPlan")}
             </Button>
           </>
         )}
@@ -166,7 +170,7 @@ export function PlanTab({
 
       {plans.length === 0 ? (
         <div className="rounded-lg border border-dashed px-4 py-8 text-center">
-          <p className="font-medium">{hasSchema ? "还没有套餐" : "请先定义约束"}</p>
+          <p className="font-medium">{hasSchema ? t("license:plans.noPlans") : t("license:plans.defineConstraintsFirst")}</p>
         </div>
       ) : (
         <div className="space-y-3">
@@ -174,6 +178,7 @@ export function PlanTab({
             const warnings = getCompatibilityWarnings(
               plan.constraintValues as Record<string, unknown>,
               modules,
+              t,
             )
             return (
               <div key={plan.id} className="flex items-center justify-between gap-4 rounded-lg border px-4 py-4">
@@ -183,13 +188,13 @@ export function PlanTab({
                     {plan.isDefault && (
                       <Badge variant="default" className="gap-1">
                         <Star className="h-3 w-3" />
-                        默认
+                        {t("license:plans.default")}
                       </Badge>
                     )}
                     {warnings.length > 0 && (
                       <Badge variant="destructive" className="gap-1" title={warnings.join("\n")}>
                         <AlertTriangle className="h-3 w-3" />
-                        需更新
+                        {t("license:plans.needsUpdate")}
                       </Badge>
                     )}
                   </div>
@@ -198,6 +203,7 @@ export function PlanTab({
                       {constraintPreview(
                         plan.constraintValues as Record<string, ModuleValues>,
                         modules,
+                        t,
                       )}
                     </p>
                   )}
@@ -212,7 +218,7 @@ export function PlanTab({
                         disabled={defaultMutation.isPending}
                         className="text-xs"
                       >
-                        设为默认
+                        {t("license:plans.setDefault")}
                       </Button>
                     )}
                     <Button variant="ghost" size="icon" onClick={() => handleEdit(plan)}>
@@ -238,18 +244,18 @@ export function PlanTab({
       <AlertDialog open={!!deleteTarget} onOpenChange={() => setDeleteTarget(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>删除套餐</AlertDialogTitle>
+            <AlertDialogTitle>{t("license:plans.deleteTitle")}</AlertDialogTitle>
             <AlertDialogDescription>
-              确定删除套餐「{deleteTarget?.name}」？此操作不可撤销。
+              {t("license:plans.deleteDesc", { name: deleteTarget?.name ?? "" })}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>取消</AlertDialogCancel>
+            <AlertDialogCancel>{t("common:cancel")}</AlertDialogCancel>
             <AlertDialogAction
               onClick={() => deleteTarget && deleteMutation.mutate(deleteTarget.id)}
               disabled={deleteMutation.isPending}
             >
-              删除
+              {t("common:delete")}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

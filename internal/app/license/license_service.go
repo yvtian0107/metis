@@ -13,12 +13,12 @@ import (
 )
 
 var (
-	ErrLicenseNotFound        = errors.New("license not found")
-	ErrLicenseAlreadyRevoked  = errors.New("许可已吊销")
-	ErrProductNotPublished    = errors.New("只能对已发布商品签发许可")
-	ErrLicenseeNotActive      = errors.New("授权主体必须为活跃状态")
-	ErrProductKeyNotFound     = errors.New("商品密钥不存在")
-	ErrRevokedLicenseNoExport = errors.New("已吊销的许可不能导出")
+	ErrLicenseNotFound        = errors.New("error.license.not_found")
+	ErrLicenseAlreadyRevoked  = errors.New("error.license.already_revoked")
+	ErrProductNotPublished    = errors.New("error.license.product_not_published")
+	ErrLicenseeNotActive      = errors.New("error.license.licensee_not_active")
+	ErrProductKeyNotFound     = errors.New("error.license.product_key_not_found")
+	ErrRevokedLicenseNoExport = errors.New("error.license.revoked_no_export")
 )
 
 type LicenseService struct {

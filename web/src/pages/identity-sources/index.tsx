@@ -1,4 +1,5 @@
 import { useState } from "react"
+import { useTranslation } from "react-i18next"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { Plus, Pencil, Trash2, Fingerprint, Plug, Loader2 } from "lucide-react"
 import { api } from "@/lib/api"
@@ -35,7 +36,12 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog"
 import { formatDateTime } from "@/lib/utils"
+import { addKernelNamespace } from "@/i18n"
+import zhCNIdentitySources from "@/i18n/locales/zh-CN/identitySources.json"
+import enIdentitySources from "@/i18n/locales/en/identitySources.json"
 import { IdentitySourceSheet, type IdentitySourceItem } from "./identity-source-sheet"
+
+addKernelNamespace("identitySources", zhCNIdentitySources, enIdentitySources)
 
 const TYPE_LABELS: Record<string, string> = {
   oidc: "OIDC",
@@ -43,6 +49,7 @@ const TYPE_LABELS: Record<string, string> = {
 }
 
 export function Component() {
+  const { t } = useTranslation(["identitySources", "common"])
   const queryClient = useQueryClient()
   const [formOpen, setFormOpen] = useState(false)
   const [editing, setEditing] = useState<IdentitySourceItem | null>(null)
@@ -60,7 +67,7 @@ export function Component() {
     mutationFn: (id: number) => api.delete(`/api/v1/identity-sources/${id}`),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["identity-sources"] })
-      toast.success("身份源已删除")
+      toast.success(t("deleteSuccess"))
     },
     onError: (err) => toast.error(err.message),
   })
@@ -78,11 +85,11 @@ export function Component() {
       const res = await api.post<{ success: boolean; message: string }>(
         `/api/v1/identity-sources/${id}/test`,
       )
-      if (!res.success) throw new Error(res.message || "连接测试失败")
+      if (!res.success) throw new Error(res.message || t("testConnectionFailed"))
       return res
     },
-    onSuccess: (res) => toast.success(res.message || "连接测试成功"),
-    onError: (err) => toast.error(`连接测试失败: ${err.message}`),
+    onSuccess: (res) => toast.success(res.message || t("testConnectionSuccess")),
+    onError: (err) => toast.error(t("testConnectionFailedDetail", { message: err.message })),
   })
 
   function handleCreate() {
@@ -98,11 +105,11 @@ export function Component() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold">身份源管理</h2>
+        <h2 className="text-lg font-semibold">{t("title")}</h2>
         {canCreate && (
           <Button size="sm" onClick={handleCreate}>
             <Plus className="mr-1.5 h-4 w-4" />
-            新建身份源
+            {t("createSource")}
           </Button>
         )}
       </div>
@@ -112,12 +119,12 @@ export function Component() {
           <TableHeader>
             <TableRow>
               <TableHead className="w-16">ID</TableHead>
-              <TableHead className="min-w-[180px]">名称</TableHead>
-              <TableHead className="w-[100px]">类型</TableHead>
-              <TableHead className="min-w-[220px]">域名</TableHead>
-              <TableHead className="w-[100px]">状态</TableHead>
-              <TableHead className="w-[150px]">创建时间</TableHead>
-              <DataTableActionsHead className="min-w-[244px]">操作</DataTableActionsHead>
+              <TableHead className="min-w-[180px]">{t("common:name")}</TableHead>
+              <TableHead className="w-[100px]">{t("common:type")}</TableHead>
+              <TableHead className="min-w-[220px]">{t("domain")}</TableHead>
+              <TableHead className="w-[100px]">{t("common:status")}</TableHead>
+              <TableHead className="w-[150px]">{t("common:createdAt")}</TableHead>
+              <DataTableActionsHead className="min-w-[244px]">{t("common:actions")}</DataTableActionsHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -127,8 +134,8 @@ export function Component() {
               <DataTableEmptyRow
                 colSpan={7}
                 icon={Fingerprint}
-                title="暂无身份源"
-                description={canCreate ? "点击「新建身份源」配置第一个身份源" : undefined}
+                title={t("emptyTitle")}
+                description={canCreate ? t("emptyDescription") : undefined}
               />
             ) : (
               sources.map((item) => (
@@ -170,13 +177,13 @@ export function Component() {
                           ) : (
                             <Plug className="mr-1 h-3.5 w-3.5" />
                           )}
-                          测试连接
+                          {t("testConnection")}
                         </Button>
                       )}
                       {canUpdate && (
                         <Button variant="ghost" size="sm" className="px-2.5" onClick={() => handleEdit(item)}>
                           <Pencil className="mr-1 h-3.5 w-3.5" />
-                          编辑
+                          {t("common:edit")}
                         </Button>
                       )}
                       {canDelete && (
@@ -188,20 +195,20 @@ export function Component() {
                               className="px-2.5 text-destructive hover:text-destructive"
                             >
                               <Trash2 className="mr-1 h-3.5 w-3.5" />
-                              删除
+                              {t("common:delete")}
                             </Button>
                           </AlertDialogTrigger>
                           <AlertDialogContent>
                             <AlertDialogHeader>
-                              <AlertDialogTitle>确认删除</AlertDialogTitle>
+                              <AlertDialogTitle>{t("confirmDeleteTitle")}</AlertDialogTitle>
                               <AlertDialogDescription>
-                                确定要删除身份源 &ldquo;{item.name}&rdquo; 吗？此操作不可撤销。
+                                {t("confirmDeleteDescription", { name: item.name })}
                               </AlertDialogDescription>
                             </AlertDialogHeader>
                             <AlertDialogFooter>
-                              <AlertDialogCancel>取消</AlertDialogCancel>
+                              <AlertDialogCancel>{t("common:cancel")}</AlertDialogCancel>
                               <AlertDialogAction onClick={() => deleteMutation.mutate(item.id)}>
-                                删除
+                                {t("common:delete")}
                               </AlertDialogAction>
                             </AlertDialogFooter>
                           </AlertDialogContent>

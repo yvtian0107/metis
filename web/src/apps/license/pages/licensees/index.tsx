@@ -1,4 +1,5 @@
 import { useState } from "react"
+import { useTranslation } from "react-i18next"
 import { Plus, Search, Building2, Pencil, Archive, ArchiveRestore } from "lucide-react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { usePermission } from "@/hooks/use-permission"
@@ -47,12 +48,13 @@ import {
 import { formatDateTime } from "@/lib/utils"
 import { LicenseeSheet, type LicenseeItem } from "../../components/licensee-sheet"
 
-const STATUS_MAP: Record<string, { label: string; variant: "default" | "secondary" | "outline" }> = {
-  active: { label: "活跃", variant: "default" },
-  archived: { label: "已归档", variant: "outline" },
+const STATUS_VARIANTS: Record<string, "default" | "secondary" | "outline"> = {
+  active: "default",
+  archived: "outline",
 }
 
 export function Component() {
+  const { t } = useTranslation(["license", "common"])
   const queryClient = useQueryClient()
   const [formOpen, setFormOpen] = useState(false)
   const [editing, setEditing] = useState<LicenseeItem | null>(null)
@@ -78,7 +80,7 @@ export function Component() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["license-licensees"] })
       setArchiveTarget(null)
-      toast.success("状态更新成功")
+      toast.success(t("license:licensees.statusUpdateSuccess"))
     },
     onError: (err) => toast.error(err.message),
   })
@@ -111,11 +113,11 @@ export function Component() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold">授权主体</h2>
+        <h2 className="text-lg font-semibold">{t("license:licensees.title")}</h2>
         {canCreate && (
           <Button size="sm" onClick={handleCreate}>
             <Plus className="mr-1.5 h-4 w-4" />
-            新增授权主体
+            {t("license:licensees.create")}
           </Button>
         )}
       </div>
@@ -126,7 +128,7 @@ export function Component() {
             <div className="relative w-full sm:max-w-sm">
               <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
               <Input
-                placeholder="搜索名称或代码"
+                placeholder={t("license:licensees.searchPlaceholder")}
                 value={keyword}
                 onChange={(e) => setKeyword(e.target.value)}
                 className="pl-8"
@@ -134,16 +136,16 @@ export function Component() {
             </div>
             <Select value={statusFilter || "all"} onValueChange={handleStatusFilter}>
               <SelectTrigger className="w-full sm:w-[130px]">
-                <SelectValue placeholder="全部状态" />
+                <SelectValue placeholder={t("license:licensees.allStatus")} />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">全部状态</SelectItem>
-                <SelectItem value="active">活跃</SelectItem>
-                <SelectItem value="archived">已归档</SelectItem>
+                <SelectItem value="all">{t("license:licensees.allStatus")}</SelectItem>
+                <SelectItem value="active">{t("license:status.active")}</SelectItem>
+                <SelectItem value="archived">{t("license:status.archived")}</SelectItem>
               </SelectContent>
             </Select>
             <Button type="submit" variant="outline">
-              搜索
+              {t("common:search")}
             </Button>
           </form>
         </DataTableToolbarGroup>
@@ -153,11 +155,11 @@ export function Component() {
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead className="min-w-[180px]">名称</TableHead>
-              <TableHead className="w-[120px]">联系人</TableHead>
-              <TableHead className="w-[80px]">状态</TableHead>
-              <TableHead className="w-[150px]">创建时间</TableHead>
-              <DataTableActionsHead className="min-w-[140px]">操作</DataTableActionsHead>
+              <TableHead className="min-w-[180px]">{t("common:name")}</TableHead>
+              <TableHead className="w-[120px]">{t("license:licensees.contactName")}</TableHead>
+              <TableHead className="w-[80px]">{t("common:status")}</TableHead>
+              <TableHead className="w-[150px]">{t("common:createdAt")}</TableHead>
+              <DataTableActionsHead className="min-w-[140px]">{t("common:actions")}</DataTableActionsHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -167,18 +169,19 @@ export function Component() {
               <DataTableEmptyRow
                 colSpan={5}
                 icon={Building2}
-                title="暂无授权主体"
-                description={canCreate ? "点击「新增授权主体」创建第一个授权主体" : undefined}
+                title={t("license:licensees.empty")}
+                description={canCreate ? t("license:licensees.emptyHint") : undefined}
               />
             ) : (
               licensees.map((item) => {
-                const status = STATUS_MAP[item.status] ?? { label: item.status, variant: "secondary" as const }
+                const variant = STATUS_VARIANTS[item.status] ?? ("secondary" as const)
+                const statusKey = item.status as string
                 return (
                   <TableRow key={item.id}>
                     <TableCell className="font-medium">{item.name}</TableCell>
                     <TableCell className="text-sm">{item.contactName || "-"}</TableCell>
                     <TableCell>
-                      <Badge variant={status.variant}>{status.label}</Badge>
+                      <Badge variant={variant}>{t(`license:status.${statusKey}`, item.status)}</Badge>
                     </TableCell>
                     <TableCell className="text-sm text-muted-foreground whitespace-nowrap">
                       {formatDateTime(item.createdAt)}
@@ -193,7 +196,7 @@ export function Component() {
                             onClick={() => handleEdit(item)}
                           >
                             <Pencil className="mr-1 h-3.5 w-3.5" />
-                            编辑
+                            {t("common:edit")}
                           </Button>
                         )}
                         {canArchive && (
@@ -206,12 +209,12 @@ export function Component() {
                             {item.status === "active" ? (
                               <>
                                 <Archive className="mr-1 h-3.5 w-3.5" />
-                                归档
+                                {t("license:licensees.archive")}
                               </>
                             ) : (
                               <>
                                 <ArchiveRestore className="mr-1 h-3.5 w-3.5" />
-                                恢复
+                                {t("license:licensees.restore")}
                               </>
                             )}
                           </Button>
@@ -239,18 +242,18 @@ export function Component() {
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>
-              {archiveTarget?.status === "active" ? "归档授权主体" : "恢复授权主体"}
+              {archiveTarget?.status === "active" ? t("license:licensees.archiveTitle") : t("license:licensees.restoreTitle")}
             </AlertDialogTitle>
             <AlertDialogDescription>
               {archiveTarget?.status === "active"
-                ? `确定要归档「${archiveTarget?.name}」吗？归档后将不会出现在默认列表中。`
-                : `确定要恢复「${archiveTarget?.name}」吗？`}
+                ? t("license:licensees.archiveDesc", { name: archiveTarget?.name })
+                : t("license:licensees.restoreDesc", { name: archiveTarget?.name })}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>取消</AlertDialogCancel>
+            <AlertDialogCancel>{t("common:cancel")}</AlertDialogCancel>
             <AlertDialogAction onClick={confirmArchive} disabled={statusMutation.isPending}>
-              {statusMutation.isPending ? "处理中..." : "确定"}
+              {statusMutation.isPending ? t("common:processing") : t("common:confirm")}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

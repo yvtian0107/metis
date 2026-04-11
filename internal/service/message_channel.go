@@ -13,7 +13,7 @@ import (
 	"metis/internal/repository"
 )
 
-var ErrChannelNotFound = errors.New("channel not found")
+var ErrChannelNotFound = errors.New("error.channel.not_found")
 
 type MessageChannelService struct {
 	repo *repository.MessageChannelRepo

@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next"
 import { useForm } from "react-hook-form"
 import { z } from "zod"
 import { zodResolver } from "@hookform/resolvers/zod"
@@ -22,18 +23,23 @@ import {
   FormMessage,
 } from "@/components/ui/form"
 
-const schema = z.object({
-  historyRetentionDays: z.number().int().min(0, "不能小于 0"),
-  auditRetentionDaysAuth: z.number().int().min(0, "不能小于 0"),
-  auditRetentionDaysOperation: z.number().int().min(0, "不能小于 0"),
-})
+type FormValues = {
+  historyRetentionDays: number
+  auditRetentionDaysAuth: number
+  auditRetentionDaysOperation: number
+}
 
-type FormValues = z.infer<typeof schema>
-
-interface SchedulerSettings extends FormValues {}
+type SchedulerSettings = FormValues
 
 export function SchedulerCard() {
+  const { t } = useTranslation(["settings", "common"])
   const queryClient = useQueryClient()
+
+  const schema = z.object({
+    historyRetentionDays: z.number().int().min(0, t("settings:scheduler.validation.numberMin")),
+    auditRetentionDaysAuth: z.number().int().min(0, t("settings:scheduler.validation.numberMin")),
+    auditRetentionDaysOperation: z.number().int().min(0, t("settings:scheduler.validation.numberMin")),
+  })
 
   const { data, isLoading } = useQuery({
     queryKey: ["settings", "scheduler"],
@@ -61,7 +67,7 @@ export function SchedulerCard() {
     return (
       <Card>
         <CardContent className="flex h-32 items-center justify-center text-muted-foreground">
-          加载中...
+          {t("common:loading")}
         </CardContent>
       </Card>
     )
@@ -70,9 +76,9 @@ export function SchedulerCard() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>自动清理</CardTitle>
+        <CardTitle>{t("settings:scheduler.title")}</CardTitle>
         <CardDescription>
-          配置各类历史数据的保留天数，设为 0 表示永不清理
+          {t("settings:scheduler.description")}
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -84,7 +90,7 @@ export function SchedulerCard() {
                 name="historyRetentionDays"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>任务执行历史</FormLabel>
+                    <FormLabel>{t("settings:scheduler.historyRetention")}</FormLabel>
                     <FormControl>
                       <Input
                         type="number"
@@ -93,7 +99,7 @@ export function SchedulerCard() {
                         onChange={(e) => field.onChange(e.target.valueAsNumber)}
                       />
                     </FormControl>
-                    <FormDescription>定时任务执行记录</FormDescription>
+                    <FormDescription>{t("settings:scheduler.historyRetentionDescription")}</FormDescription>
                     <FormMessage />
                   </FormItem>
                 )}
@@ -103,7 +109,7 @@ export function SchedulerCard() {
                 name="auditRetentionDaysAuth"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>登录活动日志</FormLabel>
+                    <FormLabel>{t("settings:scheduler.auditRetentionAuth")}</FormLabel>
                     <FormControl>
                       <Input
                         type="number"
@@ -112,7 +118,7 @@ export function SchedulerCard() {
                         onChange={(e) => field.onChange(e.target.valueAsNumber)}
                       />
                     </FormControl>
-                    <FormDescription>登录、登出等认证记录</FormDescription>
+                    <FormDescription>{t("settings:scheduler.auditRetentionAuthDescription")}</FormDescription>
                     <FormMessage />
                   </FormItem>
                 )}
@@ -122,7 +128,7 @@ export function SchedulerCard() {
                 name="auditRetentionDaysOperation"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>操作记录日志</FormLabel>
+                    <FormLabel>{t("settings:scheduler.auditRetentionOperation")}</FormLabel>
                     <FormControl>
                       <Input
                         type="number"
@@ -131,7 +137,7 @@ export function SchedulerCard() {
                         onChange={(e) => field.onChange(e.target.valueAsNumber)}
                       />
                     </FormControl>
-                    <FormDescription>用户增删改等操作记录</FormDescription>
+                    <FormDescription>{t("settings:scheduler.auditRetentionOperationDescription")}</FormDescription>
                     <FormMessage />
                   </FormItem>
                 )}
@@ -141,7 +147,7 @@ export function SchedulerCard() {
               type="submit"
               disabled={!form.formState.isDirty || mutation.isPending}
             >
-              {mutation.isPending ? "保存中..." : "保存"}
+              {mutation.isPending ? t("common:saving") : t("common:save")}
             </Button>
           </form>
         </Form>

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react"
+import { useTranslation } from "react-i18next"
 import { useQuery, useMutation } from "@tanstack/react-query"
 import { ChevronRight, ChevronDown } from "lucide-react"
 import { api } from "@/lib/api"
@@ -114,6 +115,7 @@ function getTopLevelMenus(menus: MenuItem[]): MenuItem[] {
 }
 
 export function PermissionDialog({ open, onOpenChange, role }: PermissionDialogProps) {
+  const { t } = useTranslation(["roles", "common"])
   const [checkedIds, setCheckedIds] = useState<Set<number>>(new Set())
   const [expandedDirs, setExpandedDirs] = useState<Set<number>>(new Set())
 
@@ -212,16 +214,16 @@ export function PermissionDialog({ open, onOpenChange, role }: PermissionDialogP
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent className="sm:max-w-[440px] flex flex-col gap-0 p-0">
         <SheetHeader className="px-6 pt-6 pb-3 border-b">
-          <SheetTitle className="text-base">分配权限 — {role?.name}</SheetTitle>
+          <SheetTitle className="text-base">{t("roles:permission.title", { name: role?.name })}</SheetTitle>
           <SheetDescription className="text-xs mt-1">
-            已选 {checkedCount} / {totalCount} 项
+            {t("roles:permission.selectedCount", { checked: checkedCount, total: totalCount })}
           </SheetDescription>
         </SheetHeader>
 
         <div className="flex-1 overflow-y-auto px-5 py-4 space-y-5">
           {!menuTree ? (
             <div className="flex items-center justify-center h-32 text-sm text-muted-foreground">
-              加载中...
+              {t("common:loading")}
             </div>
           ) : (
             <>
@@ -333,14 +335,14 @@ export function PermissionDialog({ open, onOpenChange, role }: PermissionDialogP
         )}
         <SheetFooter className="px-6 py-4">
           <Button variant="outline" size="sm" onClick={() => onOpenChange(false)}>
-            取消
+            {t("common:cancel")}
           </Button>
           <Button
             size="sm"
             onClick={() => saveMutation.mutate()}
             disabled={saveMutation.isPending}
           >
-            {saveMutation.isPending ? "保存中..." : "保存"}
+            {saveMutation.isPending ? t("common:saving") : t("common:save")}
           </Button>
         </SheetFooter>
       </SheetContent>

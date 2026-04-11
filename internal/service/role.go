@@ -11,11 +11,11 @@ import (
 )
 
 var (
-	ErrRoleNotFound    = errors.New("role not found")
-	ErrRoleCodeExists  = errors.New("role code already exists")
-	ErrSystemRole      = errors.New("cannot modify system role code")
-	ErrSystemRoleDel   = errors.New("cannot delete system role")
-	ErrRoleHasUsers    = errors.New("cannot delete role with assigned users")
+	ErrRoleNotFound    = errors.New("error.role.not_found")
+	ErrRoleCodeExists  = errors.New("error.role.code_exists")
+	ErrSystemRole      = errors.New("error.role.system_role")
+	ErrSystemRoleDel   = errors.New("error.role.system_role_delete")
+	ErrRoleHasUsers    = errors.New("error.role.has_users")
 )
 
 type RoleService struct {

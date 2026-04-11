@@ -1,0 +1,73 @@
+{
+  "title": "Task Center",
+  "stats": {
+    "totalTasks": "Total Tasks",
+    "running": "Running",
+    "completedToday": "Completed Today",
+    "failedToday": "Failed Today"
+  },
+  "tabs": {
+    "all": "All",
+    "scheduled": "Scheduled",
+    "async": "Async Queue"
+  },
+  "table": {
+    "lastExecution": "Last Execution",
+    "emptyTitle": "No tasks"
+  },
+  "taskType": {
+    "scheduled": "Scheduled",
+    "async": "Async"
+  },
+  "status": {
+    "active": "Running",
+    "paused": "Paused",
+    "completed": "Completed",
+    "failed": "Failed",
+    "timeout": "Timeout",
+    "pending": "Pending",
+    "running": "Running",
+    "stale": "Stale"
+  },
+  "actions": {
+    "pause": "Pause",
+    "resume": "Resume",
+    "trigger": "Trigger",
+    "execute": "Execute"
+  },
+  "triggerDialog": {
+    "title": "Trigger Task Manually",
+    "description": "Are you sure you want to execute task \"{{name}}\" now?"
+  },
+  "relativeTime": {
+    "justNow": "just now",
+    "minutesAgo": "{{count}}m ago",
+    "hoursAgo": "{{count}}h ago",
+    "daysAgo": "{{count}}d ago"
+  },
+  "detail": {
+    "back": "Back",
+    "loading": "Loading...",
+    "taskConfig": "Task Configuration",
+    "scheduledTask": "Scheduled Task",
+    "asyncTask": "Async Task",
+    "cronExpression": "Cron Expression",
+    "timeout": "Timeout",
+    "maxRetries": "Max Retries",
+    "retriesSuffix": "",
+    "executionHistory": "Execution History",
+    "emptyExecutions": "No execution records"
+  },
+  "execution": {
+    "id": "ID",
+    "triggerType": "Trigger",
+    "duration": "Duration",
+    "error": "Error",
+    "time": "Time"
+  },
+  "trigger": {
+    "cron": "Cron",
+    "manual": "Manual",
+    "api": "API"
+  }
+}

@@ -15,6 +15,8 @@ make web-dev          # Run Vite dev server (port 3000, proxies /api → :8080)
 make build            # Build frontend + compile single binary (./metis)
 make release          # Cross-compile for linux/darwin/windows (amd64+arm64) → dist/
 make run              # build + run
+make build-license    # Build license edition binary (./metis-license)
+make release-license  # Cross-compile license edition → dist/
 cd web && bun run lint  # ESLint the frontend (includes React Compiler rules)
 ```
 
@@ -104,6 +106,18 @@ App 可通过 IOC 容器引用内核 service：`do.MustInvoke[*service.UserServi
 
 **自定义 edition**：创建 `cmd/server/edition_xxx.go`（带 `//go:build edition_xxx`），仅 import 需要的 App。
 
+**现有 edition**：
+
+| 文件 | Build tag | 内容 |
+|------|-----------|------|
+| `edition_full.go` | 无（默认） | 全部 App（build constraint: `!(edition_lite \|\| edition_license)`） |
+| `edition_lite.go` | `edition_lite` | 仅内核，无 App |
+| `edition_license.go` | `edition_license` | 内核 + license App |
+
+### Version Injection
+
+Makefile 通过 `-ldflags` 注入 `internal/version` 包的三个变量：`Version`（git tag 或 `nightly-YYYYMMDD-<hash>`）、`GitCommit`、`BuildTime`。`make dev` 同样注入 ldflags。
+
 ### Middleware Chain
 
 认证路由的中间件链（顺序固定，在 `handler.Register()` 中配置）：
@@ -180,7 +194,7 @@ function MyComponent({ data }) {
 - **Database**: SQLite (default, pure Go, CGO_ENABLED=0) or PostgreSQL. Default SQLite DSN 使用 `_pragma=journal_mode(WAL)` 开启 WAL 模式。Database driver is selected during the install wizard and stored in `metis.yaml`.
 - **Configuration**: `metis.yaml` stores infrastructure config (db_driver, db_dsn, jwt_secret, license_key_secret). All other settings (server_port, OTel, site.name, etc.) are in DB `SystemConfig` table. No `.env` file is used.
 - **Install wizard**: On first run (no `metis.yaml`), the server enters install mode and serves only `/api/v1/install/*` + SPA. The frontend at `/install` guides database selection → site info → admin account creation. After install, the process hot-switches to normal mode.
-- **Seed pattern**: `seed.Install()` runs during first-time installation (full seed). `seed.Sync()` runs on every subsequent startup (incremental — adds missing roles/menus/policies only, never overwrites existing SystemConfig values).
+- **Seed pattern**: `seed.Install()` runs during first-time installation (full seed). `seed.Sync()` runs on every subsequent startup (incremental — adds missing roles/menus/policies only, never overwrites existing SystemConfig values). 种子数据用 `db.Where("permission = ?", x).First(&existing)` 做幂等检查，只在记录不存在时创建。Casbin 策略用 `enforcer.HasPolicy()` 检查。
 - **New kernel models**: Add struct in `internal/model/`, register in `database.go` AutoMigrate call, create repo → service → handler. Wire into IOC in `main.go` via `do.Provide()`.
 - **New app models**: 在 App 的 `Models()` 方法中返回，main.go 自动 AutoMigrate。
 - **BaseModel**: Embed `model.BaseModel` for auto ID + timestamps + soft delete. SystemConfig uses Key as PK instead.
@@ -190,7 +204,6 @@ function MyComponent({ data }) {
 - **Static embedding**: `embed.go` at project root embeds `web/dist/` via `//go:embed all:web/dist`. `embed_dev.go`（`//go:build dev`）提供空 FS 用于开发模式（`make dev` 不需要先构建前端）。SPA fallback serves `index.html` for non-API, non-file routes.
 - **Frontend path alias**: `@/` maps to `web/src/` in both Vite and TypeScript configs.
 - **Route registration**: Handler 的 `Register()` 返回已带 JWT+Casbin+Audit 中间件的 `*gin.RouterGroup`，App routes 挂载在此 group 下。
-- **Seed pattern**: 种子数据用 `db.Where("permission = ?", x).First(&existing)` 做幂等检查，只在记录不存在时创建。Casbin 策略用 `enforcer.HasPolicy()` 检查。Install() 为首次安装全量种子，Sync() 为后续启动增量同步。
 
 ## Do Not Modify
 

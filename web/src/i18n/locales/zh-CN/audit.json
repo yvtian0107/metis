@@ -1,0 +1,75 @@
+{
+  "title": "审计日志",
+  "tabs": {
+    "auth": "登录活动",
+    "operation": "操作记录"
+  },
+  "auth": {
+    "searchPlaceholder": "搜索用户名...",
+    "eventType": "事件类型",
+    "columns": {
+      "time": "时间",
+      "user": "用户",
+      "event": "事件",
+      "ipAddress": "IP 地址",
+      "device": "设备"
+    },
+    "actions": {
+      "login_success": "登录成功",
+      "login_failed": "登录失败",
+      "logout": "登出"
+    },
+    "empty": "暂无登录活动记录"
+  },
+  "operation": {
+    "searchPlaceholder": "搜索摘要...",
+    "resourceType": "资源类型",
+    "columns": {
+      "time": "时间",
+      "operator": "操作者",
+      "action": "操作",
+      "resourceType": "资源类型",
+      "summary": "摘要"
+    },
+    "actions": {
+      "user.create": "创建用户",
+      "user.update": "更新用户",
+      "user.delete": "删除用户",
+      "user.reset_password": "重置密码",
+      "user.activate": "启用用户",
+      "user.deactivate": "禁用用户",
+      "role.create": "创建角色",
+      "role.update": "更新角色",
+      "role.delete": "删除角色",
+      "role.set_permissions": "设置权限",
+      "menu.create": "创建菜单",
+      "menu.update": "更新菜单",
+      "menu.delete": "删除菜单",
+      "menu.reorder": "调整排序",
+      "settings.update": "更新设置",
+      "announcement.create": "创建公告",
+      "announcement.update": "更新公告",
+      "announcement.delete": "删除公告",
+      "channel.create": "创建通道",
+      "channel.update": "更新通道",
+      "channel.delete": "删除通道",
+      "channel.toggle": "切换通道",
+      "auth_provider.update": "更新认证源",
+      "auth_provider.toggle": "切换认证源",
+      "session.kick": "踢出会话"
+    },
+    "resources": {
+      "user": "用户",
+      "role": "角色",
+      "menu": "菜单",
+      "settings": "设置",
+      "announcement": "公告",
+      "channel": "通道",
+      "auth_provider": "认证源",
+      "session": "会话"
+    },
+    "empty": "暂无操作记录"
+  },
+  "all": "全部",
+  "dateTo": "至"
+}

@@ -16,6 +16,7 @@ var casbinWhitelist = map[string]bool{
 	"/api/v1/auth/logout":   true,
 	"/api/v1/auth/me":       true,
 	"/api/v1/auth/password": true,
+	"/api/v1/auth/profile":  true,
 }
 
 var casbinWhitelistPrefixes = []string{

@@ -3,6 +3,7 @@
 import * as React from "react"
 import type { LucideIcon } from "lucide-react"
 import { ChevronLeft, ChevronRight } from "lucide-react"
+import { useTranslation } from "react-i18next"
 
 import { cn } from "@/lib/utils"
 
@@ -89,15 +90,16 @@ function DataTableActionsCell({
 
 function DataTableLoadingRow({
   colSpan,
-  label = "加载中...",
+  label,
 }: {
   colSpan: number
   label?: React.ReactNode
 }) {
+  const { t } = useTranslation()
   return (
     <TableRow>
       <TableCell colSpan={colSpan} className="h-28 text-center text-sm text-muted-foreground">
-        {label}
+        {label ?? t("loading")}
       </TableCell>
     </TableRow>
   )
@@ -140,6 +142,7 @@ function DataTablePagination({
   onPageChange: (page: number) => void
   className?: string
 }) {
+  const { t } = useTranslation()
   if (totalPages <= 1) return null
 
   return (
@@ -149,7 +152,7 @@ function DataTablePagination({
         className
       )}
     >
-      <span>共 {total} 条</span>
+      <span>{t("pagination.total", { total })}</span>
       <div className="flex items-center gap-2 self-end sm:self-auto">
         <Button
           variant="outline"
@@ -158,7 +161,7 @@ function DataTablePagination({
           onClick={() => onPageChange(page - 1)}
         >
           <ChevronLeft className="h-4 w-4" />
-          上一页
+          {t("pagination.prev")}
         </Button>
         <span className="min-w-16 text-center font-medium tabular-nums">
           {page} / {totalPages}
@@ -169,7 +172,7 @@ function DataTablePagination({
           disabled={page >= totalPages}
           onClick={() => onPageChange(page + 1)}
         >
-          下一页
+          {t("pagination.next")}
           <ChevronRight className="h-4 w-4" />
         </Button>
       </div>

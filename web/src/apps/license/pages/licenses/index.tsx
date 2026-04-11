@@ -1,5 +1,6 @@
 import { useState } from "react"
 import { useNavigate } from "react-router"
+import { useTranslation } from "react-i18next"
 import { Plus, Search, FileBadge, Ban, Download, Eye } from "lucide-react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { usePermission } from "@/hooks/use-permission"
@@ -62,12 +63,13 @@ export interface LicenseItem {
   createdAt: string
 }
 
-const STATUS_MAP: Record<string, { label: string; variant: "default" | "destructive" | "outline" }> = {
-  issued: { label: "已签发", variant: "default" },
-  revoked: { label: "已吊销", variant: "destructive" },
+const STATUS_VARIANTS: Record<string, "default" | "destructive" | "outline"> = {
+  issued: "default",
+  revoked: "destructive",
 }
 
 export function Component() {
+  const { t } = useTranslation(["license", "common"])
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const [formOpen, setFormOpen] = useState(false)
@@ -91,7 +93,7 @@ export function Component() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["license-licenses"] })
       setRevokeTarget(null)
-      toast.success("许可已吊销")
+      toast.success(t("license:licenses.revokeSuccess"))
     },
     onError: (err) => toast.error(err.message),
   })
@@ -113,18 +115,18 @@ export function Component() {
       anchor.remove()
       URL.revokeObjectURL(url)
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "导出失败")
+      toast.error(err instanceof Error ? err.message : t("license:licenses.exportFailed"))
     }
   }
 
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold">许可签发</h2>
+        <h2 className="text-lg font-semibold">{t("license:licenses.title")}</h2>
         {canIssue && (
           <Button size="sm" onClick={() => setFormOpen(true)}>
             <Plus className="mr-1.5 h-4 w-4" />
-            签发许可
+            {t("license:licenses.issue")}
           </Button>
         )}
       </div>
@@ -135,7 +137,7 @@ export function Component() {
             <div className="relative w-full sm:max-w-sm">
               <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
               <Input
-                placeholder="搜索套餐名或注册码"
+                placeholder={t("license:licenses.searchPlaceholder")}
                 value={keyword}
                 onChange={(e) => setKeyword(e.target.value)}
                 className="pl-8"
@@ -143,16 +145,16 @@ export function Component() {
             </div>
             <Select value={statusFilter || "all"} onValueChange={handleStatusFilter}>
               <SelectTrigger className="w-full sm:w-[130px]">
-                <SelectValue placeholder="全部状态" />
+                <SelectValue placeholder={t("license:licenses.allStatus")} />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">全部状态</SelectItem>
-                <SelectItem value="issued">已签发</SelectItem>
-                <SelectItem value="revoked">已吊销</SelectItem>
+                <SelectItem value="all">{t("license:licenses.allStatus")}</SelectItem>
+                <SelectItem value="issued">{t("license:status.issued")}</SelectItem>
+                <SelectItem value="revoked">{t("license:status.revoked")}</SelectItem>
               </SelectContent>
             </Select>
             <Button type="submit" variant="outline">
-              搜索
+              {t("common:search")}
             </Button>
           </form>
         </DataTableToolbarGroup>
@@ -162,14 +164,14 @@ export function Component() {
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead className="min-w-[120px]">套餐</TableHead>
-              <TableHead className="min-w-[100px]">商品</TableHead>
-              <TableHead className="min-w-[100px]">授权主体</TableHead>
-              <TableHead className="w-[80px]">状态</TableHead>
-              <TableHead className="w-[100px]">生效时间</TableHead>
-              <TableHead className="w-[100px]">过期时间</TableHead>
-              <TableHead className="w-[150px]">签发时间</TableHead>
-              <DataTableActionsHead className="min-w-[180px]">操作</DataTableActionsHead>
+              <TableHead className="min-w-[120px]">{t("license:licenses.plan")}</TableHead>
+              <TableHead className="min-w-[100px]">{t("license:licenses.product")}</TableHead>
+              <TableHead className="min-w-[100px]">{t("license:licenses.licensee")}</TableHead>
+              <TableHead className="w-[80px]">{t("common:status")}</TableHead>
+              <TableHead className="w-[100px]">{t("license:licenses.validFrom")}</TableHead>
+              <TableHead className="w-[100px]">{t("license:licenses.validUntil")}</TableHead>
+              <TableHead className="w-[150px]">{t("license:licenses.issuedAt")}</TableHead>
+              <DataTableActionsHead className="min-w-[180px]">{t("common:actions")}</DataTableActionsHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -179,25 +181,26 @@ export function Component() {
               <DataTableEmptyRow
                 colSpan={8}
                 icon={FileBadge}
-                title="暂无许可记录"
-                description={canIssue ? "点击「签发许可」创建第一条许可" : undefined}
+                title={t("license:licenses.empty")}
+                description={canIssue ? t("license:licenses.emptyHint") : undefined}
               />
             ) : (
               licenses.map((item) => {
-                const status = STATUS_MAP[item.status] ?? { label: item.status, variant: "outline" as const }
+                const variant = STATUS_VARIANTS[item.status] ?? ("outline" as const)
+                const statusKey = item.status as string
                 return (
                   <TableRow key={item.id}>
                     <TableCell className="font-medium">{item.planName}</TableCell>
                     <TableCell className="text-sm">{item.productName || "-"}</TableCell>
                     <TableCell className="text-sm">{item.licenseeName || "-"}</TableCell>
                     <TableCell>
-                      <Badge variant={status.variant}>{status.label}</Badge>
+                      <Badge variant={variant}>{t(`license:status.${statusKey}`, item.status)}</Badge>
                     </TableCell>
                     <TableCell className="text-sm text-muted-foreground whitespace-nowrap">
-                      {item.validFrom ? new Date(item.validFrom).toLocaleDateString() : "-"}
+                      {item.validFrom ? formatDateTime(item.validFrom, { dateOnly: true }) : "-"}
                     </TableCell>
                     <TableCell className="text-sm text-muted-foreground whitespace-nowrap">
-                      {item.validUntil ? new Date(item.validUntil).toLocaleDateString() : "永久"}
+                      {item.validUntil ? formatDateTime(item.validUntil, { dateOnly: true }) : t("license:licenses.permanent")}
                     </TableCell>
                     <TableCell className="text-sm text-muted-foreground whitespace-nowrap">
                       {formatDateTime(item.createdAt)}
@@ -211,7 +214,7 @@ export function Component() {
                           onClick={() => navigate(`/license/licenses/${item.id}`)}
                         >
                           <Eye className="mr-1 h-3.5 w-3.5" />
-                          详情
+                          {t("license:licenses.detail")}
                         </Button>
                         {item.status === "issued" && (
                           <>
@@ -222,7 +225,7 @@ export function Component() {
                               onClick={() => handleExport(item)}
                             >
                               <Download className="mr-1 h-3.5 w-3.5" />
-                              导出
+                              {t("common:export")}
                             </Button>
                             {canRevoke && (
                               <Button
@@ -232,7 +235,7 @@ export function Component() {
                                 onClick={() => setRevokeTarget(item)}
                               >
                                 <Ban className="mr-1 h-3.5 w-3.5" />
-                                吊销
+                                {t("license:licenses.revoke")}
                               </Button>
                             )}
                           </>
@@ -259,18 +262,18 @@ export function Component() {
       <AlertDialog open={revokeTarget !== null} onOpenChange={(open) => { if (!open) setRevokeTarget(null) }}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>吊销许可</AlertDialogTitle>
+            <AlertDialogTitle>{t("license:licenses.revokeTitle")}</AlertDialogTitle>
             <AlertDialogDescription>
-              确定要吊销此许可吗？吊销后已导出的 .lic 文件仍可离线使用。
+              {t("license:licenses.revokeDesc")}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>取消</AlertDialogCancel>
+            <AlertDialogCancel>{t("common:cancel")}</AlertDialogCancel>
             <AlertDialogAction
               onClick={() => revokeTarget && revokeMutation.mutate(revokeTarget.id)}
               disabled={revokeMutation.isPending}
             >
-              {revokeMutation.isPending ? "处理中..." : "确定吊销"}
+              {revokeMutation.isPending ? t("common:processing") : t("license:licenses.confirmRevoke")}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

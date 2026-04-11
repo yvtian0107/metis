@@ -1,0 +1,75 @@
+{
+  "title": "Audit Logs",
+  "tabs": {
+    "auth": "Login Activity",
+    "operation": "Operations"
+  },
+  "auth": {
+    "searchPlaceholder": "Search username...",
+    "eventType": "Event Type",
+    "columns": {
+      "time": "Time",
+      "user": "User",
+      "event": "Event",
+      "ipAddress": "IP Address",
+      "device": "Device"
+    },
+    "actions": {
+      "login_success": "Login Success",
+      "login_failed": "Login Failed",
+      "logout": "Logout"
+    },
+    "empty": "No login activity"
+  },
+  "operation": {
+    "searchPlaceholder": "Search summary...",
+    "resourceType": "Resource Type",
+    "columns": {
+      "time": "Time",
+      "operator": "Operator",
+      "action": "Action",
+      "resourceType": "Resource Type",
+      "summary": "Summary"
+    },
+    "actions": {
+      "user.create": "Create User",
+      "user.update": "Update User",
+      "user.delete": "Delete User",
+      "user.reset_password": "Reset Password",
+      "user.activate": "Activate User",
+      "user.deactivate": "Deactivate User",
+      "role.create": "Create Role",
+      "role.update": "Update Role",
+      "role.delete": "Delete Role",
+      "role.set_permissions": "Set Permissions",
+      "menu.create": "Create Menu",
+      "menu.update": "Update Menu",
+      "menu.delete": "Delete Menu",
+      "menu.reorder": "Reorder",
+      "settings.update": "Update Settings",
+      "announcement.create": "Create Announcement",
+      "announcement.update": "Update Announcement",
+      "announcement.delete": "Delete Announcement",
+      "channel.create": "Create Channel",
+      "channel.update": "Update Channel",
+      "channel.delete": "Delete Channel",
+      "channel.toggle": "Toggle Channel",
+      "auth_provider.update": "Update Auth Provider",
+      "auth_provider.toggle": "Toggle Auth Provider",
+      "session.kick": "Kick Session"
+    },
+    "resources": {
+      "user": "User",
+      "role": "Role",
+      "menu": "Menu",
+      "settings": "Settings",
+      "announcement": "Announcement",
+      "channel": "Channel",
+      "auth_provider": "Auth Provider",
+      "session": "Session"
+    },
+    "empty": "No operation records"
+  },
+  "all": "All",
+  "dateTo": "to"
+}

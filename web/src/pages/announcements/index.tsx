@@ -1,4 +1,5 @@
 import { useState } from "react"
+import { useTranslation } from "react-i18next"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { Plus, Search, Pencil, Trash2, Megaphone } from "lucide-react"
 import { api } from "@/lib/api"
@@ -37,7 +38,12 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog"
 import { formatDateTime } from "@/lib/utils"
+import { addKernelNamespace } from "@/i18n"
+import zhCNAnnouncements from "@/i18n/locales/zh-CN/announcements.json"
+import enAnnouncements from "@/i18n/locales/en/announcements.json"
 import { AnnouncementSheet } from "./announcement-sheet"
+
+addKernelNamespace("announcements", zhCNAnnouncements, enAnnouncements)
 
 interface Announcement {
   id: number
@@ -49,6 +55,7 @@ interface Announcement {
 }
 
 export function Component() {
+  const { t } = useTranslation(["announcements", "common"])
   const queryClient = useQueryClient()
   const [sheetOpen, setSheetOpen] = useState(false)
   const [editing, setEditing] = useState<Announcement | null>(null)
@@ -79,11 +86,11 @@ export function Component() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold">公告管理</h2>
+        <h2 className="text-lg font-semibold">{t("title")}</h2>
         {canCreate && (
           <Button size="sm" onClick={handleCreate}>
             <Plus className="mr-1.5 h-4 w-4" />
-            新建公告
+            {t("create")}
           </Button>
         )}
       </div>
@@ -94,14 +101,14 @@ export function Component() {
             <div className="relative w-full sm:max-w-sm">
               <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
               <Input
-                placeholder="搜索公告标题"
+                placeholder={t("searchPlaceholder")}
                 value={keyword}
                 onChange={(e) => setKeyword(e.target.value)}
                 className="pl-8"
               />
             </div>
             <Button type="submit" variant="outline">
-              搜索
+              {t("common:search")}
             </Button>
           </form>
         </DataTableToolbarGroup>
@@ -112,10 +119,10 @@ export function Component() {
           <TableHeader>
             <TableRow>
               <TableHead className="w-16">ID</TableHead>
-              <TableHead className="min-w-[240px]">标题</TableHead>
-              <TableHead className="w-[140px]">发布者</TableHead>
-              <TableHead className="w-[150px]">发布时间</TableHead>
-              <DataTableActionsHead className="min-w-[148px]">操作</DataTableActionsHead>
+              <TableHead className="min-w-[240px]">{t("tableTitle")}</TableHead>
+              <TableHead className="w-[140px]">{t("tablePublisher")}</TableHead>
+              <TableHead className="w-[150px]">{t("tablePublishTime")}</TableHead>
+              <DataTableActionsHead className="min-w-[148px]">{t("common:actions")}</DataTableActionsHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -125,8 +132,8 @@ export function Component() {
               <DataTableEmptyRow
                 colSpan={5}
                 icon={Megaphone}
-                title="暂无公告"
-                description={canCreate ? "点击「新建公告」发布第一条公告" : undefined}
+                title={t("emptyTitle")}
+                description={canCreate ? t("emptyDescription") : undefined}
               />
             ) : (
               announcements.map((item) => (
@@ -148,7 +155,7 @@ export function Component() {
                       {canUpdate && (
                         <Button variant="ghost" size="sm" className="px-2.5" onClick={() => handleEdit(item)}>
                           <Pencil className="mr-1 h-3.5 w-3.5" />
-                          编辑
+                          {t("common:edit")}
                         </Button>
                       )}
                       {canDelete && (
@@ -160,20 +167,20 @@ export function Component() {
                               className="px-2.5 text-destructive hover:text-destructive"
                             >
                               <Trash2 className="mr-1 h-3.5 w-3.5" />
-                              删除
+                              {t("common:delete")}
                             </Button>
                           </AlertDialogTrigger>
                           <AlertDialogContent>
                             <AlertDialogHeader>
-                              <AlertDialogTitle>确认删除</AlertDialogTitle>
+                              <AlertDialogTitle>{t("confirmDeleteTitle")}</AlertDialogTitle>
                               <AlertDialogDescription>
-                                确定要删除公告 &ldquo;{item.title}&rdquo; 吗？此操作不可撤销。
+                                {t("confirmDeleteDescription", { name: item.title })}
                               </AlertDialogDescription>
                             </AlertDialogHeader>
                             <AlertDialogFooter>
-                              <AlertDialogCancel>取消</AlertDialogCancel>
+                              <AlertDialogCancel>{t("common:cancel")}</AlertDialogCancel>
                               <AlertDialogAction onClick={() => deleteMutation.mutate(item.id)}>
-                                删除
+                                {t("common:delete")}
                               </AlertDialogAction>
                             </AlertDialogFooter>
                           </AlertDialogContent>

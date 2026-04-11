@@ -1,0 +1,26 @@
+{
+  "title": "认证源",
+  "provider": "认证源",
+  "clientId": "Client ID",
+  "clientSecret": "Client Secret",
+  "callbackUrl": "回调地址",
+  "emptyTitle": "暂无认证源",
+  "sheet": {
+    "editTitle": "编辑认证源 — {{name}}",
+    "editDescription": "配置 {{name}} OAuth 参数"
+  },
+  "form": {
+    "clientIdPlaceholder": "OAuth Client ID",
+    "clientSecretPlaceholderConfigured": "留空保持不变",
+    "clientSecretPlaceholderEmpty": "OAuth Client Secret",
+    "clientSecretConfigured": "已配置，留空则保持原值",
+    "clientSecretNotConfigured": "尚未配置",
+    "scopesPlaceholder": "例如: user:email,read:user",
+    "scopesDescription": "多个 scope 用逗号分隔，留空使用默认值",
+    "callbackUrlPlaceholder": "https://your-domain.com/oauth/callback",
+    "callbackUrlDescription": "OAuth 回调地址，需与 OAuth App 配置一致"
+  },
+  "validation": {
+    "clientIdRequired": "Client ID 不能为空"
+  }
+}

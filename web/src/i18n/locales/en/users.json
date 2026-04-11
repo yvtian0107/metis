@@ -1,0 +1,30 @@
+{
+  "title": "User Management",
+  "createUser": "Create User",
+  "editUser": "Edit User",
+  "searchPlaceholder": "Search username, email, phone",
+  "username": "Username",
+  "email": "Email",
+  "phone": "Phone",
+  "role": "Role",
+  "loginMethod": "Login Method",
+  "password": "Password",
+  "noUsers": "No users",
+  "noUsersDescription": "Click \"Create User\" to add the first user",
+  "noRoleAssigned": "Unassigned",
+  "confirmDelete": "Confirm Delete",
+  "deleteConfirm": "Are you sure you want to delete user \"{{name}}\"? This action cannot be undone.",
+  "editDescription": "Edit user information",
+  "createDescription": "Fill in user information to create a new user",
+  "emailPlaceholder": "Email (optional)",
+  "phonePlaceholder": "Phone (optional)",
+  "usernamePlaceholder": "Username",
+  "passwordPlaceholder": "Password",
+  "selectRole": "Select a role",
+  "validation": {
+    "usernameRequired": "Username is required",
+    "passwordRequired": "Password is required",
+    "emailInvalid": "Invalid email format",
+    "roleRequired": "Please select a role"
+  }
+}

@@ -14,6 +14,8 @@ type User struct {
 	Email               string     `json:"email" gorm:"size:255"`
 	Phone               string     `json:"phone" gorm:"size:32"`
 	Avatar              string     `json:"avatar" gorm:"size:512"`
+	Locale              string     `json:"locale" gorm:"size:10"`
+	Timezone            string     `json:"timezone" gorm:"size:50"`
 	RoleID              uint       `json:"roleId" gorm:"not null;default:0"`
 	Role                Role       `json:"role" gorm:"foreignKey:RoleID"`
 	IsActive            bool       `json:"isActive" gorm:"not null;default:true"`
@@ -36,6 +38,8 @@ type UserResponse struct {
 	Email               string                   `json:"email"`
 	Phone               string                   `json:"phone"`
 	Avatar              string                   `json:"avatar"`
+	Locale              string                   `json:"locale"`
+	Timezone            string                   `json:"timezone"`
 	Role                RoleResponse             `json:"role"`
 	IsActive            bool                     `json:"isActive"`
 	HasPassword         bool                     `json:"hasPassword"`
@@ -56,6 +60,8 @@ func (u *User) ToResponse() UserResponse {
 		Email:    u.Email,
 		Phone:    u.Phone,
 		Avatar:   u.Avatar,
+		Locale:   u.Locale,
+		Timezone: u.Timezone,
 		Role: RoleResponse{
 			ID:   u.Role.ID,
 			Name: u.Role.Name,

@@ -11,8 +11,8 @@ import (
 )
 
 var (
-	ErrMenuNotFound    = errors.New("menu not found")
-	ErrMenuHasChildren = errors.New("cannot delete menu with children, delete children first")
+	ErrMenuNotFound    = errors.New("error.menu.not_found")
+	ErrMenuHasChildren = errors.New("error.menu.has_children")
 )
 
 type MenuService struct {

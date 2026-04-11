@@ -1,6 +1,8 @@
-import { useState, useCallback } from "react"
-import { ChevronRight } from "lucide-react"
+import { useState, useCallback, useMemo } from "react"
+import { useTranslation } from "react-i18next"
+import { ChevronRight, Globe, Search } from "lucide-react"
 
+import { supportedLocales, changeLocale } from "@/i18n"
 import { AuthShell } from "@/components/auth/auth-shell"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -8,6 +10,11 @@ import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 
 // ─── Types ───────────────────────────────────────────────────────────────────
+
+interface LocaleConfig {
+  locale: string
+  timezone: string
+}
 
 interface DBConfig {
   driver: "sqlite" | "postgres"
@@ -41,6 +48,56 @@ interface StepDef {
   label: string
 }
 
+// ─── Common timezone list (IANA, grouped) ────────────────────────────────────
+
+const TIMEZONE_LIST = [
+  "UTC",
+  "America/New_York",
+  "America/Chicago",
+  "America/Denver",
+  "America/Los_Angeles",
+  "America/Anchorage",
+  "America/Sao_Paulo",
+  "America/Argentina/Buenos_Aires",
+  "America/Mexico_City",
+  "America/Toronto",
+  "America/Vancouver",
+  "Europe/London",
+  "Europe/Berlin",
+  "Europe/Paris",
+  "Europe/Moscow",
+  "Europe/Istanbul",
+  "Europe/Rome",
+  "Europe/Madrid",
+  "Europe/Amsterdam",
+  "Asia/Shanghai",
+  "Asia/Tokyo",
+  "Asia/Seoul",
+  "Asia/Singapore",
+  "Asia/Hong_Kong",
+  "Asia/Taipei",
+  "Asia/Dubai",
+  "Asia/Kolkata",
+  "Asia/Bangkok",
+  "Asia/Jakarta",
+  "Australia/Sydney",
+  "Australia/Melbourne",
+  "Australia/Perth",
+  "Pacific/Auckland",
+  "Pacific/Honolulu",
+  "Africa/Cairo",
+  "Africa/Johannesburg",
+  "Africa/Lagos",
+]
+
+function getBrowserTimezone(): string {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone
+  } catch {
+    return "UTC"
+  }
+}
+
 // ─── API helpers (raw fetch, no auth needed) ─────────────────────────────────
 
 async function apiPost<T>(url: string, data: unknown): Promise<T> {
@@ -68,7 +125,7 @@ function StepIndicator({ steps, current }: { steps: StepDef[]; current: number }
           <div key={step.id} className="flex items-center">
             {i > 0 && (
               <div
-                className={`h-px w-8 sm:w-12 transition-colors duration-300 ${
+                className={`h-px w-6 sm:w-10 transition-colors duration-300 ${
                   isCompleted ? "bg-slate-900" : "bg-slate-200"
                 }`}
               />
@@ -106,17 +163,122 @@ function StepIndicator({ steps, current }: { steps: StepDef[]; current: number }
   )
 }
 
+// ─── Language & Timezone Step ────────────────────────────────────────────────
+
+function LanguageStep({
+  config,
+  onChange,
+  onNext,
+}: {
+  config: LocaleConfig
+  onChange: (c: LocaleConfig) => void
+  onNext: () => void
+}) {
+  const { t } = useTranslation("install")
+  const [tzSearch, setTzSearch] = useState("")
+
+  const filteredTimezones = useMemo(() => {
+    if (!tzSearch) return TIMEZONE_LIST
+    const q = tzSearch.toLowerCase()
+    return TIMEZONE_LIST.filter((tz) => tz.toLowerCase().includes(q))
+  }, [tzSearch])
+
+  const handleLocaleChange = (locale: string) => {
+    onChange({ ...config, locale })
+    changeLocale(locale)
+  }
+
+  return (
+    <div className="space-y-5">
+      <div className="text-center">
+        <h2 className="text-lg font-semibold tracking-[-0.02em] text-slate-900">
+          {t("language.title")}
+        </h2>
+        <p className="mt-1 text-[13px] text-slate-400">
+          {t("language.description")}
+        </p>
+      </div>
+
+      {/* Language selection */}
+      <div>
+        <Label className="mb-1.5 block text-[13px] font-medium text-slate-500">
+          {t("language.selectLanguage")}
+        </Label>
+        <div className="grid grid-cols-2 gap-3">
+          {supportedLocales.map((loc) => (
+            <button
+              key={loc.code}
+              type="button"
+              onClick={() => handleLocaleChange(loc.code)}
+              className={`flex items-center gap-2.5 rounded-xl border p-3.5 transition-all ${
+                config.locale === loc.code
+                  ? "border-slate-900 bg-slate-900/[0.03] shadow-[0_0_0_1px_rgba(15,23,42,0.08)]"
+                  : "border-slate-200/70 bg-white hover:border-slate-300"
+              }`}
+            >
+              <Globe className="h-4 w-4 text-slate-500" />
+              <span className="text-sm font-medium text-slate-700">{loc.name}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Timezone selection */}
+      <div>
+        <Label className="mb-1.5 block text-[13px] font-medium text-slate-500">
+          {t("language.selectTimezone")}
+        </Label>
+        <div className="relative mb-2">
+          <Search className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
+          <Input
+            placeholder={t("language.timezoneSearch")}
+            value={tzSearch}
+            onChange={(e) => setTzSearch(e.target.value)}
+            className="auth-input pl-8"
+          />
+        </div>
+        <div className="max-h-48 overflow-y-auto rounded-xl border border-slate-200/60 bg-white/60">
+          {filteredTimezones.map((tz) => (
+            <button
+              key={tz}
+              type="button"
+              onClick={() => onChange({ ...config, timezone: tz })}
+              className={`w-full px-3.5 py-2 text-left text-[13px] transition-colors ${
+                config.timezone === tz
+                  ? "bg-slate-900/[0.05] font-medium text-slate-900"
+                  : "text-slate-600 hover:bg-slate-50"
+              }`}
+            >
+              {tz}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <Button
+        className="h-[2.625rem] w-full rounded-xl border-0 bg-slate-900 text-sm font-medium tracking-[-0.01em] text-white shadow-[0_1px_2px_rgba(0,0,0,0.05),inset_0_1px_0_rgba(255,255,255,0.06)] hover:bg-slate-800 active:scale-[0.985]"
+        onClick={onNext}
+      >
+        {t("language.next")}
+      </Button>
+    </div>
+  )
+}
+
 // ─── Database Step ───────────────────────────────────────────────────────────
 
 function DatabaseStep({
   config,
   onChange,
   onNext,
+  onBack,
 }: {
   config: DBConfig
   onChange: (c: DBConfig) => void
   onNext: () => void
+  onBack: () => void
 }) {
+  const { t } = useTranslation("install")
   const [testing, setTesting] = useState(false)
   const [testResult, setTestResult] = useState<{ success: boolean; error?: string } | null>(null)
 
@@ -148,10 +310,10 @@ function DatabaseStep({
     <div className="space-y-5">
       <div className="text-center">
         <h2 className="text-lg font-semibold tracking-[-0.02em] text-slate-900">
-          选择数据库
+          {t("database.title")}
         </h2>
         <p className="mt-1 text-[13px] text-slate-400">
-          选择用于存储数据的数据库类型
+          {t("database.description")}
         </p>
       </div>
 
@@ -172,8 +334,8 @@ function DatabaseStep({
             <path d="M3 12A9 3 0 0 0 21 12" />
           </svg>
           <div>
-            <div className="text-sm font-medium text-slate-700">SQLite</div>
-            <div className="text-[11px] text-slate-400">零配置，适合小型部署</div>
+            <div className="text-sm font-medium text-slate-700">{t("database.sqlite")}</div>
+            <div className="text-[11px] text-slate-400">{t("database.sqliteDesc")}</div>
           </div>
         </button>
         <button
@@ -192,8 +354,8 @@ function DatabaseStep({
             <path d="M12 12v7" />
           </svg>
           <div>
-            <div className="text-sm font-medium text-slate-700">PostgreSQL</div>
-            <div className="text-[11px] text-slate-400">高性能，适合生产环境</div>
+            <div className="text-sm font-medium text-slate-700">{t("database.postgres")}</div>
+            <div className="text-[11px] text-slate-400">{t("database.postgresDesc")}</div>
           </div>
         </button>
       </div>
@@ -204,7 +366,7 @@ function DatabaseStep({
           <div className="grid grid-cols-3 gap-3">
             <div className="col-span-2">
               <Label className="mb-1.5 block text-[13px] font-medium text-slate-500">
-                主机地址
+                {t("database.host")}
               </Label>
               <Input
                 placeholder="localhost"
@@ -215,7 +377,7 @@ function DatabaseStep({
             </div>
             <div>
               <Label className="mb-1.5 block text-[13px] font-medium text-slate-500">
-                端口
+                {t("database.port")}
               </Label>
               <Input
                 placeholder="5432"
@@ -228,7 +390,7 @@ function DatabaseStep({
           <div className="grid grid-cols-2 gap-3">
             <div>
               <Label className="mb-1.5 block text-[13px] font-medium text-slate-500">
-                用户名
+                {t("database.username")}
               </Label>
               <Input
                 placeholder="metis"
@@ -239,7 +401,7 @@ function DatabaseStep({
             </div>
             <div>
               <Label className="mb-1.5 block text-[13px] font-medium text-slate-500">
-                密码
+                {t("database.password")}
               </Label>
               <Input
                 type="password"
@@ -252,7 +414,7 @@ function DatabaseStep({
           </div>
           <div>
             <Label className="mb-1.5 block text-[13px] font-medium text-slate-500">
-              数据库名
+              {t("database.dbName")}
             </Label>
             <Input
               placeholder="metis"
@@ -269,7 +431,7 @@ function DatabaseStep({
             onClick={handleTestConnection}
             disabled={testing || !config.host || !config.user || !config.dbname}
           >
-            {testing ? "测试中..." : "测试连接"}
+            {testing ? t("database.testing") : t("database.testConnection")}
           </Button>
 
           {testResult && (
@@ -280,19 +442,29 @@ function DatabaseStep({
                   : "bg-red-50 text-red-600"
               }`}
             >
-              {testResult.success ? "连接成功" : testResult.error || "连接失败"}
+              {testResult.success ? t("database.connectionSuccess") : testResult.error || t("database.connectionFailed")}
             </div>
           )}
         </div>
       )}
 
-      <Button
-        className="h-[2.625rem] w-full rounded-xl border-0 bg-slate-900 text-sm font-medium tracking-[-0.01em] text-white shadow-[0_1px_2px_rgba(0,0,0,0.05),inset_0_1px_0_rgba(255,255,255,0.06)] hover:bg-slate-800 active:scale-[0.985]"
-        onClick={onNext}
-        disabled={!canProceed}
-      >
-        下一步
-      </Button>
+      <div className="flex gap-3">
+        <Button
+          type="button"
+          variant="outline"
+          className="h-[2.625rem] flex-1 rounded-xl border-slate-200/70 text-sm font-medium text-slate-600 hover:bg-slate-50"
+          onClick={onBack}
+        >
+          {t("site.prev")}
+        </Button>
+        <Button
+          className="h-[2.625rem] flex-[2] rounded-xl border-0 bg-slate-900 text-sm font-medium tracking-[-0.01em] text-white shadow-[0_1px_2px_rgba(0,0,0,0.05),inset_0_1px_0_rgba(255,255,255,0.06)] hover:bg-slate-800 active:scale-[0.985]"
+          onClick={onNext}
+          disabled={!canProceed}
+        >
+          {t("database.next")}
+        </Button>
+      </div>
     </div>
   )
 }
@@ -314,22 +486,23 @@ function SiteInfoStep({
   onNext: () => void
   onBack: () => void
 }) {
+  const { t } = useTranslation("install")
   const [showAdvanced, setShowAdvanced] = useState(false)
 
   return (
     <div className="space-y-5">
       <div className="text-center">
         <h2 className="text-lg font-semibold tracking-[-0.02em] text-slate-900">
-          站点信息
+          {t("site.title")}
         </h2>
         <p className="mt-1 text-[13px] text-slate-400">
-          为你的站点起一个名字
+          {t("site.description")}
         </p>
       </div>
 
       <div>
         <Label htmlFor="site-name" className="mb-1.5 block text-[13px] font-medium text-slate-500">
-          站点名称
+          {t("site.siteName")}
         </Label>
         <Input
           id="site-name"
@@ -340,7 +513,7 @@ function SiteInfoStep({
           className="auth-input"
         />
         <p className="mt-1.5 text-[12px] text-slate-400">
-          显示在登录页和浏览器标题中
+          {t("site.siteNameHint")}
         </p>
       </div>
 
@@ -353,20 +526,20 @@ function SiteInfoStep({
         <ChevronRight
           className={`h-3.5 w-3.5 transition-transform duration-200 ${showAdvanced ? "rotate-90" : ""}`}
         />
-        高级设置
+        {t("site.advanced")}
       </button>
 
       {showAdvanced && (
         <div className="space-y-3 rounded-xl border border-slate-200/60 bg-white/60 p-4">
           <div className="mb-2 text-[12px] font-medium text-slate-400 uppercase tracking-wide">
-            OpenTelemetry
+            {t("site.otel")}
           </div>
 
           {/* OTel enabled toggle */}
           <div className="flex items-center justify-between">
             <div>
-              <div className="text-[13px] font-medium text-slate-600">启用追踪</div>
-              <div className="text-[11px] text-slate-400">启用 OpenTelemetry 分布式追踪</div>
+              <div className="text-[13px] font-medium text-slate-600">{t("site.enableTracing")}</div>
+              <div className="text-[11px] text-slate-400">{t("site.enableTracingDesc")}</div>
             </div>
             <Switch
               checked={otelConfig.enabled}
@@ -378,7 +551,7 @@ function SiteInfoStep({
             <div className="space-y-3 pt-1">
               <div>
                 <Label className="mb-1.5 block text-[13px] font-medium text-slate-500">
-                  导出端点
+                  {t("site.exportEndpoint")}
                 </Label>
                 <Input
                   placeholder="http://localhost:4318"
@@ -390,7 +563,7 @@ function SiteInfoStep({
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <Label className="mb-1.5 block text-[13px] font-medium text-slate-500">
-                    服务名称
+                    {t("site.serviceName")}
                   </Label>
                   <Input
                     placeholder="metis"
@@ -401,7 +574,7 @@ function SiteInfoStep({
                 </div>
                 <div>
                   <Label className="mb-1.5 block text-[13px] font-medium text-slate-500">
-                    采样率
+                    {t("site.sampleRate")}
                   </Label>
                   <Input
                     placeholder="1.0"
@@ -423,14 +596,14 @@ function SiteInfoStep({
           className="h-[2.625rem] flex-1 rounded-xl border-slate-200/70 text-sm font-medium text-slate-600 hover:bg-slate-50"
           onClick={onBack}
         >
-          上一步
+          {t("site.prev")}
         </Button>
         <Button
           className="h-[2.625rem] flex-[2] rounded-xl border-0 bg-slate-900 text-sm font-medium tracking-[-0.01em] text-white shadow-[0_1px_2px_rgba(0,0,0,0.05),inset_0_1px_0_rgba(255,255,255,0.06)] hover:bg-slate-800 active:scale-[0.985]"
           onClick={onNext}
           disabled={!config.siteName.trim()}
         >
-          下一步
+          {t("site.next")}
         </Button>
       </div>
     </div>
@@ -450,18 +623,20 @@ function AdminStep({
   onNext: () => void
   onBack: () => void
 }) {
+  const { t } = useTranslation("install")
+
   const errors: Record<string, string> = {}
   if (config.username && config.username.length < 3) {
-    errors.username = "用户名至少 3 个字符"
+    errors.username = t("admin.usernameMinLength")
   }
   if (config.password && config.password.length < 8) {
-    errors.password = "密码至少 8 个字符"
+    errors.password = t("admin.passwordMinLength")
   }
   if (config.confirmPassword && config.password !== config.confirmPassword) {
-    errors.confirmPassword = "两次密码不一致"
+    errors.confirmPassword = t("admin.passwordMismatch")
   }
   if (config.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(config.email)) {
-    errors.email = "请输入有效的邮箱地址"
+    errors.email = t("admin.emailInvalid")
   }
 
   const isValid =
@@ -474,17 +649,17 @@ function AdminStep({
     <div className="space-y-5">
       <div className="text-center">
         <h2 className="text-lg font-semibold tracking-[-0.02em] text-slate-900">
-          管理员账号
+          {t("admin.title")}
         </h2>
         <p className="mt-1 text-[13px] text-slate-400">
-          创建超级管理员账号
+          {t("admin.description")}
         </p>
       </div>
 
       <div className="space-y-3">
         <div>
           <Label htmlFor="admin-username" className="mb-1.5 block text-[13px] font-medium text-slate-500">
-            用户名
+            {t("admin.username")}
           </Label>
           <Input
             id="admin-username"
@@ -501,7 +676,7 @@ function AdminStep({
 
         <div>
           <Label htmlFor="admin-email" className="mb-1.5 block text-[13px] font-medium text-slate-500">
-            邮箱
+            {t("admin.email")}
           </Label>
           <Input
             id="admin-email"
@@ -518,12 +693,12 @@ function AdminStep({
 
         <div>
           <Label htmlFor="admin-password" className="mb-1.5 block text-[13px] font-medium text-slate-500">
-            密码
+            {t("admin.password")}
           </Label>
           <Input
             id="admin-password"
             type="password"
-            placeholder="至少 8 个字符"
+            placeholder={t("admin.passwordHint")}
             value={config.password}
             onChange={(e) => onChange({ ...config, password: e.target.value })}
             className="auth-input"
@@ -535,12 +710,12 @@ function AdminStep({
 
         <div>
           <Label htmlFor="admin-confirm" className="mb-1.5 block text-[13px] font-medium text-slate-500">
-            确认密码
+            {t("admin.confirmPassword")}
           </Label>
           <Input
             id="admin-confirm"
             type="password"
-            placeholder="再次输入密码"
+            placeholder={t("admin.confirmPasswordHint")}
             value={config.confirmPassword}
             onChange={(e) => onChange({ ...config, confirmPassword: e.target.value })}
             className="auth-input"
@@ -558,14 +733,14 @@ function AdminStep({
           className="h-[2.625rem] flex-1 rounded-xl border-slate-200/70 text-sm font-medium text-slate-600 hover:bg-slate-50"
           onClick={onBack}
         >
-          上一步
+          {t("admin.prev")}
         </Button>
         <Button
           className="h-[2.625rem] flex-[2] rounded-xl border-0 bg-slate-900 text-sm font-medium tracking-[-0.01em] text-white shadow-[0_1px_2px_rgba(0,0,0,0.05),inset_0_1px_0_rgba(255,255,255,0.06)] hover:bg-slate-800 active:scale-[0.985]"
           onClick={onNext}
           disabled={!isValid}
         >
-          下一步
+          {t("admin.next")}
         </Button>
       </div>
     </div>
@@ -575,21 +750,26 @@ function AdminStep({
 // ─── Completion Step ─────────────────────────────────────────────────────────
 
 function CompleteStep({
+  localeConfig,
   dbConfig,
   siteConfig,
   adminConfig,
   otelConfig,
   onBack,
 }: {
+  localeConfig: LocaleConfig
   dbConfig: DBConfig
   siteConfig: SiteConfig
   adminConfig: AdminConfig
   otelConfig: OTelConfig
   onBack: () => void
 }) {
+  const { t } = useTranslation("install")
   const [installing, setInstalling] = useState(false)
   const [done, setDone] = useState(false)
   const [error, setError] = useState("")
+
+  const localeName = supportedLocales.find((l) => l.code === localeConfig.locale)?.name || localeConfig.locale
 
   const handleInstall = useCallback(async () => {
     setInstalling(true)
@@ -603,6 +783,8 @@ function CompleteStep({
         db_password: dbConfig.driver === "postgres" ? dbConfig.password : undefined,
         db_name: dbConfig.driver === "postgres" ? dbConfig.dbname : undefined,
         site_name: siteConfig.siteName,
+        locale: localeConfig.locale,
+        timezone: localeConfig.timezone,
         admin_username: adminConfig.username,
         admin_password: adminConfig.password,
         admin_email: adminConfig.email,
@@ -613,11 +795,11 @@ function CompleteStep({
       })
       setDone(true)
     } catch (err) {
-      setError(err instanceof Error ? err.message : "安装失败")
+      setError(err instanceof Error ? err.message : t("confirm.installFailed"))
     } finally {
       setInstalling(false)
     }
-  }, [dbConfig, siteConfig, adminConfig, otelConfig])
+  }, [dbConfig, siteConfig, adminConfig, otelConfig, localeConfig, t])
 
   if (done) {
     return (
@@ -629,17 +811,17 @@ function CompleteStep({
         </div>
         <div>
           <h2 className="text-lg font-semibold tracking-[-0.02em] text-slate-900">
-            安装完成
+            {t("done.title")}
           </h2>
           <p className="mt-1 text-[13px] text-slate-400">
-            {siteConfig.siteName} 已准备就绪
+            {t("done.description", { name: siteConfig.siteName })}
           </p>
         </div>
         <Button
           className="h-[2.625rem] w-full rounded-xl border-0 bg-slate-900 text-sm font-medium tracking-[-0.01em] text-white shadow-[0_1px_2px_rgba(0,0,0,0.05),inset_0_1px_0_rgba(255,255,255,0.06)] hover:bg-slate-800 active:scale-[0.985]"
           onClick={() => { window.location.href = "/login" }}
         >
-          进入系统
+          {t("done.enter")}
         </Button>
       </div>
     )
@@ -649,34 +831,44 @@ function CompleteStep({
     <div className="space-y-5">
       <div className="text-center">
         <h2 className="text-lg font-semibold tracking-[-0.02em] text-slate-900">
-          确认安装
+          {t("confirm.title")}
         </h2>
         <p className="mt-1 text-[13px] text-slate-400">
-          请确认以下配置信息
+          {t("confirm.description")}
         </p>
       </div>
 
       {/* Summary */}
       <div className="space-y-3 rounded-xl border border-slate-200/60 bg-white/60 p-4 text-[13px]">
         <div className="flex justify-between">
-          <span className="text-slate-400">数据库</span>
+          <span className="text-slate-400">{t("confirm.language")}</span>
+          <span className="font-medium text-slate-700">{localeName}</span>
+        </div>
+        <div className="border-t border-slate-100" />
+        <div className="flex justify-between">
+          <span className="text-slate-400">{t("confirm.timezone")}</span>
+          <span className="font-medium text-slate-700">{localeConfig.timezone}</span>
+        </div>
+        <div className="border-t border-slate-100" />
+        <div className="flex justify-between">
+          <span className="text-slate-400">{t("confirm.database")}</span>
           <span className="font-medium text-slate-700">
             {dbConfig.driver === "sqlite" ? "SQLite" : `PostgreSQL (${dbConfig.host}:${dbConfig.port || "5432"})`}
           </span>
         </div>
         <div className="border-t border-slate-100" />
         <div className="flex justify-between">
-          <span className="text-slate-400">站点名称</span>
+          <span className="text-slate-400">{t("confirm.siteName")}</span>
           <span className="font-medium text-slate-700">{siteConfig.siteName}</span>
         </div>
         <div className="border-t border-slate-100" />
         <div className="flex justify-between">
-          <span className="text-slate-400">管理员</span>
+          <span className="text-slate-400">{t("confirm.administrator")}</span>
           <span className="font-medium text-slate-700">{adminConfig.username}</span>
         </div>
         <div className="border-t border-slate-100" />
         <div className="flex justify-between">
-          <span className="text-slate-400">邮箱</span>
+          <span className="text-slate-400">{t("confirm.email")}</span>
           <span className="font-medium text-slate-700">{adminConfig.email}</span>
         </div>
         {otelConfig.enabled && (
@@ -704,7 +896,7 @@ function CompleteStep({
           onClick={onBack}
           disabled={installing}
         >
-          上一步
+          {t("confirm.prev")}
         </Button>
         <Button
           className="h-[2.625rem] flex-[2] rounded-xl border-0 bg-slate-900 text-sm font-medium tracking-[-0.01em] text-white shadow-[0_1px_2px_rgba(0,0,0,0.05),inset_0_1px_0_rgba(255,255,255,0.06)] hover:bg-slate-800 active:scale-[0.985]"
@@ -717,10 +909,10 @@ function CompleteStep({
                 <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                 <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
               </svg>
-              安装中...
+              {t("confirm.installing")}
             </span>
           ) : (
-            "开始安装"
+            t("confirm.install")
           )}
         </Button>
       </div>
@@ -730,17 +922,22 @@ function CompleteStep({
 
 // ─── Main Install Page ───────────────────────────────────────────────────────
 
-const STEPS_SQLITE: StepDef[] = [
-  { id: "db", label: "数据库" },
-  { id: "site", label: "站点信息" },
-  { id: "admin", label: "管理员" },
-  { id: "complete", label: "完成" },
-]
-
-const STEPS_POSTGRES: StepDef[] = STEPS_SQLITE
-
 export default function InstallPage() {
+  const { t } = useTranslation("install")
+
+  const steps: StepDef[] = [
+    { id: "language", label: t("steps.language") },
+    { id: "db", label: t("steps.database") },
+    { id: "site", label: t("steps.site") },
+    { id: "admin", label: t("steps.admin") },
+    { id: "complete", label: t("steps.complete") },
+  ]
+
   const [step, setStep] = useState(0)
+  const [localeConfig, setLocaleConfig] = useState<LocaleConfig>({
+    locale: supportedLocales.some((l) => l.code === navigator.language) ? navigator.language : "zh-CN",
+    timezone: getBrowserTimezone(),
+  })
   const [dbConfig, setDBConfig] = useState<DBConfig>({
     driver: "sqlite",
     host: "localhost",
@@ -763,47 +960,55 @@ export default function InstallPage() {
     sampleRate: "1.0",
   })
 
-  const steps = dbConfig.driver === "postgres" ? STEPS_POSTGRES : STEPS_SQLITE
-
-  // Step order: 0=db, 1=site, 2=admin, 3=complete
+  // Step order: 0=language, 1=db, 2=site, 3=admin, 4=complete
   const stepContent = (() => {
     switch (step) {
       case 0:
         return (
-          <DatabaseStep
-            config={dbConfig}
-            onChange={setDBConfig}
+          <LanguageStep
+            config={localeConfig}
+            onChange={setLocaleConfig}
             onNext={() => setStep(1)}
           />
         )
       case 1:
         return (
-          <SiteInfoStep
-            config={siteConfig}
-            onChange={setSiteConfig}
-            otelConfig={otelConfig}
-            onOTelChange={setOTelConfig}
+          <DatabaseStep
+            config={dbConfig}
+            onChange={setDBConfig}
             onNext={() => setStep(2)}
             onBack={() => setStep(0)}
           />
         )
       case 2:
         return (
-          <AdminStep
-            config={adminConfig}
-            onChange={setAdminConfig}
+          <SiteInfoStep
+            config={siteConfig}
+            onChange={setSiteConfig}
+            otelConfig={otelConfig}
+            onOTelChange={setOTelConfig}
             onNext={() => setStep(3)}
             onBack={() => setStep(1)}
           />
         )
       case 3:
         return (
+          <AdminStep
+            config={adminConfig}
+            onChange={setAdminConfig}
+            onNext={() => setStep(4)}
+            onBack={() => setStep(2)}
+          />
+        )
+      case 4:
+        return (
           <CompleteStep
+            localeConfig={localeConfig}
             dbConfig={dbConfig}
             siteConfig={siteConfig}
             adminConfig={adminConfig}
             otelConfig={otelConfig}
-            onBack={() => setStep(2)}
+            onBack={() => setStep(3)}
           />
         )
       default:
@@ -821,7 +1026,7 @@ export default function InstallPage() {
           {stepContent}
         </div>
         <p className="mt-4 text-center text-[11px] text-slate-300">
-          Powered by Metis
+          {t("poweredBy")}
         </p>
       </div>
     </AuthShell>

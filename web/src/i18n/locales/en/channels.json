@@ -1,0 +1,65 @@
+{
+  "title": "Channels",
+  "create": "New Channel",
+  "searchPlaceholder": "Search channel name",
+  "emptyTitle": "No Channels",
+  "emptyDescription": "Click \"New Channel\" to configure the first channel",
+  "confirmDeleteTitle": "Confirm Deletion",
+  "confirmDeleteDescription": "Are you sure you want to delete channel \"{{name}}\"? This action cannot be undone.",
+  "toast": {
+    "deleted": "Channel deleted",
+    "createSuccess": "Channel created successfully",
+    "updateSuccess": "Channel updated successfully",
+    "testConnSuccess": "Connection test successful",
+    "testConnFailed": "Connection test failed: {{message}}",
+    "sendSuccess": "Test email sent successfully",
+    "sendFailed": "Send failed: {{message}}",
+    "testFailed": "Test failed",
+    "sendError": "Send failed"
+  },
+  "sheet": {
+    "createTitle": "New Channel",
+    "editTitle": "Edit Channel",
+    "createDescription": "Configure a new message channel",
+    "editDescription": "Modify message channel configuration"
+  },
+  "form": {
+    "nameLabel": "Channel Name",
+    "namePlaceholder": "e.g. System Email",
+    "typeLabel": "Channel Type",
+    "typePlaceholder": "Select channel type",
+    "typeImmutable": "Channel type cannot be changed after creation",
+    "connectionConfig": "Connection Config",
+    "sensitiveHint": "Leave empty to keep unchanged"
+  },
+  "validation": {
+    "nameRequired": "Channel name is required",
+    "typeRequired": "Please select a channel type",
+    "saveFirst": "Please save the channel before testing"
+  },
+  "testConnection": "Test Connection",
+  "sendTest": "Send Test",
+  "sendTestDialog": {
+    "title": "Send Test Email",
+    "description": "Send a test email to verify the channel configuration is working properly",
+    "recipient": "Recipient",
+    "subject": "Subject",
+    "body": "Body",
+    "send": "Send",
+    "defaultSubject": "Metis Test Email",
+    "defaultBody": "This is a test email from the Metis system."
+  },
+  "channelType": {
+    "email": "Email (SMTP)",
+    "smtpHost": "SMTP Server",
+    "port": "Port",
+    "sslTls": "SSL/TLS",
+    "username": "Username",
+    "password": "Password",
+    "from": "From",
+    "fromPlaceholder": "System Notification <noreply@example.com>"
+  },
+  "validation_email": "Please enter a valid email address",
+  "validation_subjectRequired": "Subject is required",
+  "validation_bodyRequired": "Body is required"
+}

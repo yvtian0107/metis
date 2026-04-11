@@ -79,7 +79,7 @@ func (h *UserHandler) Create(c *gin.Context) {
 	user, err := h.userSvc.Create(req.Username, req.Password, req.Email, req.Phone, req.RoleID)
 	if err != nil {
 		if errors.Is(err, service.ErrUsernameExists) {
-			Fail(c, http.StatusBadRequest, "username already exists")
+			Fail(c, http.StatusBadRequest, err.Error())
 			return
 		}
 		Fail(c, http.StatusInternalServerError, err.Error())
@@ -115,6 +115,8 @@ type updateUserReq struct {
 	Email    *string `json:"email"`
 	Phone    *string `json:"phone"`
 	Avatar   *string `json:"avatar"`
+	Locale   *string `json:"locale"`
+	Timezone *string `json:"timezone"`
 	RoleID   *uint   `json:"roleId"`
 	IsActive *bool   `json:"isActive"`
 }
@@ -136,15 +138,17 @@ func (h *UserHandler) Update(c *gin.Context) {
 		Email:    req.Email,
 		Phone:    req.Phone,
 		Avatar:   req.Avatar,
+		Locale:   req.Locale,
+		Timezone: req.Timezone,
 		RoleID:   req.RoleID,
 		IsActive: req.IsActive,
 	})
 	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrUserNotFound):
-			Fail(c, http.StatusNotFound, "user not found")
+			Fail(c, http.StatusNotFound, err.Error())
 		case errors.Is(err, service.ErrCannotSelf):
-			Fail(c, http.StatusBadRequest, "cannot change own role")
+			Fail(c, http.StatusBadRequest, err.Error())
 		default:
 			Fail(c, http.StatusInternalServerError, err.Error())
 		}

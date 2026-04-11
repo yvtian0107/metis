@@ -1,0 +1,32 @@
+{
+  "title": "公告管理",
+  "create": "新建公告",
+  "searchPlaceholder": "搜索公告标题",
+  "tableTitle": "标题",
+  "tablePublisher": "发布者",
+  "tablePublishTime": "发布时间",
+  "emptyTitle": "暂无公告",
+  "emptyDescription": "点击「新建公告」发布第一条公告",
+  "confirmDeleteTitle": "确认删除",
+  "confirmDeleteDescription": "确定要删除公告 \u201c{{name}}\u201d 吗？此操作不可撤销。",
+  "sheet": {
+    "createTitle": "新建公告",
+    "editTitle": "编辑公告",
+    "createDescription": "填写公告信息以发布新公告",
+    "editDescription": "修改公告内容"
+  },
+  "form": {
+    "titleLabel": "标题",
+    "titlePlaceholder": "公告标题",
+    "contentLabel": "内容",
+    "contentPlaceholder": "公告内容（可选）"
+  },
+  "validation": {
+    "titleRequired": "标题不能为空"
+  },
+  "submit": {
+    "saving": "保存中...",
+    "save": "保存",
+    "publish": "发布"
+  }
+}

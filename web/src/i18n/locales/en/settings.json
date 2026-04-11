@@ -1,0 +1,100 @@
+{
+  "pageTitle": "System Settings",
+  "tabs": {
+    "site": "Site Info",
+    "security": "Security",
+    "scheduler": "Tasks",
+    "connections": "Connections"
+  },
+  "site": {
+    "title": "Basic Info",
+    "description": "Set the system display name shown in the navigation bar",
+    "appName": "System Name",
+    "appNamePlaceholder": "Enter system name",
+    "appNameRequired": "System name is required",
+    "appNameMaxLength": "System name cannot exceed 50 characters"
+  },
+  "logo": {
+    "title": "System Logo",
+    "description": "Upload a system logo to display in the navigation bar (max 2MB)",
+    "upload": "Upload Logo",
+    "change": "Change Logo",
+    "remove": "Remove",
+    "fileTooLarge": "Image size cannot exceed 2MB",
+    "invalidFileType": "Please select an image file"
+  },
+  "security": {
+    "saveSuccess": "Security settings saved",
+    "saveFailed": "Failed to save",
+    "password": {
+      "title": "Password Policy",
+      "description": "Configure password complexity and expiration rules",
+      "minLength": "Minimum Length",
+      "requireUpper": "Require uppercase letters",
+      "requireLower": "Require lowercase letters",
+      "requireNumber": "Require numbers",
+      "requireSpecial": "Require special characters",
+      "expiryDays": "Password Expiry (days)",
+      "expiryDaysDescription": "Set to 0 for no expiration"
+    },
+    "login": {
+      "title": "Login Security",
+      "description": "Login failure lockout and captcha settings",
+      "maxAttempts": "Max Failed Attempts",
+      "maxAttemptsDescription": "Set to 0 for unlimited",
+      "lockoutMinutes": "Lockout Duration (minutes)",
+      "captchaProvider": "Login Captcha",
+      "captchaPlaceholder": "Select captcha type",
+      "captchaNone": "Off",
+      "captchaImage": "Image Captcha"
+    },
+    "session": {
+      "title": "Session Management",
+      "description": "Control user session behavior",
+      "maxConcurrent": "Max Concurrent Sessions",
+      "maxConcurrentDescription": "Set to 0 for unlimited",
+      "timeoutMinutes": "Session Timeout (minutes)"
+    },
+    "twoFactor": {
+      "title": "Two-Factor Authentication",
+      "description": "TOTP two-factor authentication global policy",
+      "requireAll": "Require all users to enable 2FA",
+      "requireAllDescription": "Users without 2FA will be prompted to set it up on login"
+    },
+    "registration": {
+      "title": "Registration",
+      "description": "Control user self-registration",
+      "open": "Open Registration",
+      "openDescription": "Allow new users to register accounts",
+      "defaultRole": "Default Role",
+      "defaultRolePlaceholder": "Select role",
+      "defaultRoleDescription": "Role automatically assigned to new users"
+    },
+    "validation": {
+      "minLengthMin": "Minimum length cannot be less than 1",
+      "numberMin": "Cannot be less than 0",
+      "sessionTimeoutMin": "Cannot be less than 1"
+    }
+  },
+  "scheduler": {
+    "title": "Auto Cleanup",
+    "description": "Configure retention days for historical data. Set to 0 to never clean up",
+    "historyRetention": "Task Execution History",
+    "historyRetentionDescription": "Scheduled task execution records",
+    "auditRetentionAuth": "Login Activity Logs",
+    "auditRetentionAuthDescription": "Login, logout and authentication records",
+    "auditRetentionOperation": "Operation Logs",
+    "auditRetentionOperationDescription": "User CRUD operation records",
+    "validation": {
+      "numberMin": "Cannot be less than 0"
+    }
+  },
+  "connections": {
+    "title": "Account Connections",
+    "description": "Manage third-party login account binding",
+    "bind": "Bind",
+    "unbind": "Unbind",
+    "unbound": "Not bound",
+    "noProviders": "No authentication providers available"
+  }
+}

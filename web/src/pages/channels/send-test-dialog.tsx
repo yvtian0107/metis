@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next"
 import { useForm } from "react-hook-form"
 import { z } from "zod"
 import { zodResolver } from "@hookform/resolvers/zod"
@@ -25,13 +26,11 @@ import {
   FormMessage,
 } from "@/components/ui/form"
 
-const schema = z.object({
-  to: z.string().email("请输入有效的邮箱地址"),
-  subject: z.string().min(1, "主题不能为空"),
-  body: z.string().min(1, "内容不能为空"),
-})
-
-type FormValues = z.infer<typeof schema>
+type FormValues = {
+  to: string
+  subject: string
+  body: string
+}
 
 interface SendTestDialogProps {
   open: boolean
@@ -40,9 +39,21 @@ interface SendTestDialogProps {
 }
 
 export function SendTestDialog({ open, onOpenChange, channelId }: SendTestDialogProps) {
+  const { t } = useTranslation(["channels", "common"])
+
   const form = useForm<FormValues>({
-    resolver: zodResolver(schema),
-    defaultValues: { to: "", subject: "Metis 测试邮件", body: "这是一封来自 Metis 系统的测试邮件。" },
+    resolver: zodResolver(
+      z.object({
+        to: z.string().email(t("validation_email")),
+        subject: z.string().min(1, t("validation_subjectRequired")),
+        body: z.string().min(1, t("validation_bodyRequired")),
+      }),
+    ),
+    defaultValues: {
+      to: "",
+      subject: t("sendTestDialog.defaultSubject"),
+      body: t("sendTestDialog.defaultBody"),
+    },
   })
 
   const sendMutation = useMutation({
@@ -51,23 +62,23 @@ export function SendTestDialog({ open, onOpenChange, channelId }: SendTestDialog
         `/api/v1/channels/${channelId}/send-test`,
         values,
       )
-      if (!res.success) throw new Error(res.error || "发送失败")
+      if (!res.success) throw new Error(res.error || t("toast.sendError"))
       return res
     },
     onSuccess: () => {
-      toast.success("测试邮件发送成功")
+      toast.success(t("toast.sendSuccess"))
       onOpenChange(false)
     },
-    onError: (err) => toast.error(`发送失败: ${err.message}`),
+    onError: (err) => toast.error(t("toast.sendFailed", { message: err.message })),
   })
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>发送测试邮件</DialogTitle>
+          <DialogTitle>{t("sendTestDialog.title")}</DialogTitle>
           <DialogDescription>
-            发送一封测试邮件以验证通道配置是否正常工作
+            {t("sendTestDialog.description")}
           </DialogDescription>
         </DialogHeader>
         <Form {...form}>
@@ -77,7 +88,7 @@ export function SendTestDialog({ open, onOpenChange, channelId }: SendTestDialog
               name="to"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>收件人</FormLabel>
+                  <FormLabel>{t("sendTestDialog.recipient")}</FormLabel>
                   <FormControl>
                     <Input placeholder="test@example.com" {...field} />
                   </FormControl>
@@ -90,7 +101,7 @@ export function SendTestDialog({ open, onOpenChange, channelId }: SendTestDialog
               name="subject"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>主题</FormLabel>
+                  <FormLabel>{t("sendTestDialog.subject")}</FormLabel>
                   <FormControl>
                     <Input {...field} />
                   </FormControl>
@@ -103,7 +114,7 @@ export function SendTestDialog({ open, onOpenChange, channelId }: SendTestDialog
               name="body"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>内容</FormLabel>
+                  <FormLabel>{t("sendTestDialog.body")}</FormLabel>
                   <FormControl>
                     <Textarea rows={3} {...field} />
                   </FormControl>
@@ -114,7 +125,7 @@ export function SendTestDialog({ open, onOpenChange, channelId }: SendTestDialog
             <DialogFooter>
               <Button type="submit" size="sm" disabled={sendMutation.isPending}>
                 {sendMutation.isPending && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
-                发送
+                {t("sendTestDialog.send")}
               </Button>
             </DialogFooter>
           </form>

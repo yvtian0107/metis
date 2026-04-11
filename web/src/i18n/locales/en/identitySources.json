@@ -1,0 +1,71 @@
+{
+  "title": "Identity Sources",
+  "createSource": "New Identity Source",
+  "domain": "Domain",
+  "emptyTitle": "No identity sources",
+  "emptyDescription": "Click \"New Identity Source\" to configure the first identity source",
+  "testConnection": "Test Connection",
+  "testConnectionSuccess": "Connection test successful",
+  "testConnectionFailed": "Connection test failed",
+  "testConnectionFailedDetail": "Connection test failed: {{message}}",
+  "deleteSuccess": "Identity source deleted",
+  "createSuccess": "Identity source created successfully",
+  "updateSuccess": "Identity source updated successfully",
+  "saveFirstBeforeTest": "Please save the identity source before testing",
+  "testFailed": "Test failed",
+  "confirmDeleteTitle": "Confirm Deletion",
+  "confirmDeleteDescription": "Are you sure you want to delete identity source \"{{name}}\"? This action cannot be undone.",
+  "sheet": {
+    "createTitle": "New Identity Source",
+    "editTitle": "Edit Identity Source",
+    "createDescription": "Configure a new identity source",
+    "editDescription": "Modify identity source configuration"
+  },
+  "form": {
+    "namePlaceholder": "e.g. Company Okta SSO",
+    "typeImmutable": "Type cannot be changed after creation",
+    "typePlaceholder": "Select a type",
+    "domainPlaceholder": "e.g. acme.com (separate multiple with commas)",
+    "domainDescription": "Users with matching email domains will use this identity source to log in",
+    "conflictStrategy": "Account Conflict Strategy",
+    "conflictFail": "Reject login",
+    "conflictLink": "Auto-link",
+    "defaultRoleId": "Default Role ID",
+    "defaultRoleIdPlaceholder": "0 to use system default role",
+    "forceSso": "Force SSO login"
+  },
+  "oidc": {
+    "title": "OIDC Configuration",
+    "issuerUrl": "Issuer URL",
+    "clientId": "Client ID",
+    "clientSecret": "Client Secret",
+    "clientSecretPlaceholderEdit": "Leave blank to keep unchanged",
+    "clientSecretPlaceholderCreate": "your-client-secret",
+    "callbackUrl": "Callback URL",
+    "callbackUrlDescription": "This URL needs to be configured in the OIDC provider",
+    "usePkce": "Enable PKCE",
+    "scopes": "Scopes",
+    "scopesDescription": "Separate multiple scopes with commas"
+  },
+  "ldap": {
+    "title": "LDAP Configuration",
+    "serverUrl": "Server URL",
+    "bindDn": "Bind DN",
+    "bindPassword": "Bind Password",
+    "bindPasswordPlaceholderEdit": "Leave blank to keep unchanged",
+    "bindPasswordPlaceholderCreate": "bind password",
+    "searchBase": "Search Base",
+    "userFilter": "User Filter",
+    "useTls": "Enable TLS",
+    "skipVerify": "Skip Certificate Verification"
+  },
+  "validation": {
+    "nameRequired": "Name is required",
+    "domainRequired": "Domain is required",
+    "issuerUrlRequired": "Issuer URL is required",
+    "clientIdRequired": "Client ID is required",
+    "serverUrlRequired": "Server URL is required",
+    "bindDnRequired": "Bind DN is required",
+    "searchBaseRequired": "Search Base is required"
+  }
+}

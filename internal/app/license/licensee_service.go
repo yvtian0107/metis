@@ -9,10 +9,10 @@ import (
 )
 
 var (
-	ErrLicenseeNotFound      = errors.New("licensee not found")
-	ErrLicenseeNameExists    = errors.New("主体名称已存在")
-	ErrLicenseeCodeCollision = errors.New("failed to generate unique licensee code")
-	ErrLicenseeInvalidStatus = errors.New("invalid licensee status transition")
+	ErrLicenseeNotFound      = errors.New("error.license.licensee_not_found")
+	ErrLicenseeNameExists    = errors.New("error.license.licensee_name_exists")
+	ErrLicenseeCodeCollision = errors.New("error.license.licensee_code_collision")
+	ErrLicenseeInvalidStatus = errors.New("error.license.licensee_invalid_status")
 )
 
 type LicenseeService struct {

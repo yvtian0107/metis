@@ -11,7 +11,7 @@ import (
 	"metis/internal/model"
 )
 
-var ErrDomainConflict = errors.New("domain already bound to another identity source")
+var ErrDomainConflict = errors.New("error.identity.domain_conflict")
 
 type IdentitySourceRepo struct {
 	db *database.DB

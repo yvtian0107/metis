@@ -1,0 +1,44 @@
+{
+  "title": "菜单管理",
+  "createMenu": "新建菜单",
+  "editMenu": "编辑菜单",
+  "addChild": "添加子项",
+  "collapseAll": "全部收起",
+  "expandAll": "全部展开",
+  "path": "路径",
+  "permission": "权限标识",
+  "hidden": "隐藏",
+  "hideMenu": "隐藏菜单",
+  "parentMenu": "上级菜单",
+  "topLevelMenu": "顶级菜单",
+  "icon": "图标",
+  "menuType": {
+    "directory": "目录",
+    "menu": "菜单",
+    "button": "按钮"
+  },
+  "empty": {
+    "title": "暂无菜单",
+    "description": "点击「新建菜单」添加第一个菜单项"
+  },
+  "deleteConfirm": {
+    "title": "确认删除",
+    "description": "确定要删除菜单「{{name}}」吗？",
+    "hasChildren": "该菜单包含子项，请先删除子项。"
+  },
+  "sheet": {
+    "editTitle": "编辑菜单",
+    "createTitle": "新建菜单",
+    "editDescription": "修改菜单项信息",
+    "createDescription": "填写菜单信息以创建新菜单项"
+  },
+  "form": {
+    "namePlaceholder": "菜单名称",
+    "pathPlaceholder": "路由路径，如 /users",
+    "iconPlaceholder": "图标名称（可选）",
+    "permissionPlaceholder": "如 system:user:list"
+  },
+  "validation": {
+    "nameRequired": "菜单名称不能为空"
+  }
+}

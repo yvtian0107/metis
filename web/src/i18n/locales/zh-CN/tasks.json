@@ -1,0 +1,73 @@
+{
+  "title": "任务中心",
+  "stats": {
+    "totalTasks": "总任务数",
+    "running": "运行中",
+    "completedToday": "今日完成",
+    "failedToday": "今日失败"
+  },
+  "tabs": {
+    "all": "全部",
+    "scheduled": "定时任务",
+    "async": "异步队列"
+  },
+  "table": {
+    "lastExecution": "上次执行",
+    "emptyTitle": "暂无任务"
+  },
+  "taskType": {
+    "scheduled": "定时",
+    "async": "异步"
+  },
+  "status": {
+    "active": "运行中",
+    "paused": "已暂停",
+    "completed": "完成",
+    "failed": "失败",
+    "timeout": "超时",
+    "pending": "等待中",
+    "running": "执行中",
+    "stale": "中断"
+  },
+  "actions": {
+    "pause": "暂停",
+    "resume": "恢复",
+    "trigger": "触发",
+    "execute": "执行"
+  },
+  "triggerDialog": {
+    "title": "手动触发任务",
+    "description": "确定要立即执行任务 \u201c{{name}}\u201d 吗？"
+  },
+  "relativeTime": {
+    "justNow": "刚刚",
+    "minutesAgo": "{{count}}分钟前",
+    "hoursAgo": "{{count}}小时前",
+    "daysAgo": "{{count}}天前"
+  },
+  "detail": {
+    "back": "返回",
+    "loading": "加载中...",
+    "taskConfig": "任务配置",
+    "scheduledTask": "定时任务",
+    "asyncTask": "异步任务",
+    "cronExpression": "Cron 表达式",
+    "timeout": "超时",
+    "maxRetries": "最大重试",
+    "retriesSuffix": "次",
+    "executionHistory": "执行历史",
+    "emptyExecutions": "暂无执行记录"
+  },
+  "execution": {
+    "id": "ID",
+    "triggerType": "触发方式",
+    "duration": "耗时",
+    "error": "错误信息",
+    "time": "时间"
+  },
+  "trigger": {
+    "cron": "定时",
+    "manual": "手动",
+    "api": "API"
+  }
+}

@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { useTranslation } from "react-i18next"
 import { Pencil, KeyRound } from "lucide-react"
 import { useState } from "react"
 import { api } from "@/lib/api"
@@ -20,9 +21,15 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import { addKernelNamespace } from "@/i18n"
+import zhCNAuthProviders from "@/i18n/locales/zh-CN/authProviders.json"
+import enAuthProviders from "@/i18n/locales/en/authProviders.json"
 import { ProviderSheet, type AuthProvider } from "./provider-sheet"
 
+addKernelNamespace("authProviders", zhCNAuthProviders, enAuthProviders)
+
 export function Component() {
+  const { t } = useTranslation(["authProviders", "common"])
   const queryClient = useQueryClient()
   const canUpdate = usePermission("system:auth-provider:update")
   const [sheetOpen, setSheetOpen] = useState(false)
@@ -48,20 +55,20 @@ export function Component() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold">认证源</h2>
+        <h2 className="text-lg font-semibold">{t("title")}</h2>
       </div>
 
       <DataTableCard>
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead className="min-w-[180px]">认证源</TableHead>
-              <TableHead className="min-w-[180px]">Client ID</TableHead>
-              <TableHead className="min-w-[180px]">Client Secret</TableHead>
-              <TableHead className="min-w-[220px]">回调地址</TableHead>
-              <TableHead className="w-[100px]">状态</TableHead>
+              <TableHead className="min-w-[180px]">{t("provider")}</TableHead>
+              <TableHead className="min-w-[180px]">{t("clientId")}</TableHead>
+              <TableHead className="min-w-[180px]">{t("clientSecret")}</TableHead>
+              <TableHead className="min-w-[220px]">{t("callbackUrl")}</TableHead>
+              <TableHead className="w-[100px]">{t("common:status")}</TableHead>
               <DataTableActionsHead className="min-w-[108px]">
-                操作
+                {t("common:actions")}
               </DataTableActionsHead>
             </TableRow>
           </TableHeader>
@@ -69,7 +76,7 @@ export function Component() {
             {isLoading ? (
               <DataTableLoadingRow colSpan={6} />
             ) : providers.length === 0 ? (
-              <DataTableEmptyRow colSpan={6} icon={KeyRound} title="暂无认证源" />
+              <DataTableEmptyRow colSpan={6} icon={KeyRound} title={t("emptyTitle")} />
             ) : (
               providers.map((p) => (
                 <TableRow key={p.providerKey}>
@@ -108,7 +115,7 @@ export function Component() {
                         onClick={() => handleEdit(p)}
                       >
                         <Pencil className="mr-1 h-3.5 w-3.5" />
-                        编辑
+                        {t("common:edit")}
                       </Button>
                     )}
                   </DataTableActionsCell>

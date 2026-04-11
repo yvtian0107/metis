@@ -1,4 +1,5 @@
 import { useEffect } from "react"
+import { useTranslation } from "react-i18next"
 import { useForm } from "react-hook-form"
 import { z } from "zod"
 import { zodResolver } from "@hookform/resolvers/zod"
@@ -37,14 +38,16 @@ export interface AuthProvider {
   updatedAt: string
 }
 
-const schema = z.object({
-  clientId: z.string().min(1, "Client ID 不能为空"),
-  clientSecret: z.string(),
-  scopes: z.string(),
-  callbackUrl: z.string(),
-})
+type FormValues = z.infer<ReturnType<typeof createSchema>>
 
-type FormValues = z.infer<typeof schema>
+function createSchema(t: (key: string) => string) {
+  return z.object({
+    clientId: z.string().min(1, t("validation.clientIdRequired")),
+    clientSecret: z.string(),
+    scopes: z.string(),
+    callbackUrl: z.string(),
+  })
+}
 
 interface Props {
   open: boolean
@@ -53,7 +56,10 @@ interface Props {
 }
 
 export function ProviderSheet({ open, onOpenChange, provider }: Props) {
+  const { t } = useTranslation(["authProviders", "common"])
   const queryClient = useQueryClient()
+
+  const schema = createSchema(t)
 
   const form = useForm<FormValues>({
     resolver: zodResolver(schema),
@@ -101,9 +107,9 @@ export function ProviderSheet({ open, onOpenChange, provider }: Props) {
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent>
         <SheetHeader>
-          <SheetTitle>编辑认证源 — {provider?.displayName}</SheetTitle>
+          <SheetTitle>{t("sheet.editTitle", { name: provider?.displayName })}</SheetTitle>
           <SheetDescription>
-            配置 {provider?.displayName} OAuth 参数
+            {t("sheet.editDescription", { name: provider?.displayName })}
           </SheetDescription>
         </SheetHeader>
         <Form {...form}>
@@ -116,9 +122,9 @@ export function ProviderSheet({ open, onOpenChange, provider }: Props) {
               name="clientId"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Client ID</FormLabel>
+                  <FormLabel>{t("clientId")}</FormLabel>
                   <FormControl>
-                    <Input placeholder="OAuth Client ID" {...field} />
+                    <Input placeholder={t("form.clientIdPlaceholder")} {...field} />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -129,22 +135,22 @@ export function ProviderSheet({ open, onOpenChange, provider }: Props) {
               name="clientSecret"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Client Secret</FormLabel>
+                  <FormLabel>{t("clientSecret")}</FormLabel>
                   <FormControl>
                     <Input
                       type="password"
                       placeholder={
                         provider?.clientSecret
-                          ? "留空保持不变"
-                          : "OAuth Client Secret"
+                          ? t("form.clientSecretPlaceholderConfigured")
+                          : t("form.clientSecretPlaceholderEmpty")
                       }
                       {...field}
                     />
                   </FormControl>
                   <FormDescription>
                     {provider?.clientSecret
-                      ? "已配置，留空则保持原值"
-                      : "尚未配置"}
+                      ? t("form.clientSecretConfigured")
+                      : t("form.clientSecretNotConfigured")}
                   </FormDescription>
                   <FormMessage />
                 </FormItem>
@@ -157,10 +163,10 @@ export function ProviderSheet({ open, onOpenChange, provider }: Props) {
                 <FormItem>
                   <FormLabel>Scopes</FormLabel>
                   <FormControl>
-                    <Input placeholder="例如: user:email,read:user" {...field} />
+                    <Input placeholder={t("form.scopesPlaceholder")} {...field} />
                   </FormControl>
                   <FormDescription>
-                    多个 scope 用逗号分隔，留空使用默认值
+                    {t("form.scopesDescription")}
                   </FormDescription>
                   <FormMessage />
                 </FormItem>
@@ -171,22 +177,22 @@ export function ProviderSheet({ open, onOpenChange, provider }: Props) {
               name="callbackUrl"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>回调地址</FormLabel>
+                  <FormLabel>{t("callbackUrl")}</FormLabel>
                   <FormControl>
                     <Input
-                      placeholder="https://your-domain.com/oauth/callback"
+                      placeholder={t("form.callbackUrlPlaceholder")}
                       {...field}
                     />
                   </FormControl>
                   <FormDescription>
-                    OAuth 回调地址，需与 OAuth App 配置一致
+                    {t("form.callbackUrlDescription")}
                   </FormDescription>
                   <FormMessage />
                 </FormItem>
               )}
             />
             <Button type="submit" disabled={mutation.isPending}>
-              {mutation.isPending ? "保存中..." : "保存"}
+              {mutation.isPending ? t("common:saving") : t("common:save")}
             </Button>
           </form>
         </Form>

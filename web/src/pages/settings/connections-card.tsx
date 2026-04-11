@@ -1,4 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
+import { useTranslation } from "react-i18next"
 import { api } from "@/lib/api"
 import { Button } from "@/components/ui/button"
 import {
@@ -47,6 +48,7 @@ function ProviderIcon({ provider }: { provider: string }) {
 }
 
 export function ConnectionsCard() {
+  const { t } = useTranslation(["settings", "common"])
   const queryClient = useQueryClient()
 
   const { data: connections = [], isLoading } = useQuery({
@@ -74,7 +76,7 @@ export function ConnectionsCard() {
       )
       sessionStorage.setItem("oauth_provider", providerKey)
       sessionStorage.setItem("oauth_bind", "1")
-      window.location.href = data.authURL
+      window.location.assign(data.authURL)
     } catch {
       // ignore
     }
@@ -84,7 +86,7 @@ export function ConnectionsCard() {
     return (
       <Card>
         <CardContent className="flex h-32 items-center justify-center text-muted-foreground">
-          加载中...
+          {t("common:loading")}
         </CardContent>
       </Card>
     )
@@ -98,8 +100,8 @@ export function ConnectionsCard() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>账号关联</CardTitle>
-        <CardDescription>管理第三方登录账号的绑定与解绑</CardDescription>
+        <CardTitle>{t("settings:connections.title")}</CardTitle>
+        <CardDescription>{t("settings:connections.description")}</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
         {connections.map((conn) => (
@@ -125,7 +127,7 @@ export function ConnectionsCard() {
               onClick={() => unbindMutation.mutate(conn.provider)}
               disabled={unbindMutation.isPending}
             >
-              解绑
+              {t("settings:connections.unbind")}
             </Button>
           </div>
         ))}
@@ -139,7 +141,7 @@ export function ConnectionsCard() {
               <ProviderIcon provider={p.providerKey} />
               <div>
                 <p className="text-sm font-medium">{p.displayName}</p>
-                <p className="text-xs text-muted-foreground">未绑定</p>
+                <p className="text-xs text-muted-foreground">{t("settings:connections.unbound")}</p>
               </div>
             </div>
             <Button
@@ -147,13 +149,13 @@ export function ConnectionsCard() {
               size="sm"
               onClick={() => handleBind(p.providerKey)}
             >
-              绑定
+              {t("settings:connections.bind")}
             </Button>
           </div>
         ))}
 
         {connections.length === 0 && unboundProviders.length === 0 && (
-          <p className="text-sm text-muted-foreground">暂无可用的认证源</p>
+          <p className="text-sm text-muted-foreground">{t("settings:connections.noProviders")}</p>
         )}
       </CardContent>
     </Card>

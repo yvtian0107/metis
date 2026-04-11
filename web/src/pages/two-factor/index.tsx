@@ -1,17 +1,19 @@
 import { useState } from "react"
 import { useNavigate, useLocation, Navigate } from "react-router"
+import { useTranslation } from "react-i18next"
 import { useAuthStore } from "@/stores/auth"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 
 export function Component() {
+  const { t } = useTranslation("auth")
   const navigate = useNavigate()
   const location = useLocation()
   const oauthLogin = useAuthStore((s) => s.oauthLogin)
   const user = useAuthStore((s) => s.user)
 
-  const twoFactorToken = (location.state as any)?.twoFactorToken as string | undefined
+  const twoFactorToken = (location.state as Record<string, unknown>)?.twoFactorToken as string | undefined
 
   const [code, setCode] = useState("")
   const [error, setError] = useState("")
@@ -36,13 +38,13 @@ export function Component() {
 
       const body = await res.json()
       if (!res.ok || body.code !== 0) {
-        throw new Error(body.message || "验证失败")
+        throw new Error(body.message || t("twoFactor.verifyFailed"))
       }
 
       await oauthLogin(body.data)
       navigate("/", { replace: true })
     } catch (err) {
-      setError(err instanceof Error ? err.message : "验证失败")
+      setError(err instanceof Error ? err.message : t("twoFactor.verifyFailed"))
     } finally {
       setLoading(false)
     }
@@ -52,20 +54,20 @@ export function Component() {
     <div className="flex min-h-screen items-center justify-center bg-background">
       <div className="w-full max-w-sm space-y-6 px-4">
         <div className="space-y-2 text-center">
-          <h1 className="text-2xl font-semibold tracking-tight">两步验证</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">{t("twoFactor.title")}</h1>
           <p className="text-sm text-muted-foreground">
             {useBackup
-              ? "请输入恢复码"
-              : "请输入验证器应用中的 6 位验证码"}
+              ? t("twoFactor.recoverySubtitle")
+              : t("twoFactor.codeSubtitle")}
           </p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-2">
-            <Label htmlFor="code">{useBackup ? "恢复码" : "验证码"}</Label>
+            <Label htmlFor="code">{useBackup ? t("twoFactor.recoveryLabel") : t("twoFactor.codeLabel")}</Label>
             <Input
               id="code"
-              placeholder={useBackup ? "请输入 8 位恢复码" : "请输入 6 位验证码"}
+              placeholder={useBackup ? t("twoFactor.recoveryPlaceholder") : t("twoFactor.codePlaceholder")}
               value={code}
               onChange={(e) => setCode(e.target.value)}
               required
@@ -77,7 +79,7 @@ export function Component() {
           {error && <p className="text-sm text-destructive">{error}</p>}
 
           <Button type="submit" className="w-full" disabled={loading}>
-            {loading ? "验证中..." : "验证"}
+            {loading ? t("twoFactor.submitting") : t("twoFactor.submit")}
           </Button>
         </form>
 
@@ -91,7 +93,7 @@ export function Component() {
               setError("")
             }}
           >
-            {useBackup ? "使用验证码" : "使用恢复码"}
+            {useBackup ? t("twoFactor.useCode") : t("twoFactor.useRecovery")}
           </button>
         </div>
       </div>

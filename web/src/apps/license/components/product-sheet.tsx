@@ -1,5 +1,6 @@
 import { useEffect } from "react"
 import { useForm } from "react-hook-form"
+import { useTranslation } from "react-i18next"
 import { z } from "zod"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
@@ -37,17 +38,20 @@ export interface ProductItem {
   updatedAt: string
 }
 
-const schema = z.object({
-  name: z.string().min(1, "名称不能为空").max(128),
-  code: z
-    .string()
-    .min(1, "编码不能为空")
-    .max(64)
-    .regex(/^[a-z0-9-]+$/, "仅允许小写字母、数字和连字符"),
-  description: z.string().optional(),
-})
+function useProductSchema() {
+  const { t } = useTranslation("license")
+  return z.object({
+    name: z.string().min(1, t("validation.nameRequired")).max(128),
+    code: z
+      .string()
+      .min(1, t("validation.codeRequired"))
+      .max(64)
+      .regex(/^[a-z0-9-]+$/, t("validation.codeFormat")),
+    description: z.string().optional(),
+  })
+}
 
-type FormValues = z.infer<typeof schema>
+type FormValues = z.infer<ReturnType<typeof useProductSchema>>
 
 interface ProductSheetProps {
   open: boolean
@@ -56,9 +60,11 @@ interface ProductSheetProps {
 }
 
 export function ProductSheet({ open, onOpenChange, product }: ProductSheetProps) {
+  const { t } = useTranslation(["license", "common"])
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const isEditing = product !== null
+  const schema = useProductSchema()
 
   const form = useForm<FormValues>({
     resolver: zodResolver(schema),
@@ -81,7 +87,7 @@ export function ProductSheet({ open, onOpenChange, product }: ProductSheetProps)
     onSuccess: (created) => {
       queryClient.invalidateQueries({ queryKey: ["license-products"] })
       onOpenChange(false)
-      toast.success("商品创建成功")
+      toast.success(t("license:products.createSuccess"))
       navigate(`/license/products/${created.id}?tab=schema`)
     },
     onError: (err) => toast.error(err.message),
@@ -97,7 +103,7 @@ export function ProductSheet({ open, onOpenChange, product }: ProductSheetProps)
       queryClient.invalidateQueries({ queryKey: ["license-products"] })
       queryClient.invalidateQueries({ queryKey: ["license-product"] })
       onOpenChange(false)
-      toast.success("商品更新成功")
+      toast.success(t("license:products.updateSuccess"))
     },
     onError: (err) => toast.error(err.message),
   })
@@ -116,9 +122,9 @@ export function ProductSheet({ open, onOpenChange, product }: ProductSheetProps)
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent className="sm:max-w-lg">
         <SheetHeader>
-          <SheetTitle>{isEditing ? "编辑商品" : "新建商品"}</SheetTitle>
+          <SheetTitle>{isEditing ? t("license:products.editProduct") : t("license:products.create")}</SheetTitle>
           <SheetDescription className="sr-only">
-            {isEditing ? "编辑商品" : "新建商品"}
+            {isEditing ? t("license:products.editProduct") : t("license:products.create")}
           </SheetDescription>
         </SheetHeader>
         <Form {...form}>
@@ -128,9 +134,9 @@ export function ProductSheet({ open, onOpenChange, product }: ProductSheetProps)
               name="name"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>商品名称</FormLabel>
+                  <FormLabel>{t("license:products.productName")}</FormLabel>
                   <FormControl>
-                    <Input placeholder="例如：NekoMonitor" {...field} />
+                    <Input placeholder={t("license:products.productNamePlaceholder")} {...field} />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -141,19 +147,19 @@ export function ProductSheet({ open, onOpenChange, product }: ProductSheetProps)
               name="code"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>商品编码</FormLabel>
+                  <FormLabel>{t("license:products.productCode")}</FormLabel>
                   {isEditing ? (
                     <div>
                       <Input value={field.value} disabled />
-                      <p className="text-xs text-muted-foreground mt-1">编码创建后不可更改</p>
+                      <p className="text-xs text-muted-foreground mt-1">{t("license:products.codeImmutable")}</p>
                     </div>
                   ) : (
                     <>
                       <FormControl>
-                        <Input placeholder="例如：neko-monitor" {...field} />
+                        <Input placeholder={t("license:products.productCodePlaceholder")} {...field} />
                       </FormControl>
                       <p className="text-xs text-muted-foreground">
-                        用于唯一标识商品，建议使用英文、小写和连字符。
+                        {t("license:products.codeHint")}
                       </p>
                     </>
                   )}
@@ -166,9 +172,9 @@ export function ProductSheet({ open, onOpenChange, product }: ProductSheetProps)
               name="description"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>描述</FormLabel>
+                  <FormLabel>{t("common:description")}</FormLabel>
                   <FormControl>
-                    <Textarea placeholder="商品描述（可选）" rows={3} {...field} />
+                    <Textarea placeholder={t("license:products.descriptionPlaceholder")} rows={3} {...field} />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -177,7 +183,7 @@ export function ProductSheet({ open, onOpenChange, product }: ProductSheetProps)
 
             <SheetFooter>
               <Button type="submit" size="sm" disabled={isPending}>
-                {isPending ? "保存中..." : isEditing ? "保存" : "创建"}
+                {isPending ? t("common:saving") : isEditing ? t("common:save") : t("common:create")}
               </Button>
             </SheetFooter>
           </form>

@@ -19,6 +19,7 @@ import (
 	"metis/internal/config"
 	"metis/internal/database"
 	"metis/internal/handler"
+	"metis/internal/locales"
 	"metis/internal/middleware"
 	"metis/internal/pkg/oauth"
 	"metis/internal/pkg/token"
@@ -92,6 +93,14 @@ func main() {
 		jwtSecret := []byte(cfg.JWTSecret)
 		do.ProvideValue(injector, jwtSecret)
 
+		// Locale service
+		localeSvc, err := locales.New()
+		if err != nil {
+			slog.Error("failed to init locale service", "error", err)
+			os.Exit(1)
+		}
+		do.ProvideValue(injector, localeSvc)
+
 		// Token blacklist
 		do.ProvideValue(injector, token.NewBlacklist())
 
@@ -154,6 +163,12 @@ func main() {
 			if err := a.Seed(db.DB, enforcer); err != nil {
 				slog.Error("app seed failed", "app", a.Name(), "error", err)
 				os.Exit(1)
+			}
+			// Load app locale files if provided
+			if lp, ok := a.(app.LocaleProvider); ok {
+				if err := localeSvc.LoadAppLocales(lp.Locales()); err != nil {
+					slog.Warn("failed to load app locales", "app", a.Name(), "error", err)
+				}
 			}
 		}
 
