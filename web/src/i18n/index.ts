@@ -73,6 +73,7 @@ function resolveInitialLocale(): string {
 i18n.use(initReactI18next).init({
   lng: resolveInitialLocale(),
   fallbackLng: "zh-CN",
+  nsSeparator: false,
   supportedLngs: supportedLocales.map((l) => l.code),
   ns: ["common", "errors", "install", "auth", "layout", "sessions", "users", "roles", "menus", "settings", "tasks", "audit", "announcements", "channels", "authProviders", "identitySources"],
   defaultNS: "common",
