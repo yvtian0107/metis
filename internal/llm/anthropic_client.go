@@ -17,9 +17,9 @@ type anthropicClient struct {
 func newAnthropicClient(baseURL, apiKey string) *anthropicClient {
 	opts := []option.RequestOption{
 		option.WithAPIKey(apiKey),
-		// Set HTTP client with 60s timeout to avoid Cloudflare 524 error
+		// Set HTTP client with 5min timeout; caller's context deadline is the primary timeout control
 		option.WithHTTPClient(&http.Client{
-			Timeout: 60 * time.Second,
+			Timeout: 300 * time.Second,
 		}),
 	}
 	if baseURL != "" {

@@ -18,9 +18,9 @@ func newOpenAIClient(baseURL, apiKey string) *openaiClient {
 	if baseURL != "" {
 		cfg.BaseURL = baseURL
 	}
-	// Set HTTP client with 60s timeout to avoid Cloudflare 524 error
+	// Set HTTP client with 5min timeout; caller's context deadline is the primary timeout control
 	cfg.HTTPClient = &http.Client{
-		Timeout: 60 * time.Second,
+		Timeout: 300 * time.Second,
 	}
 	return &openaiClient{client: openai.NewClientWithConfig(cfg)}
 }
