@@ -53,6 +53,18 @@ export interface GraphResponse {
   edges: EdgeItem[]
 }
 
+export interface CascadeDetail {
+  nodeTitle: string
+  updateType: "content" | "relationship" | "contradiction" | "merge"
+  reason: string
+  sourcesAdded?: number[]
+}
+
+export interface CascadeLog {
+  primaryNodes: string[]
+  cascadeUpdates: CascadeDetail[]
+}
+
 export interface LogItem {
   id: number
   action: string
@@ -62,5 +74,6 @@ export interface LogItem {
   edgesCreated: number
   lintIssues: number
   errorMessage: string
+  cascadeDetails?: CascadeLog
   createdAt: string
 }

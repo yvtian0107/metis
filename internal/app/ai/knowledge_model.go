@@ -66,6 +66,31 @@ const (
 	CompileMethodKnowledgeGraph = "knowledge_graph"
 )
 
+// Compile stages
+const (
+	CompileStagePreparing            = "preparing"
+	CompileStageCallingLLM           = "calling_llm"
+	CompileStageWritingNodes         = "writing_nodes"
+	CompileStageGeneratingEmbeddings = "generating_embeddings"
+	CompileStageCompleted            = "completed"
+	CompileStageIdle                 = "idle"
+)
+
+// ProgressCounter tracks done/total for a specific phase
+type ProgressCounter struct {
+	Total int `json:"total"`
+	Done  int `json:"done"`
+}
+
+// CompileProgress tracks real-time compilation progress
+type CompileProgress struct {
+	Stage       string          `json:"stage"`
+	Sources     ProgressCounter `json:"sources"`
+	Nodes       ProgressCounter `json:"nodes"`
+	Embeddings  ProgressCounter `json:"embeddings"`
+	CurrentItem string          `json:"currentItem"`
+}
+
 // --- KnowledgeBase ---
 
 type KnowledgeBase struct {
@@ -80,30 +105,58 @@ type KnowledgeBase struct {
 	CompiledAt          *time.Time `json:"compiledAt"`
 	AutoCompile         bool       `json:"autoCompile" gorm:"not null;default:false"`
 	SourceCount         int        `json:"sourceCount" gorm:"not null;default:0"`
+	CompileProgressData string     `json:"-" gorm:"type:text"` // JSON stored in DB
+}
+
+// GetCompileProgress returns the parsed compile progress
+func (kb *KnowledgeBase) GetCompileProgress() *CompileProgress {
+	if kb.CompileProgressData == "" {
+		return nil
+	}
+	var progress CompileProgress
+	if err := json.Unmarshal([]byte(kb.CompileProgressData), &progress); err != nil {
+		return nil
+	}
+	return &progress
+}
+
+// SetCompileProgress saves the compile progress as JSON
+func (kb *KnowledgeBase) SetCompileProgress(progress *CompileProgress) error {
+	if progress == nil {
+		kb.CompileProgressData = ""
+		return nil
+	}
+	data, err := json.Marshal(progress)
+	if err != nil {
+		return err
+	}
+	kb.CompileProgressData = string(data)
+	return nil
 }
 
 func (KnowledgeBase) TableName() string { return "ai_knowledge_bases" }
 
 type KnowledgeBaseResponse struct {
-	ID                  uint       `json:"id"`
-	Name                string     `json:"name"`
-	Description         string     `json:"description"`
-	CompileStatus       string     `json:"compileStatus"`
-	CompileMethod       string     `json:"compileMethod"`
-	CompileModelID      *uint      `json:"compileModelId"`
-	EmbeddingProviderID *uint      `json:"embeddingProviderId"`
-	EmbeddingModelID    string     `json:"embeddingModelId"`
-	CompiledAt          *time.Time `json:"compiledAt"`
-	AutoCompile         bool       `json:"autoCompile"`
-	SourceCount         int        `json:"sourceCount"`
-	NodeCount           int        `json:"nodeCount"`
-	EdgeCount           int        `json:"edgeCount"`
-	CreatedAt           time.Time  `json:"createdAt"`
-	UpdatedAt           time.Time  `json:"updatedAt"`
+	ID                  uint             `json:"id"`
+	Name                string           `json:"name"`
+	Description         string           `json:"description"`
+	CompileStatus       string           `json:"compileStatus"`
+	CompileMethod       string           `json:"compileMethod"`
+	CompileModelID      *uint            `json:"compileModelId"`
+	EmbeddingProviderID *uint            `json:"embeddingProviderId"`
+	EmbeddingModelID    string           `json:"embeddingModelId"`
+	CompiledAt          *time.Time       `json:"compiledAt"`
+	AutoCompile         bool             `json:"autoCompile"`
+	SourceCount         int              `json:"sourceCount"`
+	NodeCount           int              `json:"nodeCount"`
+	EdgeCount           int              `json:"edgeCount"`
+	CompileProgress     *CompileProgress `json:"compileProgress,omitempty"`
+	CreatedAt           time.Time        `json:"createdAt"`
+	UpdatedAt           time.Time        `json:"updatedAt"`
 }
 
 func (kb *KnowledgeBase) ToResponse() KnowledgeBaseResponse {
-	return KnowledgeBaseResponse{
+	resp := KnowledgeBaseResponse{
 		ID:                  kb.ID,
 		Name:                kb.Name,
 		Description:         kb.Description,
@@ -118,6 +171,11 @@ func (kb *KnowledgeBase) ToResponse() KnowledgeBaseResponse {
 		CreatedAt:           kb.CreatedAt,
 		UpdatedAt:           kb.UpdatedAt,
 	}
+	// Include compile progress if available
+	if progress := kb.GetCompileProgress(); progress != nil {
+		resp.CompileProgress = progress
+	}
+	return resp
 }
 
 // --- KnowledgeSource ---
@@ -256,18 +314,33 @@ func (e *KnowledgeEdge) ToResponse() KnowledgeEdgeResponse {
 
 // --- KnowledgeLog ---
 
+// CascadeDetail 记录单个节点的级联更新详情
+type CascadeDetail struct {
+	NodeTitle    string `json:"nodeTitle"`
+	UpdateType   string `json:"updateType"` // "content" | "relationship" | "contradiction" | "merge"
+	Reason       string `json:"reason"`
+	SourcesAdded []uint `json:"sourcesAdded,omitempty"`
+}
+
+// CascadeLog 记录整个编译过程的级联更新情况
+type CascadeLog struct {
+	PrimaryNodes   []string        `json:"primaryNodes"`   // 本次编译主要涉及的新节点
+	CascadeUpdates []CascadeDetail `json:"cascadeUpdates"` // 被级联更新的已有节点
+}
+
 type KnowledgeLog struct {
-	ID           uint      `json:"id" gorm:"primaryKey"`
-	KbID         uint      `json:"kbId" gorm:"not null;index"`
-	Action       string    `json:"action" gorm:"size:32;not null"`
-	ModelID      string    `json:"modelId" gorm:"size:128"`
-	NodesCreated int       `json:"nodesCreated"`
-	NodesUpdated int       `json:"nodesUpdated"`
-	EdgesCreated int       `json:"edgesCreated"`
-	LintIssues   int       `json:"lintIssues"`
-	Details      string    `json:"details" gorm:"type:text"`
-	ErrorMessage string    `json:"errorMessage" gorm:"type:text"`
-	CreatedAt    time.Time `json:"createdAt" gorm:"index"`
+	ID             uint      `json:"id" gorm:"primaryKey"`
+	KbID           uint      `json:"kbId" gorm:"not null;index"`
+	Action         string    `json:"action" gorm:"size:32;not null"`
+	ModelID        string    `json:"modelId" gorm:"size:128"`
+	NodesCreated   int       `json:"nodesCreated"`
+	NodesUpdated   int       `json:"nodesUpdated"`
+	EdgesCreated   int       `json:"edgesCreated"`
+	LintIssues     int       `json:"lintIssues"`
+	Details        string    `json:"details" gorm:"type:text"`
+	CascadeDetails string    `json:"cascadeDetails" gorm:"type:text"` // JSON 存储 CascadeLog
+	ErrorMessage   string    `json:"errorMessage" gorm:"type:text"`
+	CreatedAt      time.Time `json:"createdAt" gorm:"index"`
 }
 
 func (KnowledgeLog) TableName() string { return "ai_knowledge_logs" }
