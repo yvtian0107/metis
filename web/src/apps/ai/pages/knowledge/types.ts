@@ -1,6 +1,20 @@
 export type CompileStatus = "idle" | "compiling" | "completed" | "error"
 export type CompileMethod = "knowledge_graph"
 export type ExtractStatus = "pending" | "completed" | "error"
+export type CompileStage = "preparing" | "calling_llm" | "writing_nodes" | "generating_embeddings" | "completed" | "idle"
+
+export interface ProgressCounter {
+  total: number
+  done: number
+}
+
+export interface CompileProgress {
+  stage: CompileStage
+  sources: ProgressCounter
+  nodes: ProgressCounter
+  embeddings: ProgressCounter
+  currentItem: string
+}
 
 export interface KnowledgeBaseDetail {
   id: number

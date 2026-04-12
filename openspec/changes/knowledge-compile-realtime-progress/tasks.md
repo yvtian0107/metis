@@ -19,15 +19,15 @@
 
 ## 3. Backend API
 
-- [ ] 3.1 Add `GetCompileProgress` method to `KnowledgeBaseHandler`
-- [ ] 3.2 Register new route `GET /api/v1/ai/knowledge-bases/:id/progress` in `internal/app/ai/app.go`
-- [ ] 3.3 Return 404 if knowledge base not found
-- [ ] 3.4 Return empty progress with stage "idle" if not compiling
+- [x] 3.1 Add `GetCompileProgress` method to `KnowledgeBaseHandler`
+- [x] 3.2 Register new route `GET /api/v1/ai/knowledge-bases/:id/progress` in `internal/app/ai/app.go`
+- [x] 3.3 Return 404 if knowledge base not found
+- [x] 3.4 Return empty progress with stage "idle" if not compiling
 
 ## 4. Frontend Types
 
-- [ ] 4.1 Add `CompileProgress` interface to `web/src/apps/ai/pages/knowledge/types.ts`
-- [ ] 4.2 Define progress stage union type: "preparing" | "calling_llm" | "writing_nodes" | "generating_embeddings" | "completed" | "idle"
+- [x] 4.1 Add `CompileProgress` interface to `web/src/apps/ai/pages/knowledge/types.ts`
+- [x] 4.2 Define progress stage union type: "preparing" | "calling_llm" | "writing_nodes" | "generating_embeddings" | "completed" | "idle"
 
 ## 5. Frontend Progress Component
 

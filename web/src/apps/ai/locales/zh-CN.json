@@ -486,9 +486,14 @@
       "created": "新增",
       "updated": "更新",
       "edges": "关系",
+      "cascade": "级联",
       "lint": "Lint",
       "error": "错误",
-      "empty": "暂无编译日志"
+      "empty": "暂无编译日志",
+      "showCascade": "显示 {{count}} 条级联更新",
+      "hideCascade": "隐藏级联更新",
+      "primaryNodes": "本次主要节点",
+      "cascadeUpdates": "级联更新的节点"
     }
   }
 }

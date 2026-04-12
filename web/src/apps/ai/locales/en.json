@@ -485,9 +485,14 @@
       "created": "Created",
       "updated": "Updated",
       "edges": "Edges",
+      "cascade": "Cascade",
       "lint": "Lint",
       "error": "Error",
-      "empty": "No compile logs"
+      "empty": "No compile logs",
+      "showCascade": "Show {{count}} cascade updates",
+      "hideCascade": "Hide cascade updates",
+      "primaryNodes": "Primary nodes",
+      "cascadeUpdates": "Cascade updates"
     }
   }
 }

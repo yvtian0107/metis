@@ -128,6 +128,7 @@ func (a *AIApp) Routes(api *gin.RouterGroup) {
 		kbs.DELETE("/:id", kbH.Delete)
 		kbs.POST("/:id/compile", kbH.Compile)
 		kbs.POST("/:id/recompile", kbH.Recompile)
+		kbs.GET("/:id/progress", kbH.GetProgress)
 		// Sources
 		kbs.POST("/:id/sources", sourceH.Create)
 		kbs.GET("/:id/sources", sourceH.List)

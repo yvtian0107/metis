@@ -214,3 +214,25 @@ func (h *KnowledgeBaseHandler) enqueueCompile(c *gin.Context, recompile bool, au
 
 	handler.OK(c, kb.ToResponse())
 }
+
+func (h *KnowledgeBaseHandler) GetProgress(c *gin.Context) {
+	id, _ := strconv.Atoi(c.Param("id"))
+	kb, err := h.svc.Get(uint(id))
+	if err != nil {
+		if errors.Is(err, ErrKnowledgeBaseNotFound) {
+			handler.Fail(c, http.StatusNotFound, err.Error())
+			return
+		}
+		handler.Fail(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	progress := kb.GetCompileProgress()
+	if progress == nil {
+		progress = &CompileProgress{
+			Stage: CompileStageIdle,
+		}
+	}
+
+	handler.OK(c, progress)
+}
