@@ -367,6 +367,7 @@ func seedAI(db *gorm.DB, enforcer *casbin.Enforcer) error {
 		{"admin", "/api/v1/ai/knowledge-bases/:id", "DELETE"},
 		{"admin", "/api/v1/ai/knowledge-bases/:id/compile", "POST"},
 		{"admin", "/api/v1/ai/knowledge-bases/:id/recompile", "POST"},
+		{"admin", "/api/v1/ai/knowledge-bases/:id/progress", "GET"},
 		// Knowledge sources
 		{"admin", "/api/v1/ai/knowledge-bases/:id/sources", "GET"},
 		{"admin", "/api/v1/ai/knowledge-bases/:id/sources", "POST"},

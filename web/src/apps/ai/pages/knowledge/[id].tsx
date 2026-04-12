@@ -15,6 +15,7 @@ import { KnowledgeGraphView } from "./components/knowledge-graph-view"
 import { RecallPanel } from "./components/recall-panel"
 import { NodeTableView } from "./components/node-table-view"
 import { CompileLogsTab } from "./components/compile-logs-tab"
+import { useCompileProgress } from "./hooks/use-compile-progress"
 
 // ─── Knowledge Graph Tab (with Recall Panel) ─────────────────────────────────
 
@@ -123,6 +124,12 @@ export function Component() {
     enabled: !Number.isNaN(kbId),
   })
 
+  const { progress } = useCompileProgress({
+    kbId,
+    compileStatus: kb?.compileStatus ?? "idle",
+    enabled: !Number.isNaN(kbId),
+  })
+
   const compileMutation = useMutation({
     mutationFn: () => api.post(`/api/v1/ai/knowledge-bases/${kbId}/compile`),
     onSuccess: () => {
@@ -209,7 +216,7 @@ export function Component() {
           <TabsTrigger value="logs">{t("ai:knowledge.tabs.logs")}</TabsTrigger>
         </TabsList>
         <TabsContent value="sources" className="mt-4">
-          <SourcesTab kbId={kbId} canCreate={canCreate} />
+          <SourcesTab kbId={kbId} canCreate={canCreate} progress={progress} />
         </TabsContent>
         <TabsContent value="graph" className="mt-4">
           <KnowledgeGraphTab kbId={kbId} compileMethod={kb.compileMethod} />

@@ -464,6 +464,19 @@
       "viewContent": "查看内容",
       "hideContent": "收起内容"
     },
+    "compileStage": {
+      "preparing": "准备中",
+      "calling_llm": "AI 分析中",
+      "writing_nodes": "写入节点",
+      "generating_embeddings": "生成向量索引",
+      "completed": "已完成",
+      "idle": "空闲"
+    },
+    "progress": {
+      "sources": "来源文档",
+      "nodes": "知识节点",
+      "embeddings": "向量索引"
+    },
     "graph": {
       "viewGraph": "图谱视图",
       "viewTable": "表格视图",

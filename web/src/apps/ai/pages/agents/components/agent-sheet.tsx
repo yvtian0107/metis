@@ -18,6 +18,8 @@ import { Textarea } from "@/components/ui/textarea"
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select"
+import { Separator } from "@/components/ui/separator"
+import { Bot, Settings2, Cpu, FileText } from "lucide-react"
 
 const agentSchema = z.object({
   name: z.string().min(1),
