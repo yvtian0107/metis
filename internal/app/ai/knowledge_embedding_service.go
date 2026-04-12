@@ -57,13 +57,10 @@ func (s *KnowledgeEmbeddingService) GenerateEmbeddings(ctx context.Context, kbID
 		return fmt.Errorf("find nodes: %w", err)
 	}
 
-	// Filter out index nodes and build input texts
+	// Build input texts
 	var inputs []string
 	var nodeIDs []string
 	for _, n := range nodes {
-		if n.NodeType == NodeTypeIndex {
-			continue
-		}
 		inputs = append(inputs, n.Title+"\n"+n.Summary)
 		nodeIDs = append(nodeIDs, n.ID)
 	}

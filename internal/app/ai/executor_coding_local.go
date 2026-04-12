@@ -50,7 +50,7 @@ func (e *LocalCodingExecutor) Execute(ctx context.Context, req ExecuteRequest) (
 			}
 		}
 
-		emit(Event{Type: EventTypeLLMStart, Turn: 1, Model: cfg.Runtime})
+		emit(Event{Type: EventTypeLLMStart, Turn: 1, Model: ""})
 
 		cmd := exec.CommandContext(ctx, cmdName, args...)
 		if cfg.Workspace != "" {

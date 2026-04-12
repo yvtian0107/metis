@@ -131,7 +131,7 @@ func (h *KnowledgeQueryHandler) respondSearchResult(
 		r := n.ToResponse()
 		edgeCount, _ := h.graphRepo.CountEdgesForNode(kbID, n.ID)
 		r.EdgeCount = edgeCount
-		r.Content = nil
+		r.Content = ""
 		if scores != nil {
 			if s, ok := scores[n.ID]; ok {
 				r.Score = s

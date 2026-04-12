@@ -55,7 +55,7 @@ func (e *ReactExecutor) Execute(ctx context.Context, req ExecuteRequest) (<-chan
 			default:
 			}
 
-			emit(Event{Type: EventTypeLLMStart, Turn: turn, Model: req.AgentConfig.Runtime})
+			emit(Event{Type: EventTypeLLMStart, Turn: turn, Model: req.AgentConfig.ModelName})
 
 			chatReq := llm.ChatRequest{
 				Model:       req.AgentConfig.ModelName,
@@ -174,7 +174,11 @@ func buildLLMMessages(req ExecuteRequest) []llm.Message {
 		msgs = append(msgs, llm.Message{Role: llm.RoleSystem, Content: req.SystemPrompt})
 	}
 	for _, m := range req.Messages {
-		msgs = append(msgs, llm.Message{Role: m.Role, Content: m.Content})
+		msgs = append(msgs, llm.Message{
+			Role:    m.Role,
+			Content: m.Content,
+			Images:  m.Images,
+		})
 	}
 	return msgs
 }

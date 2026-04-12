@@ -42,10 +42,10 @@ func NewKnowledgeCompileService(i do.Injector) (*KnowledgeCompileService, error)
 // --- Map Phase Types ---
 
 type mapNodeOutput struct {
-	Title   string            `json:"title"`
-	Summary string            `json:"summary"`
-	Content *string           `json:"content"`
-	Related []compileRelation `json:"related"`
+	Title      string   `json:"title"`
+	Summary    string   `json:"summary"`
+	Content    string   `json:"content"`
+	References []string `json:"references"`
 }
 
 type mapResult struct {
@@ -67,17 +67,13 @@ type compileOutput struct {
 }
 
 type compileNodeOutput struct {
-	Title        string            `json:"title"`
-	Summary      string            `json:"summary"`
-	Content      *string           `json:"content"`
-	Related      []compileRelation `json:"related"`
-	Sources      []string          `json:"sources"`
-	UpdateReason string            `json:"update_reason,omitempty"`
-}
-
-type compileRelation struct {
-	Concept  string `json:"concept"`
-	Relation string `json:"relation"`
+	Title        string   `json:"title"`
+	Summary      string   `json:"summary"`
+	Content      string   `json:"content"`
+	References   []string `json:"references"`
+	Contradicts  []string `json:"contradicts"`
+	Sources      []string `json:"sources"`
+	UpdateReason string   `json:"update_reason,omitempty"`
 }
 
 type compilePayload struct {
@@ -238,7 +234,8 @@ func (s *KnowledgeCompileService) HandleCompile(ctx context.Context, payload jso
 			slog.Error("failed to update progress", "kb_id", kb.ID, "error", err)
 		}
 	}
-	stats, cascadeDetails, err := s.writeCompileOutput(kb.ID, output, sources, progress, onNodeProgress)
+	compileCfg := kb.GetCompileConfig()
+	stats, cascadeDetails, err := s.writeCompileOutput(kb.ID, output, sources, compileCfg, progress, onNodeProgress)
 	if err != nil {
 		kb.CompileStatus = CompileStatusError
 		if updateErr := s.kbRepo.Update(kb); updateErr != nil {
@@ -247,9 +244,6 @@ func (s *KnowledgeCompileService) HandleCompile(ctx context.Context, payload jso
 		slog.Error("knowledge compile: write output failed", "kb_id", kb.ID, "error", err)
 		return fmt.Errorf("write output: %w", err)
 	}
-
-	// Generate index node
-	s.generateIndexNode(kb.ID)
 
 	// Create full-text index
 	if err := s.graphRepo.CreateFullTextIndex(kb.ID); err != nil {
@@ -335,6 +329,13 @@ func (s *KnowledgeCompileService) runMapPhase(ctx context.Context, llmClient llm
 		slog.Error("failed to update progress", "kb_id", kb.ID, "error", err)
 	}
 
+	cfg := kb.GetCompileConfig()
+
+	// Auto-calculate maxChunkSize from model's context window if not explicitly set
+	if cfg.MaxChunkSize <= 0 {
+		cfg.MaxChunkSize = s.resolveAutoChunkSize(kb)
+	}
+
 	var results []mapSourceResult
 	successCount := 0
 
@@ -346,7 +347,7 @@ func (s *KnowledgeCompileService) runMapPhase(ctx context.Context, llmClient llm
 
 		slog.Info("knowledge compile: map source", "kb_id", kb.ID, "source", src.Title, "index", i+1, "total", len(sources))
 
-		result := s.mapSource(ctx, llmClient, modelID, src)
+		result := s.mapSource(ctx, llmClient, modelID, src, cfg)
 		results = append(results, result)
 
 		if result.Error != nil {
@@ -371,18 +372,27 @@ func (s *KnowledgeCompileService) runMapPhase(ctx context.Context, llmClient llm
 }
 
 // mapSource calls LLM to extract concepts from a single source.
-func (s *KnowledgeCompileService) mapSource(ctx context.Context, llmClient llm.Client, modelID string, src KnowledgeSource) mapSourceResult {
-	content := src.Content
-	if len(content) > 8000 {
-		content = content[:8000] + "\n\n[...truncated...]"
+// If the source exceeds maxChunkSize, it delegates to the long-doc pipeline.
+func (s *KnowledgeCompileService) mapSource(ctx context.Context, llmClient llm.Client, modelID string, src KnowledgeSource, cfg CompileConfig) mapSourceResult {
+	maxSize := cfg.MaxChunkSize
+	if maxSize <= 0 {
+		maxSize = 32000
 	}
 
-	prompt := fmt.Sprintf("## Source: %s\n\n%s", src.Title, content)
+	// Long-doc path: source exceeds maxChunkSize → three-phase pipeline
+	if len(src.Content) > maxSize {
+		slog.Info("knowledge compile: source exceeds maxChunkSize, using long-doc pipeline", "source", src.Title, "content_len", len(src.Content), "max_chunk", maxSize)
+		return s.mapSourceLongDoc(ctx, llmClient, modelID, src, cfg)
+	}
+
+	// Fast path: source fits in one chunk
+	prompt := fmt.Sprintf("## Source: %s\n\n%s", src.Title, src.Content)
+	systemPrompt := fmt.Sprintf(mapSystemPrompt, cfg.MinContentLength, cfg.TargetContentLength)
 
 	resp, err := llmClient.Chat(ctx, llm.ChatRequest{
 		Model: modelID,
 		Messages: []llm.Message{
-			{Role: llm.RoleSystem, Content: mapSystemPrompt},
+			{Role: llm.RoleSystem, Content: systemPrompt},
 			{Role: llm.RoleUser, Content: prompt},
 		},
 	})
@@ -390,28 +400,8 @@ func (s *KnowledgeCompileService) mapSource(ctx context.Context, llmClient llm.C
 		return mapSourceResult{SourceTitle: src.Title, SourceID: src.ID, Error: fmt.Errorf("LLM call: %w", err)}
 	}
 
+	jsonStr := extractJSON(resp.Content)
 	var mr mapResult
-	jsonStr := resp.Content
-
-	// Extract JSON from markdown code block if present
-	if idx := strings.Index(jsonStr, "```json"); idx != -1 {
-		start := idx + 7
-		end := strings.Index(jsonStr[start:], "```")
-		if end != -1 {
-			jsonStr = jsonStr[start : start+end]
-		}
-	} else if idx := strings.Index(jsonStr, "```"); idx != -1 {
-		start := idx + 3
-		if nl := strings.Index(jsonStr[start:], "\n"); nl != -1 {
-			start = start + nl + 1
-		}
-		end := strings.Index(jsonStr[start:], "```")
-		if end != -1 {
-			jsonStr = jsonStr[start : start+end]
-		}
-	}
-	jsonStr = strings.TrimSpace(jsonStr)
-
 	if err := json.Unmarshal([]byte(jsonStr), &mr); err != nil {
 		return mapSourceResult{SourceTitle: src.Title, SourceID: src.ID, Error: fmt.Errorf("parse JSON: %w (preview: %.200s)", err, jsonStr)}
 	}
@@ -431,14 +421,17 @@ func (s *KnowledgeCompileService) runReducePhase(ctx context.Context, llmClient 
 		slog.Error("failed to update progress", "kb_id", kb.ID, "error", err)
 	}
 
+	cfg := kb.GetCompileConfig()
 	prompt := s.buildReducePrompt(mapResults, existingNodes, cascade)
 
 	slog.Info("knowledge compile: reduce phase calling LLM", "kb_id", kb.ID, "map_results", len(mapResults), "existing_nodes", len(existingNodes))
 
+	systemPrompt := fmt.Sprintf(compileSystemPrompt, cfg.TargetContentLength, cfg.MinContentLength)
+
 	resp, err := llmClient.Chat(ctx, llm.ChatRequest{
 		Model: modelID,
 		Messages: []llm.Message{
-			{Role: llm.RoleSystem, Content: compileSystemPrompt},
+			{Role: llm.RoleSystem, Content: systemPrompt},
 			{Role: llm.RoleUser, Content: prompt},
 		},
 	})
@@ -466,12 +459,8 @@ func (s *KnowledgeCompileService) buildReducePrompt(mapResults []mapSourceResult
 		sb.WriteString(fmt.Sprintf("### From \"%s\":\n", mr.SourceTitle))
 		for _, n := range mr.Nodes {
 			sb.WriteString(fmt.Sprintf("- **%s**: %s", n.Title, n.Summary))
-			if len(n.Related) > 0 {
-				rels := make([]string, 0, len(n.Related))
-				for _, r := range n.Related {
-					rels = append(rels, fmt.Sprintf("%s(%s)", r.Concept, r.Relation))
-				}
-				sb.WriteString(fmt.Sprintf(" [relations: %s]", strings.Join(rels, ", ")))
+			if len(n.References) > 0 {
+				sb.WriteString(fmt.Sprintf(" [references: %s]", strings.Join(n.References, ", ")))
 			}
 			sb.WriteString("\n")
 		}
@@ -530,9 +519,6 @@ func (s *KnowledgeCompileService) buildReducePrompt(mapResults []mapSourceResult
 	} else if len(existingNodes) > 0 {
 		sb.WriteString("## Existing knowledge nodes\n\n")
 		for _, n := range existingNodes {
-			if n.NodeType == NodeTypeIndex {
-				continue
-			}
 			sb.WriteString(fmt.Sprintf("- **%s**: %s\n", n.Title, n.Summary))
 		}
 		sb.WriteString("\n")
@@ -543,6 +529,30 @@ func (s *KnowledgeCompileService) buildReducePrompt(mapResults []mapSourceResult
 
 // resolveLLMClient looks up the model and provider configured for the KB,
 // then builds an llm.Client using the provider credentials.
+// resolveAutoChunkSize calculates maxChunkSize from the model's context window.
+// Returns contextWindow * 0.4, or a safe default (32000) if unavailable.
+func (s *KnowledgeCompileService) resolveAutoChunkSize(kb *KnowledgeBase) int {
+	const defaultChunkSize = 32000
+
+	var m *AIModel
+	var err error
+	if kb.CompileModelID != nil {
+		m, err = s.modelRepo.FindByID(*kb.CompileModelID)
+	} else {
+		m, err = s.modelRepo.FindDefaultByType(ModelTypeLLM)
+	}
+	if err != nil || m == nil || m.ContextWindow <= 0 {
+		return defaultChunkSize
+	}
+
+	autoSize := int(float64(m.ContextWindow) * 0.4)
+	if autoSize < 8000 {
+		autoSize = 8000 // floor: never go below 8K chars
+	}
+	slog.Info("knowledge compile: auto chunk size from model context window", "model", m.ModelID, "context_window", m.ContextWindow, "chunk_size", autoSize)
+	return autoSize
+}
+
 func (s *KnowledgeCompileService) resolveLLMClient(kb *KnowledgeBase) (llm.Client, string, error) {
 	var m *AIModel
 	var err error
@@ -586,7 +596,7 @@ func (s *KnowledgeCompileService) updateProgress(kb *KnowledgeBase, progress *Co
 	return s.kbRepo.Update(kb)
 }
 
-func (s *KnowledgeCompileService) writeCompileOutput(kbID uint, output *compileOutput, sources []KnowledgeSource, progress *CompileProgress, onProgress func()) (*compileStats, *CascadeLog, error) {
+func (s *KnowledgeCompileService) writeCompileOutput(kbID uint, output *compileOutput, sources []KnowledgeSource, cfg CompileConfig, progress *CompileProgress, onProgress func()) (*compileStats, *CascadeLog, error) {
 	stats := &compileStats{}
 	cascadeLog := &CascadeLog{
 		PrimaryNodes:   make([]string, 0),
@@ -602,6 +612,11 @@ func (s *KnowledgeCompileService) writeCompileOutput(kbID uint, output *compileO
 
 	// Process new nodes — upsert by title into FalkorDB
 	for i, n := range output.Nodes {
+		// Discard nodes with insufficient content
+		if len(n.Content) < cfg.MinContentLength {
+			slog.Warn("discarding node with insufficient content", "title", n.Title, "content_len", len(n.Content), "min", cfg.MinContentLength)
+			continue
+		}
 		node := &KnowledgeNode{
 			Title:      n.Title,
 			Summary:    n.Summary,
@@ -625,6 +640,10 @@ func (s *KnowledgeCompileService) writeCompileOutput(kbID uint, output *compileO
 
 	// Process updated nodes
 	for i, n := range output.UpdatedNodes {
+		if len(n.Content) < cfg.MinContentLength {
+			slog.Warn("discarding updated node with insufficient content", "title", n.Title, "content_len", len(n.Content), "min", cfg.MinContentLength)
+			continue
+		}
 		node := &KnowledgeNode{
 			Title:      n.Title,
 			Summary:    n.Summary,
@@ -645,7 +664,6 @@ func (s *KnowledgeCompileService) writeCompileOutput(kbID uint, output *compileO
 			UpdateType: detectUpdateType(n.UpdateReason),
 			Reason:     n.UpdateReason,
 		}
-		// Extract source IDs from the node's sources
 		for _, srcTitle := range n.Sources {
 			if srcID, ok := sourceMap[srcTitle]; ok {
 				detail.SourcesAdded = append(detail.SourcesAdded, srcID)
@@ -663,22 +681,25 @@ func (s *KnowledgeCompileService) writeCompileOutput(kbID uint, output *compileO
 	// Resolve edges from all nodes (new + updated)
 	allNodeOutputs := append(output.Nodes, output.UpdatedNodes...)
 	for _, n := range allNodeOutputs {
-		for _, rel := range n.Related {
-			// Ensure target node exists (create empty concept if not)
-			if _, err := s.graphRepo.FindNodeByTitle(kbID, rel.Concept); err != nil {
-				emptyNode := &KnowledgeNode{
-					Title:      rel.Concept,
-					NodeType:   NodeTypeConcept,
-					CompiledAt: now,
-				}
-				if err := s.graphRepo.UpsertNodeByTitle(kbID, emptyNode); err != nil {
-					continue
-				}
-				stats.created++
+		// Create "related" edges from references
+		for _, ref := range n.References {
+			// Only create edge if target node exists — no ghost nodes
+			if _, err := s.graphRepo.FindNodeByTitle(kbID, ref); err != nil {
+				continue
 			}
-
-			if err := s.graphRepo.CreateEdge(kbID, n.Title, rel.Concept, rel.Relation, ""); err != nil {
-				slog.Error("failed to create edge", "from", n.Title, "to", rel.Concept, "error", err)
+			if err := s.graphRepo.CreateEdge(kbID, n.Title, ref, EdgeRelationRelated, ""); err != nil {
+				slog.Error("failed to create edge", "from", n.Title, "to", ref, "error", err)
+				continue
+			}
+			stats.edges++
+		}
+		// Create "contradicts" edges
+		for _, contra := range n.Contradicts {
+			if _, err := s.graphRepo.FindNodeByTitle(kbID, contra); err != nil {
+				continue
+			}
+			if err := s.graphRepo.CreateEdge(kbID, n.Title, contra, EdgeRelationContradicts, ""); err != nil {
+				slog.Error("failed to create contradicts edge", "from", n.Title, "to", contra, "error", err)
 				continue
 			}
 			stats.edges++
@@ -703,84 +724,23 @@ func detectUpdateType(reason string) string {
 	return "content"
 }
 
-func (s *KnowledgeCompileService) generateIndexNode(kbID uint) {
-	nodes, err := s.graphRepo.FindAllNodes(kbID)
-	if err != nil {
-		return
-	}
-
-	var sb strings.Builder
-	sb.WriteString("# Knowledge Index\n\n")
-	sb.WriteString("| Concept | Summary |\n")
-	sb.WriteString("|---------|--------|\n")
-	conceptCount := 0
-	for _, n := range nodes {
-		if n.NodeType == NodeTypeIndex {
-			continue
-		}
-		hasContent := "✓"
-		if n.Content == nil || *n.Content == "" {
-			hasContent = "—"
-		}
-		sb.WriteString(fmt.Sprintf("| %s %s | %s |\n", n.Title, hasContent, n.Summary))
-		conceptCount++
-	}
-
-	indexContent := sb.String()
-	summary := fmt.Sprintf("Index of %d concepts", conceptCount)
-
-	node := &KnowledgeNode{
-		Title:      "Knowledge Index",
-		Summary:    summary,
-		Content:    &indexContent,
-		NodeType:   NodeTypeIndex,
-		CompiledAt: time.Now().Unix(),
-	}
-	if err := s.graphRepo.UpsertNodeByTitle(kbID, node); err != nil {
-		slog.Error("failed to upsert index node", "kb_id", kbID, "error", err)
-	}
-}
-
 func (s *KnowledgeCompileService) runLint(kbID uint) int {
 	issues := 0
 
 	orphans, _ := s.graphRepo.CountOrphanNodes(kbID)
 	issues += int(orphans)
 
-	sparse, _ := s.graphRepo.CountSparseNodes(kbID)
-	issues += int(sparse)
-
 	contradictions, _ := s.graphRepo.CountContradictions(kbID)
 	issues += int(contradictions)
 
 	if issues > 0 {
-		slog.Info("knowledge lint", "kb_id", kbID, "orphans", orphans, "sparse", sparse, "contradictions", contradictions)
+		slog.Info("knowledge lint", "kb_id", kbID, "orphans", orphans, "contradictions", contradictions)
 	}
 	return issues
 }
 
 func (s *KnowledgeCompileService) parseLLMOutput(content string) (*compileOutput, error) {
-	jsonStr := content
-
-	if idx := strings.Index(content, "```json"); idx != -1 {
-		start := idx + 7
-		end := strings.Index(content[start:], "```")
-		if end != -1 {
-			jsonStr = content[start : start+end]
-		}
-	} else if idx := strings.Index(content, "```"); idx != -1 {
-		start := idx + 3
-		if nl := strings.Index(content[start:], "\n"); nl != -1 {
-			start = start + nl + 1
-		}
-		end := strings.Index(content[start:], "```")
-		if end != -1 {
-			jsonStr = content[start : start+end]
-		}
-	}
-
-	jsonStr = strings.TrimSpace(jsonStr)
-
+	jsonStr := extractJSON(content)
 	var output compileOutput
 	if err := json.Unmarshal([]byte(jsonStr), &output); err != nil {
 		return nil, fmt.Errorf("JSON parse error: %w (content preview: %.200s)", err, jsonStr)
@@ -807,10 +767,6 @@ func (s *KnowledgeCompileService) analyzeCascadeImpact(sources []KnowledgeSource
 
 	// Check each existing node against new sources
 	for _, node := range existingNodes {
-		if node.NodeType == NodeTypeIndex {
-			continue
-		}
-
 		match := s.checkNodeImpact(node, sources, analysis.NewConcepts)
 		if match != nil {
 			if match.MatchType == "title_similarity" || match.MatchType == "keyword_match" {
@@ -823,7 +779,7 @@ func (s *KnowledgeCompileService) analyzeCascadeImpact(sources []KnowledgeSource
 	// For high-impact nodes, find related nodes via graph (would need graphRepo query)
 	// For now, use simple heuristics: nodes that share keywords in summaries
 	for _, node := range existingNodes {
-		if node.NodeType == NodeTypeIndex || highImpactIDs[node.ID] {
+		if highImpactIDs[node.ID] {
 			continue
 		}
 
@@ -841,9 +797,6 @@ func (s *KnowledgeCompileService) analyzeCascadeImpact(sources []KnowledgeSource
 
 	// Remaining nodes are reference-only
 	for _, node := range existingNodes {
-		if node.NodeType == NodeTypeIndex {
-			continue
-		}
 		if !highImpactIDs[node.ID] && !mediumImpactIDs[node.ID] {
 			analysis.ReferenceNodes = append(analysis.ReferenceNodes, node)
 		}
@@ -969,26 +922,32 @@ func (s *KnowledgeCompileService) TaskDefs() []scheduler.TaskDef {
 	}
 }
 
-const compileSystemPrompt = `You are a knowledge compiler. Your job is to read source documents and compile them into a knowledge graph of concept nodes with relationships.
+const compileSystemPrompt = `You are a knowledge compiler. Your job is to read source documents and compile them into a knowledge graph of concept nodes. Each node MUST be a complete, self-contained wiki article.
 
 IMPORTANT RULES:
 1. Organize knowledge by CONCEPTS, not by source documents
-2. Multiple sources about the same concept should be merged into one node
-3. If sources contradict each other, note the contradiction and mark the relationship as "contradicts"
-4. Create nodes even for concepts that don't have enough content for a full article (set content to null, provide only title and summary)
+2. Multiple sources about the same concept MUST be merged into one node
+3. Every node MUST have substantive content — a complete wiki article. Do NOT create nodes with empty or minimal content. If you cannot write at least a short article about a concept, do not create a node for it.
+4. Target article length: %d characters per node. Minimum: %d characters.
 5. Use name-driven references — output concept names and source titles, NOT database IDs
+6. Each article should be self-contained and independently readable
 
 CASCADE UPDATE RULES (CRITICAL):
 When new sources relate to existing concepts, you MUST update the existing nodes:
 1. Check "High-impact existing nodes" section - these LIKELY need updates
 2. Include affected existing nodes in "updated_nodes" array, not "nodes" array
-3. Add new relationships if the new source connects to existing concepts
-4. Merge new source content into existing nodes when they cover the same concept
-5. Flag contradictions if new sources conflict with existing knowledge
-6. In "update_reason" field, explain specifically what changed and why
+3. Merge new source content into existing nodes when they cover the same concept
+4. Flag contradictions if new sources conflict with existing knowledge
+5. In "update_reason" field, explain specifically what changed and why
 
 Do NOT put existing nodes (from "High-impact" or "Medium-impact" sections) in the "nodes" array.
 Only truly NEW concepts should be in "nodes".
+
+ARTICLE STRUCTURE:
+Each node's content should follow this structure:
+- Opening paragraph: what this concept is and why it matters
+- Core content: detailed explanation, key principles, specifics
+- Practical details: examples, data, comparisons where applicable
 
 OUTPUT FORMAT: You MUST output valid JSON with this exact structure:
 {
@@ -996,10 +955,9 @@ OUTPUT FORMAT: You MUST output valid JSON with this exact structure:
     {
       "title": "New Concept Name",
       "summary": "One-line description",
-      "content": "Full Markdown or null",
-      "related": [
-        {"concept": "Other Concept Name", "relation": "related|contradicts|extends|part_of"}
-      ],
+      "content": "Full wiki article in Markdown (REQUIRED, never empty)",
+      "references": ["Other Concept Name", "Another Concept"],
+      "contradicts": [],
       "sources": ["Source Title 1"]
     }
   ],
@@ -1007,34 +965,30 @@ OUTPUT FORMAT: You MUST output valid JSON with this exact structure:
     {
       "title": "Existing Concept Name",
       "summary": "Updated summary incorporating new information",
-      "content": "Updated content with merged information",
-      "related": [
-        {"concept": "New Concept Name", "relation": "related"},
-        {"concept": "Other Existing", "relation": "extends"}
-      ],
+      "content": "Updated full article with merged information",
+      "references": ["New Concept Name", "Other Existing"],
+      "contradicts": ["Conflicting Concept"],
       "sources": ["Original Source", "New Source Title"],
-      "update_reason": "Added pricing information from new source; linked to new 'Claude Pricing' concept"
+      "update_reason": "Added pricing information from new source"
     }
   ]
 }
 
-Relation types:
-- "related": general relationship
-- "contradicts": conflicting information
-- "extends": builds upon or specializes
-- "part_of": is a component of
+- "references": list of other concept names this article relates to (creates "related" edges)
+- "contradicts": list of concept names with conflicting information (creates "contradicts" edges)
 
 If no existing nodes need updates, leave "updated_nodes" as an empty array.
 Output ONLY the JSON, no other text.`
 
-const mapSystemPrompt = `You are a knowledge extractor. Your job is to read a single source document and extract concept nodes with relationships.
+const mapSystemPrompt = `You are a knowledge extractor. Your job is to read a single source document and extract concept nodes. Each node MUST be a complete, self-contained wiki article.
 
 RULES:
-1. Extract distinct concepts from the document
-2. Each concept should have a clear title, one-line summary, and optionally full content in Markdown
-3. Identify relationships between concepts found in this document
-4. Create nodes even for concepts mentioned but not fully explained (set content to null)
+1. Extract distinct concepts from the document — only concepts you can write a substantive article about
+2. Every node MUST have non-empty content: a complete wiki article
+3. Do NOT create nodes for concepts only briefly mentioned. Only create nodes for concepts with enough material to write at least %d characters.
+4. Target article length: %d characters per node
 5. Use descriptive, canonical concept titles (e.g., "React Hooks" not "hooks")
+6. List other concepts referenced in each article under "references"
 
 OUTPUT FORMAT: You MUST output valid JSON with this exact structure:
 {
@@ -1042,18 +996,26 @@ OUTPUT FORMAT: You MUST output valid JSON with this exact structure:
     {
       "title": "Concept Name",
       "summary": "One-line description",
-      "content": "Full Markdown article or null if not enough info",
-      "related": [
-        {"concept": "Other Concept Name", "relation": "related|contradicts|extends|part_of"}
-      ]
+      "content": "Full wiki article in Markdown (REQUIRED, never empty)",
+      "references": ["Other Concept Name", "Another Concept"]
     }
   ]
 }
 
-Relation types:
-- "related": general relationship
-- "contradicts": conflicting information
-- "extends": builds upon or specializes
-- "part_of": is a component of
+Output ONLY the JSON, no other text.`
+
+const scanSystemPrompt = `You are a knowledge scanner. Your job is to quickly identify distinct concepts in a text chunk. Output ONLY concept titles and one-line summaries — do NOT write full articles.
+
+RULES:
+1. Only identify concepts that have enough material for a substantive article
+2. Skip trivially mentioned concepts
+3. Use descriptive, canonical concept titles
+
+OUTPUT FORMAT: You MUST output valid JSON:
+{
+  "concepts": [
+    {"title": "Concept Name", "summary": "One-line description"}
+  ]
+}
 
 Output ONLY the JSON, no other text.`

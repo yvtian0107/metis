@@ -129,7 +129,7 @@ func (h *SessionHandler) Delete(c *gin.Context) {
 }
 
 type sendMessageReq struct {
-	Content string   `json:"content" binding:"required"`
+	Content string   `json:"content"`
 	Images  []string `json:"images"` // base64 encoded images or URLs
 }
 
@@ -138,6 +138,10 @@ func (h *SessionHandler) SendMessage(c *gin.Context) {
 	var req sendMessageReq
 	if err := c.ShouldBindJSON(&req); err != nil {
 		handler.Fail(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	if req.Content == "" && len(req.Images) == 0 {
+		handler.Fail(c, http.StatusBadRequest, "content or images required")
 		return
 	}
 

@@ -58,6 +58,8 @@ function useKnowledgeBaseSchema() {
     embeddingProviderId: z.string().optional(),
     embeddingModelId: z.string().optional(),
     autoCompile: z.boolean(),
+    targetContentLength: z.coerce.number().min(100).max(50000).optional(),
+    minContentLength: z.coerce.number().min(50).max(10000).optional(),
   })
 }
 
@@ -105,6 +107,8 @@ export function KnowledgeBaseForm({ open, onOpenChange, knowledgeBase }: Knowled
       embeddingProviderId: "",
       embeddingModelId: "",
       autoCompile: false,
+      targetContentLength: 4000,
+      minContentLength: 200,
     },
   })
 
@@ -145,6 +149,8 @@ export function KnowledgeBaseForm({ open, onOpenChange, knowledgeBase }: Knowled
         embeddingProviderId: knowledgeBase.embeddingProviderId ? String(knowledgeBase.embeddingProviderId) : "",
         embeddingModelId: knowledgeBase.embeddingModelId || "",
         autoCompile: knowledgeBase.autoCompile,
+        targetContentLength: knowledgeBase.compileConfig?.targetContentLength ?? 4000,
+        minContentLength: knowledgeBase.compileConfig?.minContentLength ?? 200,
       }
     }
     return {
@@ -156,6 +162,8 @@ export function KnowledgeBaseForm({ open, onOpenChange, knowledgeBase }: Knowled
       embeddingProviderId: "",
       embeddingModelId: "",
       autoCompile: false,
+      targetContentLength: 4000,
+      minContentLength: 200,
     }
   }, [knowledgeBase, editProviderId])
 
@@ -177,11 +185,12 @@ export function KnowledgeBaseForm({ open, onOpenChange, knowledgeBase }: Knowled
 
   const createMutation = useMutation({
     mutationFn: (values: FormValues) => {
-      const { name, description, compileMethod, compileModelId, autoCompile, embeddingProviderId, embeddingModelId } = values
+      const { name, description, compileMethod, compileModelId, autoCompile, embeddingProviderId, embeddingModelId, targetContentLength, minContentLength } = values
       return api.post("/api/v1/ai/knowledge-bases", {
         name, description, compileMethod, compileModelId, autoCompile,
         embeddingProviderId: embeddingProviderId ? Number(embeddingProviderId) : null,
         embeddingModelId: embeddingModelId || "",
+        compileConfig: { targetContentLength: targetContentLength ?? 4000, minContentLength: minContentLength ?? 200, maxChunkSize: 0 },
       })
     },
     onSuccess: () => {
@@ -194,11 +203,12 @@ export function KnowledgeBaseForm({ open, onOpenChange, knowledgeBase }: Knowled
 
   const updateMutation = useMutation({
     mutationFn: (values: FormValues) => {
-      const { name, description, compileMethod, compileModelId, autoCompile, embeddingProviderId, embeddingModelId } = values
+      const { name, description, compileMethod, compileModelId, autoCompile, embeddingProviderId, embeddingModelId, targetContentLength, minContentLength } = values
       return api.put(`/api/v1/ai/knowledge-bases/${knowledgeBase!.id}`, {
         name, description, compileMethod, compileModelId, autoCompile,
         embeddingProviderId: embeddingProviderId ? Number(embeddingProviderId) : null,
         embeddingModelId: embeddingModelId || "",
+        compileConfig: { targetContentLength: targetContentLength ?? 4000, minContentLength: minContentLength ?? 200, maxChunkSize: 0 },
       })
     },
     onSuccess: () => {
@@ -392,6 +402,36 @@ export function KnowledgeBaseForm({ open, onOpenChange, knowledgeBase }: Knowled
                 </FormItem>
               )}
             />
+            {/* Compile Config */}
+            <div className="space-y-3 rounded-lg border p-3">
+              <p className="text-sm font-medium">{t("ai:knowledge.compileConfig.title")}</p>
+              <FormField
+                control={form.control}
+                name="targetContentLength"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>{t("ai:knowledge.compileConfig.targetContentLength")}</FormLabel>
+                    <FormControl>
+                      <Input type="number" min={100} max={50000} {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name="minContentLength"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>{t("ai:knowledge.compileConfig.minContentLength")}</FormLabel>
+                    <FormControl>
+                      <Input type="number" min={50} max={10000} {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            </div>
             <FormField
               control={form.control}
               name="autoCompile"

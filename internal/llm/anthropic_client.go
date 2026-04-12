@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/anthropics/anthropic-sdk-go"
@@ -130,6 +131,45 @@ func (c *anthropicClient) Embedding(_ context.Context, _ EmbeddingRequest) (*Emb
 	return nil, ErrNotSupported
 }
 
+// parseBase64DataURL parses a base64 data URL and returns the media type and base64 data.
+// Format: data:image/png;base64,xxxxx
+func parseBase64DataURL(url string) (anthropic.Base64ImageSourceMediaType, string) {
+	const prefix = "data:image/"
+	if !strings.HasPrefix(url, prefix) {
+		return "", ""
+	}
+
+	// Find the comma that separates metadata from data
+	idx := strings.Index(url, ",")
+	if idx == -1 {
+		return "", ""
+	}
+
+	// Extract media type from: image/png;base64
+	meta := url[len(prefix):idx]
+	parts := strings.Split(meta, ";")
+	if len(parts) < 1 {
+		return "", ""
+	}
+
+	var mediaType anthropic.Base64ImageSourceMediaType
+	switch parts[0] {
+	case "png":
+		mediaType = anthropic.Base64ImageSourceMediaTypeImagePNG
+	case "jpeg", "jpg":
+		mediaType = anthropic.Base64ImageSourceMediaTypeImageJPEG
+	case "gif":
+		mediaType = anthropic.Base64ImageSourceMediaTypeImageGIF
+	case "webp":
+		mediaType = anthropic.Base64ImageSourceMediaTypeImageWebP
+	default:
+		return "", ""
+	}
+
+	data := url[idx+1:]
+	return mediaType, data
+}
+
 func (c *anthropicClient) buildParams(req ChatRequest) anthropic.MessageNewParams {
 	maxTokens := int64(req.MaxTokens)
 	if maxTokens <= 0 {
@@ -148,9 +188,24 @@ func (c *anthropicClient) buildParams(req ChatRequest) anthropic.MessageNewParam
 				{Text: msg.Content},
 			}
 		case RoleUser:
-			params.Messages = append(params.Messages, anthropic.NewUserMessage(
-				anthropic.NewTextBlock(msg.Content),
-			))
+			// Build content blocks for multimodal support
+			var blocks []anthropic.ContentBlockParamUnion
+			if msg.Content != "" {
+				blocks = append(blocks, anthropic.NewTextBlock(msg.Content))
+			}
+			for _, img := range msg.Images {
+				// Parse base64 data URL: data:image/png;base64,xxxxx
+				mediaType, data := parseBase64DataURL(img)
+				if data != "" {
+					blocks = append(blocks, anthropic.NewImageBlock(
+						anthropic.Base64ImageSourceParam{
+							Data:      data,
+							MediaType: mediaType,
+						},
+					))
+				}
+			}
+			params.Messages = append(params.Messages, anthropic.NewUserMessage(blocks...))
 		case RoleAssistant:
 			if len(msg.ToolCalls) > 0 {
 				var blocks []anthropic.ContentBlockParamUnion

@@ -81,7 +81,19 @@ func (gw *AgentGateway) Run(ctx context.Context, sessionID uint) (<-chan Event, 
 	execMessages := make([]ExecuteMessage, 0, len(messages))
 	for _, m := range messages {
 		if m.Role == MessageRoleUser || m.Role == MessageRoleAssistant {
-			execMessages = append(execMessages, ExecuteMessage{Role: m.Role, Content: m.Content})
+			var images []string
+			if len(m.Metadata) > 0 {
+				var meta struct {
+					Images []string `json:"images"`
+				}
+				_ = json.Unmarshal(m.Metadata, &meta)
+				images = meta.Images
+			}
+			execMessages = append(execMessages, ExecuteMessage{
+				Role:    m.Role,
+				Content: m.Content,
+				Images:  images,
+			})
 		}
 	}
 

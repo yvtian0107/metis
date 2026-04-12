@@ -178,10 +178,12 @@ function ToolResult({ message }: { message: SessionMessage }) {
 // User query — right-aligned pill (ChatGPT style)
 function UserQuery({
   content,
+  images,
   messageId,
   onEdit,
 }: {
   content: string
+  images?: string[]
   messageId?: number
   onEdit?: (messageId: number, content: string) => void
 }) {
@@ -241,7 +243,19 @@ function UserQuery({
           </Button>
         )}
         <div className="rounded-3xl bg-secondary px-5 py-2.5">
-          <div className="text-[15px] leading-relaxed whitespace-pre-wrap">{content}</div>
+          {images && images.length > 0 && (
+            <div className="flex flex-wrap gap-2 mb-2">
+              {images.map((src, idx) => (
+                <img
+                  key={idx}
+                  src={src}
+                  alt={`image-${idx}`}
+                  className="max-h-48 max-w-xs rounded-xl object-cover"
+                />
+              ))}
+            </div>
+          )}
+          {content && <div className="text-[15px] leading-relaxed whitespace-pre-wrap">{content}</div>}
         </div>
       </div>
     </div>
@@ -361,10 +375,13 @@ export function QAPair({
 }: QAPairProps) {
   const displayContent = isStreaming && streamingContent ? streamingContent : (aiMessage?.content ?? "")
 
+  const userImages = (userMessage.metadata as { images?: string[] } | undefined)?.images
+
   return (
     <div className="py-6">
       <UserQuery
         content={userMessage.content}
+        images={userImages}
         messageId={userMessage.id}
         onEdit={onEditMessage}
       />

@@ -38,8 +38,9 @@ type AgentExecuteConfig struct {
 
 // ExecuteMessage represents a message in the conversation history.
 type ExecuteMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role    string   `json:"role"`
+	Content string   `json:"content"`
+	Images  []string `json:"images,omitempty"` // base64 encoded image URLs (data:image/...)
 }
 
 // ToolDefinition describes a tool available to the agent.

@@ -23,10 +23,18 @@ const (
 	RoleTool      = "tool"
 )
 
+// MessageContentPart represents a single part of a message content (text or image).
+type MessageContentPart struct {
+	Type     string `json:"type"` // "text" or "image_url"
+	Text     string `json:"text,omitempty"`
+	ImageURL string `json:"image_url,omitempty"` // base64 data URL or http URL
+}
+
 // Message represents a chat message.
 type Message struct {
 	Role       string     `json:"role"`
-	Content    string     `json:"content"`
+	Content    string     `json:"content"` // For simple text messages
+	Images     []string   `json:"images,omitempty"` // base64 data URLs or http URLs for multimodal
 	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
 	ToolCallID string     `json:"tool_call_id,omitempty"`
 }

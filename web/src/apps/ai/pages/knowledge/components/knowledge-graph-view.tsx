@@ -277,8 +277,12 @@ export function KnowledgeGraphView({ kbId, highlightedNodeIds }: { kbId: number;
             {t("ai:knowledge.graph.nodeTypes.concept")}
           </span>
           <span className="flex items-center gap-1">
-            <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ backgroundColor: NODE_COLORS.index }} />
-            {t("ai:knowledge.graph.nodeTypes.index")}
+            <span className="inline-block h-2 w-4 rounded-sm" style={{ backgroundColor: RELATION_COLORS.related }} />
+            {t("ai:knowledge.graph.edgeTypes.related")}
+          </span>
+          <span className="flex items-center gap-1">
+            <span className="inline-block h-2 w-4 rounded-sm" style={{ backgroundColor: RELATION_COLORS.contradicts }} />
+            {t("ai:knowledge.graph.edgeTypes.contradicts")}
           </span>
         </div>
       )}

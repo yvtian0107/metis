@@ -60,16 +60,11 @@ func (r *KnowledgeGraphRepo) CreateNode(kbID uint, node *KnowledgeNode) error {
 SET n.title = $title, n.summary = $summary, n.content = $content,
     n.node_type = $nodeType, n.source_ids = $sourceIds, n.compiled_at = $compiledAt`
 
-	var content string
-	if node.Content != nil {
-		content = *node.Content
-	}
-
 	params := map[string]interface{}{
 		"id":         node.ID,
 		"title":      node.Title,
 		"summary":    node.Summary,
-		"content":    content,
+		"content":    node.Content,
 		"nodeType":   node.NodeType,
 		"sourceIds":  node.SourceIDs,
 		"compiledAt": node.CompiledAt,
@@ -92,20 +87,15 @@ func (r *KnowledgeGraphRepo) UpsertNodeByTitle(kbID uint, node *KnowledgeNode) e
 	query := `MERGE (n:KnowledgeNode {title: $title})
 ON CREATE SET n.id = $id, n.summary = $summary, n.content = $content,
               n.node_type = $nodeType, n.source_ids = $sourceIds, n.compiled_at = $compiledAt
-ON MATCH SET  n.summary = $summary, n.content = CASE WHEN $content IS NOT NULL THEN $content ELSE n.content END,
+ON MATCH SET  n.summary = $summary, n.content = $content,
               n.source_ids = $sourceIds, n.compiled_at = $compiledAt
 RETURN n.id`
-
-	var content string
-	if node.Content != nil {
-		content = *node.Content
-	}
 
 	params := map[string]interface{}{
 		"id":         node.ID,
 		"title":      node.Title,
 		"summary":    node.Summary,
-		"content":    content,
+		"content":    node.Content,
 		"nodeType":   node.NodeType,
 		"sourceIds":  node.SourceIDs,
 		"compiledAt": node.CompiledAt,
@@ -173,22 +163,6 @@ func (r *KnowledgeGraphRepo) FindAllNodes(kbID uint) ([]KnowledgeNode, error) {
 	return collectNodes(result, "n")
 }
 
-// FindIndexNode returns the index node for a KB.
-func (r *KnowledgeGraphRepo) FindIndexNode(kbID uint) (*KnowledgeNode, error) {
-	g := r.client.GraphFor(kbID)
-	result, err := g.Query(
-		`MATCH (n:KnowledgeNode {node_type: $nt}) RETURN n`,
-		map[string]interface{}{"nt": NodeTypeIndex}, nil,
-	)
-	if err != nil {
-		return nil, err
-	}
-	if !result.Next() {
-		return nil, fmt.Errorf("index node not found")
-	}
-	return recordToNode(result.Record(), "n")
-}
-
 // ListNodes returns paginated nodes with optional keyword and type filter.
 func (r *KnowledgeGraphRepo) ListNodes(kbID uint, keyword, nodeType string, page, pageSize int) ([]KnowledgeNode, int64, error) {
 	if page < 1 {
@@ -246,12 +220,12 @@ func (r *KnowledgeGraphRepo) ListNodes(kbID uint, keyword, nodeType string, page
 	return nodes, total, err
 }
 
-// CountNodes returns the number of non-index nodes.
+// CountNodes returns the total number of nodes.
 func (r *KnowledgeGraphRepo) CountNodes(kbID uint) (int64, error) {
 	g := r.client.GraphFor(kbID)
 	result, err := g.Query(
-		`MATCH (n:KnowledgeNode) WHERE n.node_type <> $nt RETURN count(n) AS cnt`,
-		map[string]interface{}{"nt": NodeTypeIndex}, nil,
+		`MATCH (n:KnowledgeNode) RETURN count(n) AS cnt`,
+		nil, nil,
 	)
 	if err != nil {
 		// Graph might not exist yet
@@ -909,19 +883,13 @@ func recordToNode(rec *falkordb.Record, alias string) (*KnowledgeNode, error) {
 	}
 
 	node := &KnowledgeNode{
-		ID:       toString(fNode.GetProperty("id")),
-		Title:    toString(fNode.GetProperty("title")),
-		Summary:  toString(fNode.GetProperty("summary")),
-		NodeType: toString(fNode.GetProperty("node_type")),
-		SourceIDs: toString(fNode.GetProperty("source_ids")),
+		ID:         toString(fNode.GetProperty("id")),
+		Title:      toString(fNode.GetProperty("title")),
+		Summary:    toString(fNode.GetProperty("summary")),
+		Content:    toString(fNode.GetProperty("content")),
+		NodeType:   toString(fNode.GetProperty("node_type")),
+		SourceIDs:  toString(fNode.GetProperty("source_ids")),
 		CompiledAt: toInt64(fNode.GetProperty("compiled_at")),
-	}
-
-	if c := fNode.GetProperty("content"); c != nil {
-		s := toString(c)
-		if s != "" {
-			node.Content = &s
-		}
 	}
 
 	return node, nil
@@ -989,24 +957,17 @@ func cypherRelType(relation string) string {
 	switch relation {
 	case EdgeRelationContradicts:
 		return "CONTRADICTS"
-	case EdgeRelationExtends:
-		return "EXTENDS"
-	case EdgeRelationPartOf:
-		return "PART_OF"
 	default:
 		return "RELATED_TO"
 	}
 }
 
 // relationFromCypher converts a Cypher relationship type back to our relation string.
+// Legacy types (EXTENDS, PART_OF) are mapped to "related".
 func relationFromCypher(rel string) string {
 	switch rel {
 	case "CONTRADICTS":
 		return EdgeRelationContradicts
-	case "EXTENDS":
-		return EdgeRelationExtends
-	case "PART_OF":
-		return EdgeRelationPartOf
 	default:
 		return EdgeRelationRelated
 	}

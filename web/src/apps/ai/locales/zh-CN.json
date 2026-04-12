@@ -435,6 +435,11 @@
       "knowledge_graph": "LLM 知识提炼"
     },
     "autoCompile": "自动编译",
+    "compileConfig": {
+      "title": "编译配置",
+      "targetContentLength": "目标文章长度（字符）",
+      "minContentLength": "最小文章长度（字符）"
+    },
     "compile": "编译",
     "recompile": "重新编译",
     "compileStarted": "编译已开始",
@@ -545,14 +550,15 @@
       "emptyGraph": "暂无图谱数据（尚未编译）",
       "clickNodeHint": "点击节点查看详情",
       "nodeTypes": {
-        "concept": "概念",
-        "index": "索引"
+        "concept": "概念"
+      },
+      "edgeTypes": {
+        "related": "关联",
+        "contradicts": "矛盾"
       },
       "relations": {
         "related": "关联",
-        "contradicts": "矛盾",
-        "extends": "扩展",
-        "part_of": "从属"
+        "contradicts": "矛盾"
       }
     },
     "logs": {

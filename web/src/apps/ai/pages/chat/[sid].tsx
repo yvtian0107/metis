@@ -228,7 +228,18 @@ export function Component() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["ai-sessions"] })
       toast.success(t("ai:chat.sessionDeleted"))
-      navigate("/ai/chat")
+
+      // 获取同 Agent 的其他会话（排除被删除的），导航到下一个
+      const currentData = queryClient.getQueryData<{ items: Array<{ id: number }> }>(
+        ["ai-sessions", agentId]
+      )
+      const otherSession = currentData?.items.find(s => s.id !== sessionId)
+
+      if (otherSession) {
+        navigate(`/ai/chat/${otherSession.id}`)
+      } else {
+        navigate("/ai/chat")
+      }
     },
     onError: (err) => toast.error(err.message),
   })

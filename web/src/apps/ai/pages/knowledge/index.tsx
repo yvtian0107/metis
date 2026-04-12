@@ -55,6 +55,11 @@ export interface KnowledgeBaseItem {
   compileStatus: string
   compileMethod: string
   compileModelId: number
+  compileConfig?: {
+    targetContentLength: number
+    minContentLength: number
+    maxChunkSize: number
+  }
   embeddingProviderId: number | null
   embeddingModelId: string
   autoCompile: boolean

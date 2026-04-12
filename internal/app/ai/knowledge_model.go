@@ -41,7 +41,6 @@ const (
 
 // Knowledge node types
 const (
-	NodeTypeIndex   = "index"
 	NodeTypeConcept = "concept"
 )
 
@@ -49,8 +48,6 @@ const (
 const (
 	EdgeRelationRelated     = "related"
 	EdgeRelationContradicts = "contradicts"
-	EdgeRelationExtends     = "extends"
-	EdgeRelationPartOf      = "part_of"
 )
 
 // Knowledge log actions
@@ -93,6 +90,22 @@ type CompileProgress struct {
 	StartedAt   int64           `json:"startedAt"` // Unix timestamp when compile started
 }
 
+// CompileConfig holds configurable parameters for knowledge compilation.
+type CompileConfig struct {
+	TargetContentLength int `json:"targetContentLength"` // Target article length in chars, default 4000
+	MinContentLength    int `json:"minContentLength"`    // Minimum content length, nodes below this are discarded, default 200
+	MaxChunkSize        int `json:"maxChunkSize"`        // Long-doc chunk size, 0 = auto (model window × 40%), default 0
+}
+
+// DefaultCompileConfig returns the default compile configuration.
+func DefaultCompileConfig() CompileConfig {
+	return CompileConfig{
+		TargetContentLength: 4000,
+		MinContentLength:    200,
+		MaxChunkSize:        0,
+	}
+}
+
 // --- KnowledgeBase ---
 
 type KnowledgeBase struct {
@@ -102,12 +115,45 @@ type KnowledgeBase struct {
 	CompileStatus       string     `json:"compileStatus" gorm:"size:16;not null;default:idle"`
 	CompileMethod       string     `json:"compileMethod" gorm:"size:64;not null;default:knowledge_graph"`
 	CompileModelID      *uint      `json:"compileModelId" gorm:"index"`
+	CompileConfigData   string     `json:"-" gorm:"column:compile_config;type:text"` // JSON stored in DB
 	EmbeddingProviderID *uint      `json:"embeddingProviderId" gorm:"index"`
 	EmbeddingModelID    string     `json:"embeddingModelId" gorm:"size:128"`
 	CompiledAt          *time.Time `json:"compiledAt"`
 	AutoCompile         bool       `json:"autoCompile" gorm:"not null;default:false"`
 	SourceCount         int        `json:"sourceCount" gorm:"not null;default:0"`
 	CompileProgressData string     `json:"-" gorm:"type:text"` // JSON stored in DB
+}
+
+// GetCompileConfig returns the parsed compile config, or defaults if not set.
+func (kb *KnowledgeBase) GetCompileConfig() CompileConfig {
+	if kb.CompileConfigData == "" {
+		return DefaultCompileConfig()
+	}
+	var cfg CompileConfig
+	if err := json.Unmarshal([]byte(kb.CompileConfigData), &cfg); err != nil {
+		return DefaultCompileConfig()
+	}
+	if cfg.TargetContentLength <= 0 {
+		cfg.TargetContentLength = 4000
+	}
+	if cfg.MinContentLength <= 0 {
+		cfg.MinContentLength = 200
+	}
+	return cfg
+}
+
+// SetCompileConfig saves the compile config as JSON.
+func (kb *KnowledgeBase) SetCompileConfig(cfg *CompileConfig) error {
+	if cfg == nil {
+		kb.CompileConfigData = ""
+		return nil
+	}
+	data, err := json.Marshal(cfg)
+	if err != nil {
+		return err
+	}
+	kb.CompileConfigData = string(data)
+	return nil
 }
 
 // GetCompileProgress returns the parsed compile progress
@@ -145,6 +191,7 @@ type KnowledgeBaseResponse struct {
 	CompileStatus       string           `json:"compileStatus"`
 	CompileMethod       string           `json:"compileMethod"`
 	CompileModelID      *uint            `json:"compileModelId"`
+	CompileConfig       *CompileConfig   `json:"compileConfig,omitempty"`
 	EmbeddingProviderID *uint            `json:"embeddingProviderId"`
 	EmbeddingModelID    string           `json:"embeddingModelId"`
 	CompiledAt          *time.Time       `json:"compiledAt"`
@@ -173,7 +220,10 @@ func (kb *KnowledgeBase) ToResponse() KnowledgeBaseResponse {
 		CreatedAt:           kb.CreatedAt,
 		UpdatedAt:           kb.UpdatedAt,
 	}
-	// Include compile progress if available
+	if kb.CompileConfigData != "" {
+		cfg := kb.GetCompileConfig()
+		resp.CompileConfig = &cfg
+	}
 	if progress := kb.GetCompileProgress(); progress != nil {
 		resp.CompileProgress = progress
 	}
@@ -249,20 +299,20 @@ func (s *KnowledgeSource) ToResponse() KnowledgeSourceResponse {
 // It is NOT a GORM model — nodes are stored exclusively in FalkorDB graphs.
 
 type KnowledgeNode struct {
-	ID         string    `json:"id"`
-	Title      string    `json:"title"`
-	Summary    string    `json:"summary"`
-	Content    *string   `json:"content"`
-	NodeType   string    `json:"nodeType"`
-	SourceIDs  string    `json:"sourceIds"`
-	CompiledAt int64     `json:"compiledAt"`
+	ID         string `json:"id"`
+	Title      string `json:"title"`
+	Summary    string `json:"summary"`
+	Content    string `json:"content"`
+	NodeType   string `json:"nodeType"`
+	SourceIDs  string `json:"sourceIds"`
+	CompiledAt int64  `json:"compiledAt"`
 }
 
 type KnowledgeNodeResponse struct {
 	ID         string          `json:"id"`
 	Title      string          `json:"title"`
 	Summary    string          `json:"summary"`
-	Content    *string         `json:"content,omitempty"`
+	Content    string          `json:"content,omitempty"`
 	HasContent bool            `json:"hasContent"`
 	NodeType   string          `json:"nodeType"`
 	SourceIDs  json.RawMessage `json:"sourceIds"`
@@ -281,7 +331,7 @@ func (n *KnowledgeNode) ToResponse() KnowledgeNodeResponse {
 		Title:      n.Title,
 		Summary:    n.Summary,
 		Content:    n.Content,
-		HasContent: n.Content != nil && *n.Content != "",
+		HasContent: n.Content != "",
 		NodeType:   n.NodeType,
 		SourceIDs:  sourceIDs,
 		CompiledAt: n.CompiledAt,

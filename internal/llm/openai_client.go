@@ -162,22 +162,49 @@ func (c *openaiClient) buildRequest(req ChatRequest) openai.ChatCompletionReques
 	}
 
 	for _, msg := range req.Messages {
-		oaiMsg := openai.ChatCompletionMessage{
-			Role:       msg.Role,
-			Content:    msg.Content,
-			ToolCallID: msg.ToolCallID,
-		}
-		for _, tc := range msg.ToolCalls {
-			oaiMsg.ToolCalls = append(oaiMsg.ToolCalls, openai.ToolCall{
-				ID:   tc.ID,
-				Type: openai.ToolTypeFunction,
-				Function: openai.FunctionCall{
-					Name:      tc.Name,
-					Arguments: tc.Arguments,
-				},
+		// Handle multimodal messages with images
+		if len(msg.Images) > 0 {
+			parts := make([]openai.ChatMessagePart, 0, len(msg.Images)+1)
+			// Add text content
+			if msg.Content != "" {
+				parts = append(parts, openai.ChatMessagePart{
+					Type: openai.ChatMessagePartTypeText,
+					Text: msg.Content,
+				})
+			}
+			// Add image content
+			for _, img := range msg.Images {
+				parts = append(parts, openai.ChatMessagePart{
+					Type: openai.ChatMessagePartTypeImageURL,
+					ImageURL: &openai.ChatMessageImageURL{
+						URL: img,
+					},
+				})
+			}
+			oaiReq.Messages = append(oaiReq.Messages, openai.ChatCompletionMessage{
+				Role:         msg.Role,
+				MultiContent: parts,
+				ToolCallID:   msg.ToolCallID,
 			})
+		} else {
+			// Simple text message
+			oaiMsg := openai.ChatCompletionMessage{
+				Role:       msg.Role,
+				Content:    msg.Content,
+				ToolCallID: msg.ToolCallID,
+			}
+			for _, tc := range msg.ToolCalls {
+				oaiMsg.ToolCalls = append(oaiMsg.ToolCalls, openai.ToolCall{
+					ID:   tc.ID,
+					Type: openai.ToolTypeFunction,
+					Function: openai.FunctionCall{
+						Name:      tc.Name,
+						Arguments: tc.Arguments,
+					},
+				})
+			}
+			oaiReq.Messages = append(oaiReq.Messages, oaiMsg)
 		}
-		oaiReq.Messages = append(oaiReq.Messages, oaiMsg)
 	}
 
 	if req.MaxTokens > 0 {

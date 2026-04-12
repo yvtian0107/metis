@@ -434,6 +434,11 @@
       "knowledge_graph": "LLM Knowledge Distillation"
     },
     "autoCompile": "Auto Compile",
+    "compileConfig": {
+      "title": "Compile Config",
+      "targetContentLength": "Target Article Length (chars)",
+      "minContentLength": "Min Article Length (chars)"
+    },
     "compile": "Compile",
     "recompile": "Recompile",
     "compileStarted": "Compilation started",
@@ -535,14 +540,15 @@
       "emptyGraph": "No graph data (not compiled yet)",
       "clickNodeHint": "Click a node to see details",
       "nodeTypes": {
-        "concept": "Concept",
-        "index": "Index"
+        "concept": "Concept"
+      },
+      "edgeTypes": {
+        "related": "Related",
+        "contradicts": "Contradicts"
       },
       "relations": {
         "related": "Related",
-        "contradicts": "Contradicts",
-        "extends": "Extends",
-        "part_of": "Part Of"
+        "contradicts": "Contradicts"
       }
     },
     "logs": {
