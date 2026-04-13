@@ -43,6 +43,9 @@ services:
       - "traefik.enable=true"
       - "traefik.http.routers.otlp.entrypoints=otlp-http"
       - "traefik.http.routers.otlp.rule=PathPrefix(`/`)"
+      - "traefik.http.routers.otlp.middlewares=otlp-auth"
+      - "traefik.http.middlewares.otlp-auth.forwardauth.address=http://host.docker.internal:8080/api/v1/observe/auth/verify"
+      - "traefik.http.middlewares.otlp-auth.forwardauth.authResponseHeaders=X-Metis-User-Id,X-Metis-Token-Id,X-Metis-Scope,X-Metis-Org-Id"
       - "traefik.http.services.otlp.loadbalancer.server.port=4318"
 
   postgres:

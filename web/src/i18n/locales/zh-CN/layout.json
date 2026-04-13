@@ -37,6 +37,9 @@
     "license": "许可管理",
     "license:product:list": "商品管理",
     "license:licensee:list": "授权主体",
-    "license:license:list": "许可签发"
+    "license:license:list": "许可签发",
+    "observe": "可观测",
+    "observe:integrations": "集成市场",
+    "observe:tokens": "API Token"
   }
 }

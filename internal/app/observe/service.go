@@ -63,6 +63,7 @@ func (s *IntegrationTokenService) Create(userID uint, name string) (string, *Int
 		Name:        name,
 		TokenHash:   hash,
 		TokenPrefix: prefix,
+		TokenPlain:  raw,
 	}
 	if err := s.repo.Create(t); err != nil {
 		return "", nil, err

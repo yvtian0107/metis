@@ -83,13 +83,14 @@ export function Component() {
   const canUpdate = usePermission("org:department:update")
   const canDelete = usePermission("org:department:delete")
 
-  const { data: treeData = [], isLoading } = useQuery({
+  const { data, isLoading } = useQuery({
     queryKey: ["departments", "tree"],
     queryFn: async () => {
       const res = await api.get<{ items: TreeNode[] }>("/api/v1/org/departments/tree")
-      return res.items
+      return res.items ?? []
     },
   })
+  const treeData = data ?? []
 
   // Default expand all on first load
   useEffect(() => {

@@ -2,7 +2,21 @@ import { useState } from "react"
 import { useTranslation } from "react-i18next"
 import { useNavigate, useParams, Link } from "react-router"
 import { useQuery } from "@tanstack/react-query"
-import { ArrowLeft, Copy, Check } from "lucide-react"
+import {
+  ArrowLeft,
+  Copy,
+  Check,
+  Cpu,
+  Hexagon,
+  Terminal,
+  Coffee,
+  Monitor,
+  Box,
+  Database,
+  FileText,
+  ScrollText,
+  Globe,
+} from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -15,6 +29,24 @@ import {
 } from "@/components/ui/select"
 import { integrations } from "../../data/integrations"
 import { observeApi } from "../../api"
+
+const iconMap: Record<string, typeof FileText> = {
+  Cpu,
+  Hexagon,
+  Terminal,
+  Coffee,
+  Monitor,
+  Box,
+  Database,
+  FileText,
+  ScrollText,
+  Globe,
+}
+
+function IntegrationIcon({ name, className }: { name: string; className?: string }) {
+  const Icon = iconMap[name] ?? FileText
+  return <Icon className={className} />
+}
 
 function CodeBlock({ code }: { code: string }) {
   const [copied, setCopied] = useState(false)
@@ -52,9 +84,10 @@ function CodeBlock({ code }: { code: string }) {
 }
 
 function fillSnippet(snippet: string, token: string, endpoint: string) {
+  const fallbackEndpoint = typeof window !== "undefined" ? window.location.origin : "https://localhost"
   return snippet
     .replace(/\{\{TOKEN\}\}/g, token || "YOUR_TOKEN")
-    .replace(/\{\{ENDPOINT\}\}/g, endpoint || "https://otel.your-domain.com")
+    .replace(/\{\{ENDPOINT\}\}/g, endpoint || fallbackEndpoint)
 }
 
 export function Component() {
@@ -76,11 +109,9 @@ export function Component() {
   })
 
   const endpoint = settings?.otelEndpoint ?? ""
-  const selectedToken = tokens.find((t) => String(t.id) === selectedTokenId)
-  // For snippets we use a placeholder when not selected
-  const snippetToken = selectedTokenId
-    ? `${selectedToken?.prefix ?? ""}••••••••••••••••`
-    : "{{TOKEN}}"
+  // Always use YOUR_TOKEN placeholder — the prefix is not a usable token,
+  // users must paste the full token they received at creation time
+  const snippetToken = "YOUR_TOKEN"
 
   if (!integration) {
     return (
@@ -93,28 +124,35 @@ export function Component() {
     )
   }
 
+  const fallbackEndpoint = window.location.origin
+  const resolvedEndpoint = endpoint || fallbackEndpoint
+
   const filledDocker = fillSnippet(integration.dockerSnippet, snippetToken, endpoint)
   const filledBinary = fillSnippet(integration.binarySnippet, snippetToken, endpoint)
   const filledSdk = integration.sdkSnippet
     ? fillSnippet(integration.sdkSnippet, snippetToken, endpoint)
     : undefined
 
-  const verifyCmd = `curl -I -H "Authorization: Bearer ${snippetToken}" \\
-  ${endpoint || "https://otel.your-domain.com"}/v1/metrics`
+  const verifyCmd = `curl -X POST -d "" -H "Authorization: Bearer ${snippetToken}" \\
+  ${resolvedEndpoint}${integration.verifyPath}`
 
   return (
     <div className="mx-auto max-w-3xl space-y-8">
       {/* Header */}
       <div>
-        <button
+        <Button
+          variant="ghost"
+          size="sm"
+          className="mb-4 -ml-2 text-muted-foreground"
           onClick={() => navigate("/observe/integrations")}
-          className="mb-4 flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors"
         >
-          <ArrowLeft className="h-4 w-4" />
+          <ArrowLeft className="mr-1 h-4 w-4" />
           {t("detail.back")}
-        </button>
+        </Button>
         <div className="flex items-center gap-3">
-          <span className="text-4xl">{integration.icon}</span>
+          <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-muted/60">
+            <IntegrationIcon name={integration.icon} className="h-5.5 w-5.5 text-foreground/70" />
+          </div>
           <div>
             <h2 className="text-xl font-semibold">{integration.name}</h2>
             <p className="text-sm text-muted-foreground">{integration.description}</p>
@@ -154,7 +192,7 @@ export function Component() {
                 <SelectContent>
                   {tokens.map((tok) => (
                     <SelectItem key={tok.id} value={String(tok.id)}>
-                      {tok.name} — {tok.prefix}••••
+                      {tok.name}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -186,12 +224,33 @@ export function Component() {
           <h3 className="font-semibold">{t("detail.step2")}</h3>
         </div>
 
-        <Tabs defaultValue="docker">
+        <p className="text-sm text-muted-foreground">{integration.setupNotes}</p>
+
+        {integration.prerequisites && integration.prerequisites.length > 0 && (
+          <div className="space-y-1.5">
+            <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+              {t("detail.prerequisites")}
+            </label>
+            <ul className="list-disc list-inside text-sm text-muted-foreground space-y-0.5">
+              {integration.prerequisites.map((p) => (
+                <li key={p}>{p}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        <Tabs defaultValue={filledSdk ? "sdk" : "docker"}>
           <TabsList>
+            {filledSdk && <TabsTrigger value="sdk">SDK</TabsTrigger>}
             <TabsTrigger value="docker">{t("detail.dockerTab")}</TabsTrigger>
             <TabsTrigger value="binary">{t("detail.binaryTab")}</TabsTrigger>
-            {filledSdk && <TabsTrigger value="sdk">SDK</TabsTrigger>}
           </TabsList>
+
+          {filledSdk && (
+            <TabsContent value="sdk" className="mt-3">
+              <CodeBlock code={filledSdk} />
+            </TabsContent>
+          )}
 
           <TabsContent value="docker" className="mt-3">
             <CodeBlock code={filledDocker} />
@@ -200,12 +259,6 @@ export function Component() {
           <TabsContent value="binary" className="mt-3">
             <CodeBlock code={filledBinary} />
           </TabsContent>
-
-          {filledSdk && (
-            <TabsContent value="sdk" className="mt-3">
-              <CodeBlock code={filledSdk} />
-            </TabsContent>
-          )}
         </Tabs>
       </section>
 

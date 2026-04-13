@@ -7,7 +7,7 @@ Define consistent error handling standards across the backend and frontend to en
 ## Requirements
 
 ### Requirement: Backend DB operation errors MUST be handled explicitly
-All database operations in service and handler layers SHALL either check the returned error and act on it, or explicitly log the error with `slog.Error`. No DB operation error SHALL be silently discarded.
+All database operations in service and handler layers SHALL either check the returned error and act on it, or explicitly log the error with `slog.Error`. No DB operation error SHALL be silently discarded. This includes Org App's `demoteCurrentPrimary` which SHALL NOT use `_ =` to discard errors.
 
 #### Scenario: Compile status update fails
 - **WHEN** `kbRepo.Update(kb)` fails during compile error recovery (setting status to "error")
@@ -20,6 +20,10 @@ All database operations in service and handler layers SHALL either check the ret
 #### Scenario: Service FindByID distinguishes not-found from DB error
 - **WHEN** a service's `Get` method calls `repo.FindByID` and receives an error
 - **THEN** the system SHALL return `ErrXxxNotFound` only if the error is `gorm.ErrRecordNotFound`, and return the original error wrapped for all other cases
+
+#### Scenario: Org assignment demote error propagated
+- **WHEN** `demoteCurrentPrimary` returns an error during `AddUserPosition` or `UpdateUserPosition`
+- **THEN** the service method SHALL return the error and abort the operation, not discard it with `_ =`
 
 ### Requirement: N+1 queries MUST be eliminated in list endpoints
 All list/search API endpoints SHALL use batch queries instead of per-item queries within loops.
@@ -57,6 +61,10 @@ All `useMutation` calls in the frontend SHALL include an `onError` handler that 
 #### Scenario: Save role permissions fails
 - **WHEN** saving role permissions returns an error
 - **THEN** the system SHALL display a toast error with the error message
+
+#### Scenario: Org assignment remove fails with not-found
+- **WHEN** removing an assignment returns HTTP 404
+- **THEN** the system SHALL display a toast error with a user-friendly message
 
 ### Requirement: Audit action naming MUST use namespace format
 All audit log entries SHALL use `<resource>.<verb>` format for the `audit_action` field (e.g., `knowledgeBase.create`, `mcpServer.update`).

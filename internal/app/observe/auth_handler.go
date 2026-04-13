@@ -44,5 +44,5 @@ func (h *AuthHandler) Verify(c *gin.Context) {
 	c.Header("X-Metis-Token-Id", fmt.Sprintf("%d", result.TokenID))
 	c.Header("X-Metis-Scope", result.Scope)
 	c.Header("X-Metis-Org-Id", "")
-	c.Status(http.StatusOK)
+	c.JSON(http.StatusOK, gin.H{"ok": true})
 }

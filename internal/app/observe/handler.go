@@ -37,7 +37,7 @@ func (h *IntegrationTokenHandler) Create(c *gin.Context) {
 	}
 
 	userID := c.GetUint("userId")
-	raw, t, err := h.svc.Create(userID, req.Name)
+	_, t, err := h.svc.Create(userID, req.Name)
 	if err != nil {
 		if errors.Is(err, ErrTokenLimitReached) {
 			handler.Fail(c, http.StatusUnprocessableEntity, "token limit reached (max 10)")
@@ -52,7 +52,6 @@ func (h *IntegrationTokenHandler) Create(c *gin.Context) {
 		Message: "ok",
 		Data: CreateTokenResponse{
 			TokenResponse: t.ToResponse(),
-			Token:         raw,
 		},
 	})
 }

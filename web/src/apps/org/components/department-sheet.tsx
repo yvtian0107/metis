@@ -83,11 +83,11 @@ export function DepartmentSheet({ open, onOpenChange, department }: DepartmentSh
     defaultValues: { name: "", code: "", parentId: ROOT_VALUE, sort: 0, description: "" },
   })
 
-  const { data: treeData } = useQuery({
+  const { data: treeData = [] } = useQuery({
     queryKey: ["departments", "tree"],
     queryFn: async () => {
       const res = await api.get<{ items: TreeNode[] }>("/api/v1/org/departments/tree")
-      return res.items
+      return res.items ?? []
     },
     enabled: open,
   })

@@ -64,8 +64,8 @@ func seedObserve(db *gorm.DB, enforcer *casbin.Enforcer) error {
 
 	// Button permissions under tokens menu
 	tokenButtons := []model.Menu{
-		{Name: "创建 Token", Type: model.MenuTypeButton, Permission: "observe:token:create", Sort: 0},
-		{Name: "撤销 Token", Type: model.MenuTypeButton, Permission: "observe:token:revoke", Sort: 1},
+		{Name: "Create Token", Type: model.MenuTypeButton, Permission: "observe:token:create", Sort: 0},
+		{Name: "Revoke Token", Type: model.MenuTypeButton, Permission: "observe:token:revoke", Sort: 1},
 	}
 	for _, btn := range tokenButtons {
 		var existing model.Menu

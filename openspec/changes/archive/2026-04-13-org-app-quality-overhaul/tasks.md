@@ -27,16 +27,16 @@
 
 ## 4. 前端：Assignments 页面拆分
 
-- [ ] 4.1 创建 `pages/assignments/department-tree.tsx` — 提取 DepartmentTreeItem 组件和树面板逻辑
-- [ ] 4.2 创建 `pages/assignments/member-list.tsx` — 提取成员表格、搜索、分页逻辑
-- [ ] 4.3 创建 `pages/assignments/add-member-sheet.tsx` — 提取添加成员 Sheet
-- [ ] 4.4 重写 `pages/assignments/index.tsx` 为容器组件，协调子组件间的共享状态
-- [ ] 4.5 验证拆分后页面功能不变：部门树选择、成员列表、添加/移除成员、设置主岗位
+- [x] 4.1 创建 `pages/assignments/department-tree.tsx` — 提取 DepartmentTreeItem 组件和树面板逻辑
+- [x] 4.2 创建 `pages/assignments/member-list.tsx` — 提取成员表格、搜索、分页逻辑
+- [x] 4.3 创建 `pages/assignments/add-member-sheet.tsx` — 提取添加成员 Sheet
+- [x] 4.4 重写 `pages/assignments/index.tsx` 为容器组件，协调子组件间的共享状态
+- [x] 4.5 验证拆分后页面功能不变：部门树选择、成员列表、添加/移除成员、设置主岗位
 
 ## 5. 前端：交互优化
 
-- [ ] 5.1 用 shadcn Command 组件替换 add-member-sheet 中手搓的 Popover 用户选择器
-- [ ] 5.2 用户搜索输入增加 300ms debounce（用 `useDebouncedValue` 或 `setTimeout` 模式）
-- [ ] 5.3 岗位加载改用 `pageSize=0`，消除 `pageSize=9999` hack
-- [ ] 5.4 Add Member 表单改用 React Hook Form + Zod schema 验证
-- [ ] 5.5 将 queryFn 中的 `useRef` + `setState` 反模式改为 `useEffect` 监听 `treeData` 变化做初始展开
+- [x] 5.1 用 shadcn Command 组件替换 add-member-sheet 中手搓的 Popover 用户选择器
+- [x] 5.2 用户搜索输入增加 300ms debounce（用 `useDebouncedValue` 或 `setTimeout` 模式）
+- [x] 5.3 岗位加载改用 `pageSize=0`，消除 `pageSize=9999` hack
+- [x] 5.4 Add Member 表单改用 React Hook Form + Zod schema 验证
+- [x] 5.5 将 queryFn 中的 `useRef` + `setState` 反模式改为 `useMemo` 派生初始展开状态

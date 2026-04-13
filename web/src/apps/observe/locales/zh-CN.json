@@ -25,7 +25,8 @@
     "copied": "已复制",
     "copy": "复制",
     "verifyTitle": "验证连接",
-    "verifyDesc": "运行以下命令测试接入是否正常："
+    "verifyDesc": "运行以下命令测试接入是否正常：",
+    "prerequisites": "前置条件"
   },
   "tokens": {
     "title": "API Token 管理",
@@ -35,6 +36,7 @@
     "name": "名称",
     "namePlaceholder": "例如：生产环境",
     "prefix": "Token 前缀",
+    "token": "Token",
     "scope": "类型",
     "personal": "个人",
     "lastUsed": "最近使用",

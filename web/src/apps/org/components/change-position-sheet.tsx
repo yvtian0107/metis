@@ -49,7 +49,7 @@ export function ChangePositionSheet({
   const { data: positions } = useQuery({
     queryKey: ["positions", "all"],
     queryFn: async () => {
-      const res = await api.get<{ items: PositionItem[] }>("/api/v1/org/positions?pageSize=9999")
+      const res = await api.get<{ items: PositionItem[] }>("/api/v1/org/positions?pageSize=0")
       return res.items.filter((p) => p.isActive)
     },
   })

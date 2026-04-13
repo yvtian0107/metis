@@ -25,7 +25,8 @@
     "copied": "Copied",
     "copy": "Copy",
     "verifyTitle": "Verify Connection",
-    "verifyDesc": "Run the following command to test your connection:"
+    "verifyDesc": "Run the following command to test your connection:",
+    "prerequisites": "Prerequisites"
   },
   "tokens": {
     "title": "API Tokens",
@@ -35,6 +36,7 @@
     "name": "Name",
     "namePlaceholder": "e.g. Production",
     "prefix": "Token Prefix",
+    "token": "Token",
     "scope": "Scope",
     "personal": "Personal",
     "lastUsed": "Last used",
