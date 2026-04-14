@@ -50,6 +50,11 @@ interface FalkorDBConfig {
   database: string
 }
 
+interface ClickHouseConfig {
+  enabled: boolean
+  dsn: string
+}
+
 interface StepDef {
   id: string
   label: string
@@ -485,6 +490,8 @@ function SiteInfoStep({
   onOTelChange,
   falkordbConfig,
   onFalkorDBChange,
+  clickhouseConfig,
+  onClickHouseChange,
   onNext,
   onBack,
 }: {
@@ -494,6 +501,8 @@ function SiteInfoStep({
   onOTelChange: (c: OTelConfig) => void
   falkordbConfig: FalkorDBConfig
   onFalkorDBChange: (c: FalkorDBConfig) => void
+  clickhouseConfig: ClickHouseConfig
+  onClickHouseChange: (c: ClickHouseConfig) => void
   onNext: () => void
   onBack: () => void
 }) {
@@ -655,6 +664,42 @@ function SiteInfoStep({
                     className="auth-input"
                   />
                 </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {showAdvanced && (
+        <div className="space-y-3 rounded-xl border border-slate-200/60 bg-white/60 p-4">
+          <div className="mb-2 text-[12px] font-medium text-slate-400 uppercase tracking-wide">
+            {t("site.clickhouse")}
+          </div>
+
+          {/* ClickHouse enabled toggle */}
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="text-[13px] font-medium text-slate-600">{t("site.enableClickHouse")}</div>
+              <div className="text-[11px] text-slate-400">{t("site.enableClickHouseDesc")}</div>
+            </div>
+            <Switch
+              checked={clickhouseConfig.enabled}
+              onCheckedChange={(checked) => onClickHouseChange({ ...clickhouseConfig, enabled: checked })}
+            />
+          </div>
+
+          {clickhouseConfig.enabled && (
+            <div className="space-y-3 pt-1">
+              <div>
+                <Label className="mb-1.5 block text-[13px] font-medium text-slate-500">
+                  {t("site.clickhouseDSN")}
+                </Label>
+                <Input
+                  placeholder={t("site.clickhouseDSNPlaceholder")}
+                  value={clickhouseConfig.dsn}
+                  onChange={(e) => onClickHouseChange({ ...clickhouseConfig, dsn: e.target.value })}
+                  className="auth-input"
+                />
               </div>
             </div>
           )}
@@ -828,6 +873,7 @@ function CompleteStep({
   adminConfig,
   otelConfig,
   falkordbConfig,
+  clickhouseConfig,
   onBack,
 }: {
   localeConfig: LocaleConfig
@@ -836,6 +882,7 @@ function CompleteStep({
   adminConfig: AdminConfig
   otelConfig: OTelConfig
   falkordbConfig: FalkorDBConfig
+  clickhouseConfig: ClickHouseConfig
   onBack: () => void
 }) {
   const { t } = useTranslation("install")
@@ -869,6 +916,7 @@ function CompleteStep({
         falkordb_addr: falkordbConfig.enabled ? falkordbConfig.addr : undefined,
         falkordb_password: falkordbConfig.enabled ? falkordbConfig.password : undefined,
         falkordb_database: falkordbConfig.enabled ? parseInt(falkordbConfig.database, 10) || 0 : undefined,
+        clickhouse_dsn: clickhouseConfig.enabled ? clickhouseConfig.dsn : undefined,
       })
       setDone(true)
     } catch (err) {
@@ -876,7 +924,7 @@ function CompleteStep({
     } finally {
       setInstalling(false)
     }
-  }, [dbConfig, siteConfig, adminConfig, otelConfig, falkordbConfig, localeConfig, t])
+  }, [dbConfig, siteConfig, adminConfig, otelConfig, falkordbConfig, clickhouseConfig, localeConfig, t])
 
   if (done) {
     return (
@@ -966,6 +1014,15 @@ function CompleteStep({
             </div>
           </>
         )}
+        {clickhouseConfig.enabled && (
+          <>
+            <div className="border-t border-slate-100" />
+            <div className="flex justify-between">
+              <span className="text-slate-400">{t("confirm.clickhouse")}</span>
+              <span className="font-medium text-slate-700 truncate max-w-[200px]">{clickhouseConfig.dsn}</span>
+            </div>
+          </>
+        )}
       </div>
 
       {error && (
@@ -1034,10 +1091,10 @@ export default function InstallPage() {
   })
   const [siteConfig, setSiteConfig] = useState<SiteConfig>({ siteName: "Metis" })
   const [adminConfig, setAdminConfig] = useState<AdminConfig>({
-    username: "",
-    password: "",
-    confirmPassword: "",
-    email: "",
+    username: "admin",
+    password: "password",
+    confirmPassword: "password",
+    email: "admin@dev.com",
   })
   const [otelConfig, setOTelConfig] = useState<OTelConfig>({
     enabled: false,
@@ -1050,6 +1107,10 @@ export default function InstallPage() {
     addr: "localhost:6379",
     password: "",
     database: "0",
+  })
+  const [clickhouseConfig, setClickHouseConfig] = useState<ClickHouseConfig>({
+    enabled: false,
+    dsn: "clickhouse://default:@localhost:9000/otel",
   })
 
   // Step order: 0=language, 1=db, 2=site, 3=admin, 4=complete
@@ -1083,6 +1144,8 @@ export default function InstallPage() {
           onOTelChange={setOTelConfig}
           falkordbConfig={falkordbConfig}
           onFalkorDBChange={setFalkorDBConfig}
+          clickhouseConfig={clickhouseConfig}
+          onClickHouseChange={setClickHouseConfig}
           onNext={() => setStep(3)}
           onBack={() => setStep(1)}
         />
@@ -1107,6 +1170,7 @@ export default function InstallPage() {
           adminConfig={adminConfig}
           otelConfig={otelConfig}
           falkordbConfig={falkordbConfig}
+          clickhouseConfig={clickhouseConfig}
           onBack={() => setStep(3)}
         />
       )

@@ -21,7 +21,13 @@ type MetisConfig struct {
 	SecretKey        string          `yaml:"secret_key"`
 	JWTSecret        string          `yaml:"jwt_secret"`
 	LicenseKeySecret string          `yaml:"license_key_secret"`
-	FalkorDB         *FalkorDBConfig `yaml:"falkordb,omitempty"`
+	FalkorDB         *FalkorDBConfig    `yaml:"falkordb,omitempty"`
+	ClickHouse       *ClickHouseConfig  `yaml:"clickhouse,omitempty"`
+}
+
+// ClickHouseConfig holds ClickHouse connection settings (required for APM features).
+type ClickHouseConfig struct {
+	DSN string `yaml:"dsn"`
 }
 
 // FalkorDBConfig holds FalkorDB connection settings (only required for AI edition).

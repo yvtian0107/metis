@@ -54,6 +54,11 @@
     "falkordbPassword": "Password",
     "falkordbPasswordPlaceholder": "Leave empty if no password",
     "falkordbDatabase": "Database Number",
+    "clickhouse": "ClickHouse (APM)",
+    "enableClickHouse": "Enable ClickHouse",
+    "enableClickHouseDesc": "Required for APM trace analysis features",
+    "clickhouseDSN": "Connection DSN",
+    "clickhouseDSNPlaceholder": "clickhouse://default:@localhost:9000/otel",
     "next": "Next",
     "prev": "Previous"
   },
@@ -86,7 +91,8 @@
     "installing": "Installing...",
     "prev": "Previous",
     "installFailed": "Installation failed",
-    "falkordb": "FalkorDB"
+    "falkordb": "FalkorDB",
+    "clickhouse": "ClickHouse"
   },
   "done": {
     "title": "Installation Complete",

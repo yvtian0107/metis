@@ -1,0 +1,89 @@
+{
+  "traces": "Traces",
+  "traceExplorer": "Trace Explorer",
+  "traceDetail": "Trace 详情",
+  "filters": {
+    "service": "服务",
+    "servicePlaceholder": "全部服务",
+    "operation": "操作",
+    "operationPlaceholder": "全部操作",
+    "status": "状态",
+    "statusAll": "全部",
+    "statusOk": "正常",
+    "statusError": "错误",
+    "durationMin": "最小 (ms)",
+    "durationMax": "最大 (ms)",
+    "search": "搜索"
+  },
+  "table": {
+    "traceId": "Trace ID",
+    "rootOperation": "根操作",
+    "service": "服务",
+    "duration": "耗时",
+    "spans": "Spans",
+    "status": "状态",
+    "time": "时间",
+    "noData": "未找到 Trace",
+    "noDataHint": "请尝试调整过滤条件或时间范围"
+  },
+  "detail": {
+    "waterfall": "瀑布图",
+    "spanDetail": "Span 详情",
+    "attributes": "属性",
+    "events": "事件",
+    "resource": "资源",
+    "noSpans": "该 Trace 无 Span 数据",
+    "service": "服务",
+    "operation": "操作",
+    "duration": "耗时",
+    "status": "状态",
+    "spanId": "Span ID",
+    "parentSpanId": "父 Span ID"
+  },
+  "services": {
+    "title": "服务目录",
+    "name": "服务",
+    "reqRate": "请求数",
+    "avgDuration": "平均延迟",
+    "p95": "P95",
+    "errorRate": "错误率",
+    "trend": "趋势",
+    "noData": "未找到服务",
+    "throughput": "吞吐量",
+    "latencyTrend": "延迟趋势",
+    "operations": "操作列表",
+    "operationName": "操作"
+  },
+  "timeRange": {
+    "last15m": "最近 15 分钟",
+    "last1h": "最近 1 小时",
+    "last6h": "最近 6 小时",
+    "last24h": "最近 24 小时",
+    "last7d": "最近 7 天",
+    "custom": "自定义"
+  },
+  "topology": {
+    "title": "服务拓扑",
+    "noData": "暂无拓扑数据",
+    "noDataHint": "请确认服务间存在父子 Span 关系",
+    "requests": "请求",
+    "errorRate": "错误率",
+    "avgLatency": "平均",
+    "p95Latency": "P95",
+    "calls": "次调用"
+  },
+  "logs": {
+    "tab": "日志",
+    "spansTab": "Spans",
+    "timestamp": "时间",
+    "severity": "级别",
+    "service": "服务",
+    "body": "内容",
+    "noLogs": "该 Trace 无关联日志",
+    "notAvailable": "日志关联不可用。请确认 OTel Collector 已配置将日志导出到 ClickHouse 的 otel_logs 表。",
+    "allSeverities": "全部级别",
+    "spanId": "Span ID"
+  },
+  "notConfigured": "ClickHouse 未配置，请在安装向导中配置。",
+  "loading": "加载中..."
+}

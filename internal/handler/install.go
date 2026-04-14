@@ -125,6 +125,9 @@ type ExecuteRequest struct {
 	FalkorDBAddr     string `json:"falkordb_addr"`
 	FalkorDBPassword string `json:"falkordb_password"`
 	FalkorDBDatabase int    `json:"falkordb_database"`
+
+	// ClickHouse (optional — required for APM features)
+	ClickHouseDSN string `json:"clickhouse_dsn"`
 }
 
 // Execute performs the full installation.
@@ -158,6 +161,13 @@ func (h *InstallHandler) Execute(c *gin.Context) {
 			Addr:     req.FalkorDBAddr,
 			Password: req.FalkorDBPassword,
 			Database: req.FalkorDBDatabase,
+		}
+	}
+
+	// ClickHouse (optional)
+	if req.ClickHouseDSN != "" {
+		cfg.ClickHouse = &config.ClickHouseConfig{
+			DSN: req.ClickHouseDSN,
 		}
 	}
 

@@ -54,6 +54,11 @@
     "falkordbPassword": "密码",
     "falkordbPasswordPlaceholder": "留空则不设密码",
     "falkordbDatabase": "数据库编号",
+    "clickhouse": "ClickHouse（APM）",
+    "enableClickHouse": "启用 ClickHouse",
+    "enableClickHouseDesc": "APM 追踪分析功能需要 ClickHouse",
+    "clickhouseDSN": "连接 DSN",
+    "clickhouseDSNPlaceholder": "clickhouse://default:@localhost:9000/otel",
     "next": "下一步",
     "prev": "上一步"
   },
@@ -86,7 +91,8 @@
     "installing": "安装中...",
     "prev": "上一步",
     "installFailed": "安装失败",
-    "falkordb": "FalkorDB"
+    "falkordb": "FalkorDB",
+    "clickhouse": "ClickHouse"
   },
   "done": {
     "title": "安装完成",

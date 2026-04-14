@@ -25,29 +25,7 @@ processors:
     timeout: 5s
     override: false
 
-  # 3. Metis 归属信息 — 将 ForwardAuth 透传的 headers 写入 resource attributes
-  transform/metis:
-    error_mode: ignore
-    trace_statements:
-      - context: resource
-        statements:
-          - set(attributes["metis.user_id"], request.headers["X-Metis-User-Id"][0])
-          - set(attributes["metis.token_id"], request.headers["X-Metis-Token-Id"][0])
-          - set(attributes["metis.scope"], request.headers["X-Metis-Scope"][0])
-    metric_statements:
-      - context: resource
-        statements:
-          - set(attributes["metis.user_id"], request.headers["X-Metis-User-Id"][0])
-          - set(attributes["metis.token_id"], request.headers["X-Metis-Token-Id"][0])
-          - set(attributes["metis.scope"], request.headers["X-Metis-Scope"][0])
-    log_statements:
-      - context: resource
-        statements:
-          - set(attributes["metis.user_id"], request.headers["X-Metis-User-Id"][0])
-          - set(attributes["metis.token_id"], request.headers["X-Metis-Token-Id"][0])
-          - set(attributes["metis.scope"], request.headers["X-Metis-Scope"][0])
-
-  # 4. 批处理 — 最后一步，聚合后再写 ClickHouse，减少写入次数
+  # 3. 批处理 — 聚合后再写 ClickHouse，减少写入次数
   batch:
     timeout: 5s
     send_batch_size: 1000
@@ -71,13 +49,13 @@ service:
   pipelines:
     logs:
       receivers: [otlp/grpc, otlp/http]
-      processors: [memory_limiter, resourcedetection, transform/metis, batch]
+      processors: [memory_limiter, resourcedetection, batch]
       exporters: [clickhouse]
     metrics:
       receivers: [otlp/grpc, otlp/http]
-      processors: [memory_limiter, resourcedetection, transform/metis, batch]
+      processors: [memory_limiter, resourcedetection, batch]
       exporters: [clickhouse]
     traces:
       receivers: [otlp/grpc, otlp/http]
-      processors: [memory_limiter, resourcedetection, transform/metis, batch]
+      processors: [memory_limiter, resourcedetection, batch]
       exporters: [clickhouse]

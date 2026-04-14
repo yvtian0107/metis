@@ -37,6 +37,7 @@ services:
       - ./otel-collector-config.yaml:/etc/otelcol-contrib/config.yaml:ro
     ports:
       - "4317:4317"   # OTLP gRPC (直连)
+      - "14318:4318"  # OTLP HTTP (直连，绕过 Traefik auth)
     depends_on:
       - clickhouse
     labels:

@@ -1,0 +1,89 @@
+{
+  "traces": "Traces",
+  "traceExplorer": "Trace Explorer",
+  "traceDetail": "Trace Detail",
+  "filters": {
+    "service": "Service",
+    "servicePlaceholder": "All services",
+    "operation": "Operation",
+    "operationPlaceholder": "All operations",
+    "status": "Status",
+    "statusAll": "All",
+    "statusOk": "OK",
+    "statusError": "Error",
+    "durationMin": "Min (ms)",
+    "durationMax": "Max (ms)",
+    "search": "Search"
+  },
+  "table": {
+    "traceId": "Trace ID",
+    "rootOperation": "Root Operation",
+    "service": "Service",
+    "duration": "Duration",
+    "spans": "Spans",
+    "status": "Status",
+    "time": "Time",
+    "noData": "No traces found",
+    "noDataHint": "Try adjusting your filters or time range"
+  },
+  "detail": {
+    "waterfall": "Waterfall",
+    "spanDetail": "Span Detail",
+    "attributes": "Attributes",
+    "events": "Events",
+    "resource": "Resource",
+    "noSpans": "No spans found for this trace",
+    "service": "Service",
+    "operation": "Operation",
+    "duration": "Duration",
+    "status": "Status",
+    "spanId": "Span ID",
+    "parentSpanId": "Parent Span ID"
+  },
+  "services": {
+    "title": "Service Catalog",
+    "name": "Service",
+    "reqRate": "Requests",
+    "avgDuration": "Avg Latency",
+    "p95": "P95",
+    "errorRate": "Error Rate",
+    "trend": "Trend",
+    "noData": "No services found",
+    "throughput": "Throughput",
+    "latencyTrend": "Latency Trend",
+    "operations": "Operations",
+    "operationName": "Operation"
+  },
+  "timeRange": {
+    "last15m": "Last 15 minutes",
+    "last1h": "Last 1 hour",
+    "last6h": "Last 6 hours",
+    "last24h": "Last 24 hours",
+    "last7d": "Last 7 days",
+    "custom": "Custom"
+  },
+  "topology": {
+    "title": "Service Topology",
+    "noData": "No topology data found",
+    "noDataHint": "Ensure your services have parent-child span relationships",
+    "requests": "requests",
+    "errorRate": "Error",
+    "avgLatency": "Avg",
+    "p95Latency": "P95",
+    "calls": "calls"
+  },
+  "logs": {
+    "tab": "Logs",
+    "spansTab": "Spans",
+    "timestamp": "Timestamp",
+    "severity": "Severity",
+    "service": "Service",
+    "body": "Message",
+    "noLogs": "No logs found for this trace",
+    "notAvailable": "Log correlation is not available. Ensure the OTel Collector is configured to export logs to the otel_logs table in ClickHouse.",
+    "allSeverities": "All Severities",
+    "spanId": "Span ID"
+  },
+  "notConfigured": "ClickHouse is not configured. Please configure it in the installation wizard.",
+  "loading": "Loading..."
+}
