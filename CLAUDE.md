@@ -289,7 +289,7 @@ UserPosition      → 用户-职位分配（多对多，支持主岗/兼岗）
 
 **后端**：`internal/locales/` 使用 go-i18n，内核内嵌 `zh-CN.json` + `en.json`。App 可实现 `LocaleProvider` 接口提供额外翻译文件，main.go 在启动时自动加载。通过 `localeSvc.T(locale, messageID)` 获取翻译。
 
-**前端**：`web/src/` 使用 i18next + react-i18next。内核翻译在 `web/src/locales/`，各 App 翻译在 `web/src/apps/<name>/locales/`（en.json + zh-CN.json）。
+**前端**：`web/src/i18n/` 使用 i18next + react-i18next。内核翻译按 namespace 拆分在 `web/src/i18n/locales/{zh-CN,en}/` 下。App 翻译在 `web/src/apps/<name>/locales/`，通过 `registerTranslations(ns, resources)` 在 `module.ts` 中注册。支持 zh-CN 和 en，fallback 为 zh-CN。
 
 ### Frontend Stack (`web/src/`)
 
