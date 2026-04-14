@@ -40,6 +40,10 @@
     "license:license:list": "许可签发",
     "observe": "集成",
     "observe:integrations": "集成市场",
-    "observe:tokens": "API Token"
+    "observe:tokens": "API Token",
+    "apm": "应用性能监控",
+    "apm:traces": "Trace 追踪",
+    "apm:services": "服务列表",
+    "apm:topology": "服务拓扑"
   }
 }

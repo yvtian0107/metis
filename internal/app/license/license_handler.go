@@ -71,6 +71,25 @@ func NewLicenseHandler(i do.Injector) (*LicenseHandler, error) {
 	}, nil
 }
 
+func parseLicenseDate(value string) (time.Time, error) {
+	t, err := time.Parse(time.RFC3339, value)
+	if err != nil {
+		t, err = time.Parse("2006-01-02", value)
+	}
+	return t, err
+}
+
+func parseOptionalLicenseDate(value *string) (*time.Time, error) {
+	if value == nil || *value == "" {
+		return nil, nil
+	}
+	t, err := parseLicenseDate(*value)
+	if err != nil {
+		return nil, err
+	}
+	return &t, nil
+}
+
 func (h *LicenseHandler) Issue(c *gin.Context) {
 	var req IssueLicenseRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -78,26 +97,16 @@ func (h *LicenseHandler) Issue(c *gin.Context) {
 		return
 	}
 
-	validFrom, err := time.Parse(time.RFC3339, req.ValidFrom)
+	validFrom, err := parseLicenseDate(req.ValidFrom)
 	if err != nil {
-		validFrom, err = time.Parse("2006-01-02", req.ValidFrom)
-		if err != nil {
-			handler.Fail(c, http.StatusBadRequest, "invalid validFrom date format")
-			return
-		}
+		handler.Fail(c, http.StatusBadRequest, "invalid validFrom date format")
+		return
 	}
 
-	var validUntil *time.Time
-	if req.ValidUntil != nil && *req.ValidUntil != "" {
-		t, err := time.Parse(time.RFC3339, *req.ValidUntil)
-		if err != nil {
-			t, err = time.Parse("2006-01-02", *req.ValidUntil)
-			if err != nil {
-				handler.Fail(c, http.StatusBadRequest, "invalid validUntil date format")
-				return
-			}
-		}
-		validUntil = &t
+	validUntil, err := parseOptionalLicenseDate(req.ValidUntil)
+	if err != nil {
+		handler.Fail(c, http.StatusBadRequest, "invalid validUntil date format")
+		return
 	}
 
 	userID, _ := c.Get("userId")
@@ -274,17 +283,10 @@ func (h *LicenseHandler) Renew(c *gin.Context) {
 		return
 	}
 
-	var validUntil *time.Time
-	if req.ValidUntil != nil && *req.ValidUntil != "" {
-		t, err := time.Parse(time.RFC3339, *req.ValidUntil)
-		if err != nil {
-			t, err = time.Parse("2006-01-02", *req.ValidUntil)
-			if err != nil {
-				handler.Fail(c, http.StatusBadRequest, "invalid validUntil date format")
-				return
-			}
-		}
-		validUntil = &t
+	validUntil, err := parseOptionalLicenseDate(req.ValidUntil)
+	if err != nil {
+		handler.Fail(c, http.StatusBadRequest, "invalid validUntil date format")
+		return
 	}
 
 	userID, _ := c.Get("userId")
@@ -323,26 +325,16 @@ func (h *LicenseHandler) Upgrade(c *gin.Context) {
 		return
 	}
 
-	validFrom, err := time.Parse(time.RFC3339, req.ValidFrom)
+	validFrom, err := parseLicenseDate(req.ValidFrom)
 	if err != nil {
-		validFrom, err = time.Parse("2006-01-02", req.ValidFrom)
-		if err != nil {
-			handler.Fail(c, http.StatusBadRequest, "invalid validFrom date format")
-			return
-		}
+		handler.Fail(c, http.StatusBadRequest, "invalid validFrom date format")
+		return
 	}
 
-	var validUntil *time.Time
-	if req.ValidUntil != nil && *req.ValidUntil != "" {
-		t, err := time.Parse(time.RFC3339, *req.ValidUntil)
-		if err != nil {
-			t, err = time.Parse("2006-01-02", *req.ValidUntil)
-			if err != nil {
-				handler.Fail(c, http.StatusBadRequest, "invalid validUntil date format")
-				return
-			}
-		}
-		validUntil = &t
+	validUntil, err := parseOptionalLicenseDate(req.ValidUntil)
+	if err != nil {
+		handler.Fail(c, http.StatusBadRequest, "invalid validUntil date format")
+		return
 	}
 
 	userID, _ := c.Get("userId")

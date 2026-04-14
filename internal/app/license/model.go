@@ -17,7 +17,7 @@ type JSONText json.RawMessage
 
 func (j JSONText) Value() (driver.Value, error) {
 	if len(j) == 0 {
-		return "[]", nil
+		return "null", nil
 	}
 	return string(j), nil
 }
@@ -38,7 +38,7 @@ func (j *JSONText) Scan(src any) error {
 
 func (j JSONText) MarshalJSON() ([]byte, error) {
 	if len(j) == 0 {
-		return []byte("[]"), nil
+		return []byte("null"), nil
 	}
 	return []byte(j), nil
 }
@@ -351,16 +351,20 @@ func (Licensee) TableName() string { return "license_licensees" }
 
 const licenseeCodeCharset = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
 
-func generateLicenseeCode() (string, error) {
-	b := make([]byte, 12)
+func generateRandomCode(charset string, length int, prefix string) (string, error) {
+	b := make([]byte, length)
 	for i := range b {
-		n, err := rand.Int(rand.Reader, big.NewInt(int64(len(licenseeCodeCharset))))
+		n, err := rand.Int(rand.Reader, big.NewInt(int64(len(charset))))
 		if err != nil {
 			return "", err
 		}
-		b[i] = licenseeCodeCharset[n.Int64()]
+		b[i] = charset[n.Int64()]
 	}
-	return "LS-" + string(b), nil
+	return prefix + string(b), nil
+}
+
+func generateLicenseeCode() (string, error) {
+	return generateRandomCode(licenseeCodeCharset, 12, "LS-")
 }
 
 type LicenseeResponse struct {

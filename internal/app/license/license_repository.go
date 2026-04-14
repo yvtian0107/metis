@@ -125,6 +125,12 @@ func (r *LicenseRepo) FindExpired(now time.Time) ([]License, error) {
 	return items, nil
 }
 
+func (r *LicenseRepo) UpdateExpiredStatus(now time.Time, statuses []string) error {
+	return r.db.Model(&License{}).
+		Where("lifecycle_status IN ? AND valid_until IS NOT NULL AND valid_until <= ?", statuses, now).
+		Update("lifecycle_status", LicenseLifecycleExpired).Error
+}
+
 func (r *LicenseRepo) CountByProductAndKeyVersionLessThan(productID uint, version int) (int64, error) {
 	var count int64
 	err := r.db.Model(&License{}).

@@ -1,11 +1,9 @@
 package license
 
 import (
-	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math/big"
 	"time"
 
 	"github.com/samber/do/v2"
@@ -66,6 +64,47 @@ type IssueLicenseParams struct {
 	IssuedBy               uint
 }
 
+type licensePayloadArgs struct {
+	ProductCode      string
+	LicenseeCode     string
+	LicenseeName     string
+	RegistrationCode string
+	ConstraintValues JSONText
+	IssuedAt         time.Time
+	ValidFrom        time.Time
+	ValidUntil       *time.Time
+	KeyVersion       int
+}
+
+func buildLicensePayload(args licensePayloadArgs) (map[string]any, error) {
+	var constraintMap map[string]any
+	if len(args.ConstraintValues) > 0 {
+		if err := json.Unmarshal(args.ConstraintValues.RawMessage(), &constraintMap); err != nil {
+			return nil, fmt.Errorf("invalid constraint values: %w", err)
+		}
+	}
+	if constraintMap == nil {
+		constraintMap = make(map[string]any)
+	}
+
+	payload := map[string]any{
+		"v":    1,
+		"pid":  args.ProductCode,
+		"lic":  args.LicenseeCode,
+		"licn": args.LicenseeName,
+		"reg":  args.RegistrationCode,
+		"con":  constraintMap,
+		"iat":  args.IssuedAt.Unix(),
+		"nbf":  args.ValidFrom.Unix(),
+		"exp":  nil,
+		"kv":   args.KeyVersion,
+	}
+	if args.ValidUntil != nil {
+		payload["exp"] = args.ValidUntil.Unix()
+	}
+	return payload, nil
+}
+
 func deriveLifecycleStatus(validFrom time.Time, validUntil *time.Time) string {
 	now := time.Now()
 	if validFrom.After(now) {
@@ -120,30 +159,19 @@ func (s *LicenseService) IssueLicense(params IssueLicenseParams) (*License, erro
 	now := time.Now()
 
 	// Build payload
-	var constraintMap map[string]any
-	if len(params.ConstraintValues) > 0 {
-		if err := json.Unmarshal(params.ConstraintValues, &constraintMap); err != nil {
-			return nil, fmt.Errorf("invalid constraint values: %w", err)
-		}
-	}
-	if constraintMap == nil {
-		constraintMap = make(map[string]any)
-	}
-
-	payload := map[string]any{
-		"v":    1,
-		"pid":  product.Code,
-		"lic":  licensee.Code,
-		"licn": licensee.Name,
-		"reg":  params.RegistrationCode,
-		"con":  constraintMap,
-		"iat":  now.Unix(),
-		"nbf":  params.ValidFrom.Unix(),
-		"exp":  nil,
-		"kv":   key.Version,
-	}
-	if params.ValidUntil != nil {
-		payload["exp"] = params.ValidUntil.Unix()
+	payload, err := buildLicensePayload(licensePayloadArgs{
+		ProductCode:      product.Code,
+		LicenseeCode:     licensee.Code,
+		LicenseeName:     licensee.Name,
+		RegistrationCode: params.RegistrationCode,
+		ConstraintValues: JSONText(params.ConstraintValues),
+		IssuedAt:         now,
+		ValidFrom:        params.ValidFrom,
+		ValidUntil:       params.ValidUntil,
+		KeyVersion:       key.Version,
+	})
+	if err != nil {
+		return nil, err
 	}
 
 	// Sign
@@ -281,7 +309,7 @@ func (s *LicenseService) UpgradeLicense(id uint, params IssueLicenseParams) (*Li
 
 	// Unbind registration from original license so it can be reused for upgrade
 	if original.RegistrationCode != "" && original.RegistrationCode == params.RegistrationCode {
-		if err := s.db.Model(&LicenseRegistration{}).Where("code = ?", params.RegistrationCode).Update("bound_license_id", nil).Error; err != nil {
+		if err := s.regRepo.UnbindLicenseInTx(s.db, params.RegistrationCode); err != nil {
 			return nil, err
 		}
 	}
@@ -450,15 +478,7 @@ func (s *LicenseService) ExportLicFile(id uint) (string, string, error) {
 
 func generateRegistrationCode() (string, error) {
 	const charset = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
-	b := make([]byte, 16)
-	for i := range b {
-		n, err := rand.Int(rand.Reader, big.NewInt(int64(len(charset))))
-		if err != nil {
-			return "", err
-		}
-		b[i] = charset[n.Int64()]
-	}
-	return "RG-" + string(b), nil
+	return generateRandomCode(charset, 16, "RG-")
 }
 
 type CreateLicenseRegistrationParams struct {

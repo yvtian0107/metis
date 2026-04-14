@@ -35,6 +35,9 @@ import {
   ClipboardList,
   Fingerprint,
   Package,
+  Activity,
+  GitBranch,
+  Network,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -75,6 +78,9 @@ const icons = {
   Package,
   Building2,
   FileBadge,
+  Activity,
+  GitBranch,
+  Network,
 };
 
 function normalizeIconName(name: string): string {

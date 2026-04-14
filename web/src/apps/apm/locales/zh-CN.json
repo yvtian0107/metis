@@ -1,6 +1,6 @@
 {
-  "traces": "Traces",
-  "traceExplorer": "Trace Explorer",
+  "traces": "Trace 追踪",
+  "traceExplorer": "Trace 追踪",
   "traceDetail": "Trace 详情",
   "filters": {
     "service": "服务",
@@ -20,7 +20,7 @@
     "rootOperation": "根操作",
     "service": "服务",
     "duration": "耗时",
-    "spans": "Spans",
+    "spans": "Span 数",
     "status": "状态",
     "time": "时间",
     "noData": "未找到 Trace",
@@ -43,7 +43,7 @@
     "parentSpanId": "父 Span ID"
   },
   "services": {
-    "title": "服务目录",
+    "title": "服务列表",
     "name": "服务",
     "reqRate": "请求数",
     "avgDuration": "平均延迟",
@@ -113,7 +113,7 @@
   },
   "logs": {
     "tab": "日志",
-    "spansTab": "Spans",
+    "spansTab": "Span 列表",
     "timestamp": "时间",
     "severity": "级别",
     "service": "服务",

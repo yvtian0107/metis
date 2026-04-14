@@ -40,6 +40,10 @@
     "license:license:list": "Licenses",
     "observe": "Integrations",
     "observe:integrations": "Integration Catalog",
-    "observe:tokens": "API Tokens"
+    "observe:tokens": "API Tokens",
+    "apm": "APM",
+    "apm:traces": "Traces",
+    "apm:services": "Services",
+    "apm:topology": "Topology"
   }
 }
