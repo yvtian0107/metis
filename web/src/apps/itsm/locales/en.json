@@ -267,6 +267,18 @@
       "activityDetail": "Activity Detail"
     }
   },
+  "approval": {
+    "title": "My Approvals",
+    "empty": "No pending approvals",
+    "approve": "Approve",
+    "deny": "Deny",
+    "reason": "Reason for denial",
+    "reasonPlaceholder": "Enter reason (optional)",
+    "confirmDeny": "Confirm Deny",
+    "approveSuccess": "Approved successfully",
+    "denySuccess": "Denied successfully",
+    "activityName": "Approval Step"
+  },
   "smart": {
     "configTitle": "Smart Engine Config",
     "agent": "Decision Agent",

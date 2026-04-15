@@ -506,6 +506,52 @@ export function retryAI(ticketId: number) {
   return api.post(`/api/v1/itsm/tickets/${ticketId}/override/retry-ai`, {})
 }
 
+// ─── Approvals ─────────────────────────────────────────
+
+export interface ApprovalItem {
+  ticketId: number
+  ticketCode: string
+  ticketTitle: string
+  ticketStatus: string
+  serviceId: number
+  priorityId: number
+  priorityName: string
+  priorityColor: string
+  serviceName: string
+  slaStatus: string
+  slaResponseDeadline: string | null
+  slaResolutionDeadline: string | null
+  activityId: number
+  activityName: string
+  activityType: string
+  formSchema: unknown
+  startedAt: string | null
+  createdAt: string
+  assignmentId: number
+  participantType: string
+}
+
+export function fetchApprovals(params: { page?: number; pageSize?: number }) {
+  const p = new URLSearchParams()
+  p.set("page", String(params.page ?? 1))
+  p.set("pageSize", String(params.pageSize ?? 20))
+  return api.get<{ items: ApprovalItem[]; total: number }>(
+    `/api/v1/itsm/tickets/approvals?${p}`,
+  )
+}
+
+export function fetchApprovalCount() {
+  return api.get<{ count: number }>("/api/v1/itsm/tickets/approvals/count")
+}
+
+export function approveActivity(ticketId: number, activityId: number) {
+  return api.post(`/api/v1/itsm/tickets/${ticketId}/activities/${activityId}/approve`, {})
+}
+
+export function denyActivity(ticketId: number, activityId: number, reason?: string) {
+  return api.post(`/api/v1/itsm/tickets/${ticketId}/activities/${activityId}/deny`, { reason })
+}
+
 // ─── AI App APIs (for smart engine config) ─────────────
 
 export interface AgentItem {

@@ -183,6 +183,8 @@ func (a *ITSMApp) Routes(api *gin.RouterGroup) {
 		g.GET("/tickets/mine", ticketH.Mine)
 		g.GET("/tickets/todo", ticketH.Todo)
 		g.GET("/tickets/history", ticketH.History)
+		g.GET("/tickets/approvals", ticketH.Approvals)
+		g.GET("/tickets/approvals/count", ticketH.ApprovalCount)
 		g.POST("/tickets", ticketH.Create)
 		g.GET("/tickets", ticketH.List)
 		g.GET("/tickets/:id", ticketH.Get)
@@ -200,6 +202,9 @@ func (a *ITSMApp) Routes(api *gin.RouterGroup) {
 		g.POST("/tickets/:id/override/jump", ticketH.OverrideJump)
 		g.POST("/tickets/:id/override/reassign", ticketH.OverrideReassign)
 		g.POST("/tickets/:id/override/retry-ai", ticketH.RetryAI)
+		// Phase 4: Approval routes
+		g.POST("/tickets/:id/activities/:aid/approve", ticketH.ApproveActivity)
+		g.POST("/tickets/:id/activities/:aid/deny", ticketH.DenyActivity)
 	}
 }
 

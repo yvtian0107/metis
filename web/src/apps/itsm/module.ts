@@ -75,6 +75,15 @@ registerApp({
       ],
     },
     {
+      path: "itsm/tickets/approvals",
+      children: [
+        {
+          index: true,
+          lazy: () => import("./pages/tickets/approvals/index"),
+        },
+      ],
+    },
+    {
       path: "itsm/tickets/:id",
       lazy: () => import("./pages/tickets/[id]/index"),
     },

@@ -12,18 +12,13 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table"
 import { type TicketItem } from "../../api"
+import { SLABadge } from "../../components/sla-badge"
 
 const STATUS_MAP: Record<string, { variant: "default" | "secondary" | "destructive" | "outline"; key: string }> = {
   pending: { variant: "secondary", key: "statusPending" },
   in_progress: { variant: "default", key: "statusInProgress" },
   waiting_approval: { variant: "outline", key: "statusWaitingApproval" },
   waiting_action: { variant: "outline", key: "statusWaitingAction" },
-}
-
-const SLA_VARIANT: Record<string, "default" | "secondary" | "destructive"> = {
-  normal: "default",
-  warning: "secondary",
-  breached: "destructive",
 }
 
 export function Component() {
@@ -79,11 +74,7 @@ export function Component() {
                     <TableCell className="text-sm text-muted-foreground">{item.serviceName}</TableCell>
                     <TableCell className="text-sm">{item.requesterName}</TableCell>
                     <TableCell>
-                      {item.slaStatus && (
-                        <Badge variant={SLA_VARIANT[item.slaStatus] ?? "secondary"}>
-                          {t(`itsm:tickets.sla${item.slaStatus.charAt(0).toUpperCase() + item.slaStatus.slice(1)}`)}
-                        </Badge>
-                      )}
+                      <SLABadge slaStatus={item.slaStatus} slaResolutionDeadline={item.slaResolutionDeadline} />
                     </TableCell>
                     <TableCell className="text-sm text-muted-foreground">{new Date(item.createdAt).toLocaleString()}</TableCell>
                   </TableRow>

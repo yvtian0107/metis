@@ -267,6 +267,18 @@
       "activityDetail": "节点详情"
     }
   },
+  "approval": {
+    "title": "我的审批",
+    "empty": "暂无待审批项",
+    "approve": "通过",
+    "deny": "驳回",
+    "reason": "驳回原因",
+    "reasonPlaceholder": "请输入驳回原因（可选）",
+    "confirmDeny": "确定驳回",
+    "approveSuccess": "审批已通过",
+    "denySuccess": "审批已驳回",
+    "activityName": "审批节点"
+  },
   "smart": {
     "configTitle": "智能引擎配置",
     "agent": "决策 Agent",

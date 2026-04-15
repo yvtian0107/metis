@@ -95,6 +95,9 @@ func seedMenus(db *gorm.DB) error {
 	// 历史工单
 	seedMenu(db, &ticketDir.ID, "历史工单", model.MenuTypeMenu, "/itsm/tickets/history", "Archive", "itsm:ticket:history", 3)
 
+	// 我的审批
+	seedMenu(db, &ticketDir.ID, "我的审批", model.MenuTypeMenu, "/itsm/tickets/approvals", "CheckCircle", "itsm:ticket:approvals", 4)
+
 	// 优先级管理
 	priorityMenu := seedMenu(db, &itsmDir.ID, "优先级管理", model.MenuTypeMenu, "/itsm/priorities", "Flag", "itsm:priority:list", 3)
 	seedButtons(db, priorityMenu, []model.Menu{
@@ -206,6 +209,11 @@ func seedPolicies(enforcer *casbin.Enforcer) error {
 		{"admin", "/api/v1/itsm/tickets/:id/override/jump", "POST"},
 		{"admin", "/api/v1/itsm/tickets/:id/override/reassign", "POST"},
 		{"admin", "/api/v1/itsm/tickets/:id/override/retry-ai", "POST"},
+		// Approval routes
+		{"admin", "/api/v1/itsm/tickets/approvals", "GET"},
+		{"admin", "/api/v1/itsm/tickets/approvals/count", "GET"},
+		{"admin", "/api/v1/itsm/tickets/:id/activities/:aid/approve", "POST"},
+		{"admin", "/api/v1/itsm/tickets/:id/activities/:aid/deny", "POST"},
 	}
 
 	menuPerms := [][]string{
@@ -227,6 +235,7 @@ func seedPolicies(enforcer *casbin.Enforcer) error {
 		{"admin", "itsm:ticket:mine", "read"},
 		{"admin", "itsm:ticket:todo", "read"},
 		{"admin", "itsm:ticket:history", "read"},
+		{"admin", "itsm:ticket:approvals", "read"},
 		{"admin", "itsm:priority:list", "read"},
 		{"admin", "itsm:priority:create", "read"},
 		{"admin", "itsm:priority:update", "read"},

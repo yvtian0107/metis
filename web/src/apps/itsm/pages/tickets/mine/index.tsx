@@ -14,6 +14,7 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table"
 import { type TicketItem } from "../../api"
+import { SLABadge } from "../../components/sla-badge"
 
 const STATUS_MAP: Record<string, { variant: "default" | "secondary" | "destructive" | "outline"; key: string }> = {
   pending: { variant: "secondary", key: "statusPending" },
@@ -68,14 +69,15 @@ export function Component() {
               <TableHead className="w-[100px]">{t("itsm:tickets.status")}</TableHead>
               <TableHead className="w-[100px]">{t("itsm:tickets.service")}</TableHead>
               <TableHead className="w-[80px]">{t("itsm:tickets.assignee")}</TableHead>
+              <TableHead className="w-[100px]">{t("itsm:tickets.slaStatus")}</TableHead>
               <TableHead className="w-[140px]">{t("itsm:tickets.createdAt")}</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {isLoading ? (
-              <DataTableLoadingRow colSpan={7} />
+              <DataTableLoadingRow colSpan={8} />
             ) : items.length === 0 ? (
-              <DataTableEmptyRow colSpan={7} icon={Ticket} title={t("itsm:tickets.empty")} />
+              <DataTableEmptyRow colSpan={8} icon={Ticket} title={t("itsm:tickets.empty")} />
             ) : (
               items.map((item) => {
                 const statusInfo = STATUS_MAP[item.status] ?? { variant: "secondary" as const, key: "statusPending" }
@@ -94,6 +96,9 @@ export function Component() {
                     </TableCell>
                     <TableCell className="text-sm text-muted-foreground">{item.serviceName}</TableCell>
                     <TableCell className="text-sm">{item.assigneeName || "—"}</TableCell>
+                    <TableCell>
+                      <SLABadge slaStatus={item.slaStatus} slaResolutionDeadline={item.slaResolutionDeadline} />
+                    </TableCell>
                     <TableCell className="text-sm text-muted-foreground">{new Date(item.createdAt).toLocaleString()}</TableCell>
                   </TableRow>
                 )
