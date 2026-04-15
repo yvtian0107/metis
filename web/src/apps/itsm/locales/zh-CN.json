@@ -62,7 +62,18 @@
     "formSchema": "表单 Schema",
     "actions": "动作管理",
     "allCatalogs": "全部分类",
-    "workflow": "流程设计"
+    "workflow": "流程设计",
+    "detail": "服务详情",
+    "tabBasicInfo": "基础信息",
+    "tabWorkflow": "工作流",
+    "tabActions": "动作",
+    "backToList": "返回列表",
+    "allEngineTypes": "全部引擎",
+    "allStatuses": "全部状态",
+    "view": "查看",
+    "workflowEmpty": "工作流尚未配置",
+    "workflowEmptyHint": "工作流数据将在后续生成",
+    "collaborationSpecLabel": "协作规范"
   },
   "actions": {
     "title": "动作管理",

@@ -7,7 +7,7 @@ import { z } from "zod"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { useNavigate } from "react-router"
-import { Plus, Search, Pencil, Trash2, Cog, Zap, GitBranch } from "lucide-react"
+import { Plus, Search, Pencil, Trash2, Cog, Eye } from "lucide-react"
 import { usePermission } from "@/hooks/use-permission"
 import { useListPage } from "@/hooks/use-list-page"
 import { toast } from "sonner"
@@ -250,16 +250,9 @@ export function Component() {
                   </TableCell>
                   <DataTableActionsCell>
                     <DataTableActions>
-                      {canUpdate && item.engineType === "classic" && (
-                        <Button variant="ghost" size="sm" className="px-2.5" onClick={() => navigate(`/itsm/services/${item.id}/workflow`)}>
-                          <GitBranch className="mr-1 h-3.5 w-3.5" />{t("itsm:services.workflow")}
-                        </Button>
-                      )}
-                      {canUpdate && (
-                        <Button variant="ghost" size="sm" className="px-2.5" onClick={() => navigate(`/itsm/services/${item.id}/actions`)}>
-                          <Zap className="mr-1 h-3.5 w-3.5" />{t("itsm:services.actions")}
-                        </Button>
-                      )}
+                      <Button variant="ghost" size="sm" className="px-2.5" onClick={() => navigate(`/itsm/services/${item.id}`)}>
+                        <Eye className="mr-1 h-3.5 w-3.5" />{t("itsm:services.view")}
+                      </Button>
                       {canUpdate && (
                         <Button variant="ghost" size="sm" className="px-2.5" onClick={() => { setEditing(item); setFormOpen(true) }}>
                           <Pencil className="mr-1 h-3.5 w-3.5" />{t("common:edit")}

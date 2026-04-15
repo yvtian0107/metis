@@ -12,6 +12,9 @@ import (
 	"metis/internal/database"
 )
 
+// timeNow is overridable in tests to make time-based logic deterministic.
+var timeNow = time.Now
+
 var (
 	ErrLicenseNotFound          = errors.New("error.license.not_found")
 	ErrLicenseAlreadyRevoked    = errors.New("error.license.already_revoked")
@@ -108,8 +111,7 @@ func buildLicensePayload(args licensePayloadArgs) (map[string]any, error) {
 	return payload, nil
 }
 
-func deriveLifecycleStatus(validFrom time.Time, validUntil *time.Time) string {
-	now := time.Now()
+func deriveLifecycleStatus(validFrom time.Time, validUntil *time.Time, now time.Time) string {
 	if validFrom.After(now) {
 		return LicenseLifecyclePending
 	}
@@ -159,7 +161,7 @@ func (s *LicenseService) issueLicenseInTx(tx *gorm.DB, params IssueLicenseParams
 		return nil, err
 	}
 
-	now := time.Now()
+	now := timeNow()
 
 	// Build payload
 	payload, err := buildLicensePayload(licensePayloadArgs{
@@ -192,7 +194,7 @@ func (s *LicenseService) issueLicenseInTx(tx *gorm.DB, params IssueLicenseParams
 	// Validate registration code
 	var reg *LicenseRegistration
 	if params.RegistrationCode != "" {
-		r, err := s.regRepo.FindByCode(params.RegistrationCode)
+		r, err := s.regRepo.FindByCodeInTx(tx, params.RegistrationCode)
 		if err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				if params.AutoCreateRegistration {
@@ -235,7 +237,7 @@ func (s *LicenseService) issueLicenseInTx(tx *gorm.DB, params IssueLicenseParams
 		KeyVersion:       key.Version,
 		Signature:        sig,
 		Status:           LicenseStatusIssued,
-		LifecycleStatus:  deriveLifecycleStatus(params.ValidFrom, params.ValidUntil),
+		LifecycleStatus:  deriveLifecycleStatus(params.ValidFrom, params.ValidUntil, timeNow()),
 		IssuedBy:         params.IssuedBy,
 		Notes:            params.Notes,
 	}
@@ -277,7 +279,7 @@ func (s *LicenseService) RevokeLicense(id uint, revokedBy uint) error {
 		return ErrLicenseAlreadyRevoked
 	}
 
-	now := time.Now()
+	now := timeNow()
 	return s.licenseRepo.UpdateStatus(id, map[string]any{
 		"status":           LicenseStatusRevoked,
 		"lifecycle_status": LicenseLifecycleRevoked,
@@ -333,7 +335,7 @@ func (s *LicenseService) UpgradeLicense(id uint, params IssueLicenseParams) (*Li
 			return err
 		}
 
-		now := time.Now()
+		now := timeNow()
 		// Revoke original and link to new
 		if err := s.licenseRepo.UpdateStatusInTx(tx, id, map[string]any{
 			"status":           LicenseStatusRevoked,
@@ -349,6 +351,7 @@ func (s *LicenseService) UpgradeLicense(id uint, params IssueLicenseParams) (*Li
 		}); err != nil {
 			return err
 		}
+		newLicense.OriginalLicenseID = &id
 
 		return nil
 	})
@@ -374,7 +377,7 @@ func (s *LicenseService) SuspendLicense(id uint, suspendedBy uint) error {
 		return ErrLicenseAlreadySuspended
 	}
 
-	now := time.Now()
+	now := timeNow()
 	return s.licenseRepo.UpdateStatus(id, map[string]any{
 		"lifecycle_status": LicenseLifecycleSuspended,
 		"suspended_at":     now,
@@ -397,7 +400,7 @@ func (s *LicenseService) ReactivateLicense(id uint) error {
 		return ErrLicenseNotSuspended
 	}
 
-	newStatus := deriveLifecycleStatus(detail.ValidFrom, detail.ValidUntil)
+	newStatus := deriveLifecycleStatus(detail.ValidFrom, detail.ValidUntil, time.Now())
 	return s.licenseRepo.UpdateStatus(id, map[string]any{
 		"lifecycle_status": newStatus,
 		"suspended_at":     nil,
@@ -406,7 +409,7 @@ func (s *LicenseService) ReactivateLicense(id uint) error {
 }
 
 func (s *LicenseService) CheckExpiredLicenses() error {
-	return s.licenseRepo.UpdateExpiredStatus(time.Now(), []string{LicenseLifecyclePending, LicenseLifecycleActive})
+	return s.licenseRepo.UpdateExpiredStatus(timeNow(), []string{LicenseLifecyclePending, LicenseLifecycleActive})
 }
 
 func (s *LicenseService) GetLicense(id uint) (*LicenseDetail, error) {
@@ -568,7 +571,7 @@ func (s *LicenseService) ListLicenseRegistrations(params LicenseRegistrationList
 }
 
 func (s *LicenseService) CleanupExpiredRegistrations() error {
-	return s.regRepo.DeleteExpired(time.Now())
+	return s.regRepo.DeleteExpired(timeNow())
 }
 
 // --- Key rotation impact assessment ---

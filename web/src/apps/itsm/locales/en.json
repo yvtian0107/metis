@@ -62,7 +62,18 @@
     "formSchema": "Form Schema",
     "actions": "Actions",
     "allCatalogs": "All Categories",
-    "workflow": "Workflow"
+    "workflow": "Workflow",
+    "detail": "Service Detail",
+    "tabBasicInfo": "Basic Info",
+    "tabWorkflow": "Workflow",
+    "tabActions": "Actions",
+    "backToList": "Back to list",
+    "allEngineTypes": "All Engines",
+    "allStatuses": "All Statuses",
+    "view": "View",
+    "workflowEmpty": "Workflow not configured",
+    "workflowEmptyHint": "Workflow data will be generated later",
+    "collaborationSpecLabel": "Collaboration Spec"
   },
   "actions": {
     "title": "Actions",

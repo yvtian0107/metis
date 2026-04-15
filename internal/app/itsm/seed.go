@@ -26,6 +26,9 @@ func seedITSM(db *gorm.DB, enforcer *casbin.Enforcer) error {
 	if err := seedSLATemplates(db); err != nil {
 		return err
 	}
+	if err := seedServiceDefinitions(db); err != nil {
+		return err
+	}
 	if err := tools.SeedTools(db); err != nil {
 		return err
 	}
@@ -386,6 +389,9 @@ func seedSLATemplates(db *gorm.DB) error {
 	templates := []SLATemplate{
 		{Name: "标准", Code: "standard", Description: "标准 SLA，响应 4 小时，解决 24 小时", ResponseMinutes: 240, ResolutionMinutes: 1440, IsActive: true},
 		{Name: "紧急", Code: "urgent", Description: "紧急 SLA，响应 30 分钟，解决 4 小时", ResponseMinutes: 30, ResolutionMinutes: 240, IsActive: true},
+		{Name: "快速办公支持", Code: "rapid-workplace", Description: "适用于办公终端、账号开通、基础软件支持等高频轻量服务", ResponseMinutes: 15, ResolutionMinutes: 120, IsActive: true},
+		{Name: "关键业务", Code: "critical-business", Description: "适用于影响关键业务连续性的高优先级服务与紧急支持场景", ResponseMinutes: 10, ResolutionMinutes: 60, IsActive: true},
+		{Name: "基础设施变更", Code: "infra-change", Description: "适用于服务器、网络、数据库等基础设施类服务和变更协作", ResponseMinutes: 60, ResolutionMinutes: 480, IsActive: true},
 	}
 
 	for _, t := range templates {
@@ -396,6 +402,127 @@ func seedSLATemplates(db *gorm.DB) error {
 				continue
 			}
 			slog.Info("seed: created SLA template", "code", t.Code, "name", t.Name)
+		}
+	}
+
+	return nil
+}
+
+func seedServiceDefinitions(db *gorm.DB) error {
+	type serviceSeed struct {
+		Name              string
+		Code              string
+		Description       string
+		CatalogCode       string
+		SLACode           string
+		CollaborationSpec string
+		Actions           []ServiceAction
+	}
+
+	seeds := []serviceSeed{
+		{
+			Name:        "Copilot 账号申请",
+			Code:        "copilot-account-request",
+			Description: "用于验证服务申请与审批闭环的内置服务。",
+			CatalogCode: "account-access:provisioning",
+			SLACode:     "rapid-workplace",
+			CollaborationSpec: "收集提单用户的Github账号信息和申请理由（可选），交给信息部的IT管理员审批，审批通过后结束流程。",
+		},
+		{
+			Name:        "高风险变更协同申请（Boss）",
+			Code:        "boss-serial-change-request",
+			Description: "用于在系统内直接查看复杂表单、表格明细与两级串签流程图的 Boss 级内置服务。",
+			CatalogCode: "application-platform:release",
+			SLACode:     "infra-change",
+			CollaborationSpec: `用户通过 IT 服务台提交高风险变更协同申请。服务台需要收集申请主题、申请类别、风险等级、期望完成时间、变更开始时间、变更结束时间、影响范围、回滚要求、影响模块以及变更明细表。申请类别必须支持：生产变更(prod_change)、访问授权(access_grant)、应急支持(emergency_support)。风险等级必须支持：低(low)、中(medium)、高(high)。回滚要求必须支持：需要(required)、不需要(not_required)。影响模块必须支持多选：网关(gateway)、支付(payment)、监控(monitoring)、订单(order)。变更明细表至少包含系统、资源、权限级别、生效时段、变更理由。权限级别必须支持：只读(read)、读写(read_write)。申请提交后，先交给指定用户 serial-reviewer 审批，审批参与者类型必须使用 user。serial-reviewer 审批通过后，再交给信息部的运维管理员岗位审批，审批参与者类型必须使用 position_department，部门编码使用 it，岗位编码使用 ops_admin。运维管理员审批通过后直接结束流程，不要生成驳回分支。`,
+		},
+		{
+			Name:        "生产数据库备份白名单临时放行申请",
+			Code:        "db-backup-whitelist-action-e2e",
+			Description: "用于验证请求节点预检动作、审批后自动放行动作与工单闭环。",
+			CatalogCode: "application-platform:database",
+			SLACode:     "infra-change",
+			CollaborationSpec: `用户提交生产数据库备份白名单临时放行申请。系统先进入申请人请求节点，并在进入节点时自动执行预检动作，校验目标数据库、运维来源 IP 和放行时间窗信息是否齐备。申请人提交后，交给信息部的数据库管理员岗位审批，审批参与者类型必须使用 position_department，部门编码使用 it，岗位编码使用 dba_admin。审批通过后，在离开审批节点时自动执行白名单放行动作，并在动作成功后直接结束流程。`,
+			Actions: []ServiceAction{
+				{
+					Name: "备份白名单预检", Code: "backup_whitelist_precheck",
+					Description: "在申请人提交前校验数据库、时间窗与来源 IP 是否齐备。",
+					ActionType: "http", IsActive: true,
+					ConfigJSON: JSONField(`{"url":"/precheck","method":"POST","timeout_seconds":5}`),
+				},
+				{
+					Name: "执行备份白名单放行", Code: "backup_whitelist_apply",
+					Description: "审批通过后自动执行数据库备份白名单放行。",
+					ActionType: "http", IsActive: true,
+					ConfigJSON: JSONField(`{"url":"/apply","method":"POST","timeout_seconds":5}`),
+				},
+			},
+		},
+		{
+			Name:        "生产服务器临时访问申请",
+			Code:        "prod-server-temporary-access",
+			Description: "用于验证生产服务器临时访问在主机运维、网络诊断与安全审计语境下的真实分支审批。",
+			CatalogCode: "infra-network:compute",
+			SLACode:     "critical-business",
+			CollaborationSpec: `用户通过 IT 服务台提交生产服务器临时访问申请。服务台需要收集访问服务器、访问时段、操作目的和访问原因。如果访问原因属于应用发布、进程排障、日志排查、磁盘清理、主机巡检或生产运维操作，则交给信息部的运维管理员岗位审批，审批参与者类型必须使用 position_department，部门编码使用 it，岗位编码使用 ops_admin。如果访问原因属于网络抓包、连通性诊断、ACL 调整、负载均衡变更或防火墙策略调整，则交给信息部的网络管理员岗位审批，审批参与者类型必须使用 position_department，部门编码使用 it，岗位编码使用 network_admin。如果访问原因属于安全审计、入侵排查、漏洞修复验证、取证分析或合规检查，则交给信息部的信息安全管理员岗位审批，审批参与者类型必须使用 position_department，部门编码使用 it，岗位编码使用 security_admin。审批通过后直接结束流程，不要生成驳回分支。`,
+		},
+		{
+			Name:        "VPN 开通申请",
+			Code:        "vpn-access-request",
+			Description: "用于验证 VPN 开通申请在服务匹配、拟提单确认与分支审批下的完整闭环。",
+			CatalogCode: "infra-network:network",
+			SLACode:     "standard",
+			CollaborationSpec: `用户通过 IT 服务台提交 VPN 开通申请。服务台需要收集 VPN 账号、设备与用途说明、访问原因。如果访问原因属于线上支持、故障排查、生产应急或网络接入问题，则交给信息部的网络管理员岗位审批，审批参与者类型必须使用 position_department，部门编码使用 it，岗位编码使用 network_admin。如果访问原因属于外部协作、长期远程办公、跨境访问或安全合规事项，则交给信息部的信息安全管理员岗位审批，审批参与者类型必须使用 position_department，部门编码使用 it，岗位编码使用 security_admin。审批通过后直接结束流程，不要生成驳回分支。`,
+		},
+	}
+
+	for _, s := range seeds {
+		var existing ServiceDefinition
+		if err := db.Where("code = ?", s.Code).First(&existing).Error; err == nil {
+			continue
+		}
+
+		var catalog ServiceCatalog
+		if err := db.Where("code = ?", s.CatalogCode).First(&catalog).Error; err != nil {
+			slog.Error("seed: catalog not found for service", "serviceCode", s.Code, "catalogCode", s.CatalogCode, "error", err)
+			continue
+		}
+
+		var slaID *uint
+		var sla SLATemplate
+		if err := db.Where("code = ?", s.SLACode).First(&sla).Error; err == nil {
+			slaID = &sla.ID
+		} else {
+			slog.Warn("seed: SLA not found for service, setting to nil", "serviceCode", s.Code, "slaCode", s.SLACode)
+		}
+
+		svc := ServiceDefinition{
+			Name:              s.Name,
+			Code:              s.Code,
+			Description:       s.Description,
+			CatalogID:         catalog.ID,
+			EngineType:        "smart",
+			SLAID:             slaID,
+			CollaborationSpec: s.CollaborationSpec,
+			IsActive:          true,
+		}
+		if err := db.Create(&svc).Error; err != nil {
+			slog.Error("seed: failed to create service definition", "code", s.Code, "error", err)
+			continue
+		}
+		slog.Info("seed: created service definition", "code", s.Code, "name", s.Name)
+
+		for _, action := range s.Actions {
+			var existingAction ServiceAction
+			if err := db.Where("service_id = ? AND code = ?", svc.ID, action.Code).First(&existingAction).Error; err == nil {
+				continue
+			}
+			action.ServiceID = svc.ID
+			if err := db.Create(&action).Error; err != nil {
+				slog.Error("seed: failed to create service action", "serviceCode", s.Code, "actionCode", action.Code, "error", err)
+				continue
+			}
+			slog.Info("seed: created service action", "serviceCode", s.Code, "actionCode", action.Code)
 		}
 	}
 
