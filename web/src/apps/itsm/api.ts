@@ -64,7 +64,6 @@ export interface ServiceDefItem {
   workflowJson: unknown
   collaborationSpec: string
   agentId: number | null
-  knowledgeBaseIds: number[] | null
   agentConfig: SmartAgentConfig | null
   isActive: boolean
   sortOrder: number
@@ -573,12 +572,29 @@ export function fetchAgents() {
   return api.get<{ items: AgentItem[] }>("/api/v1/ai/agents?page=1&pageSize=100").then((r) => r?.items ?? [])
 }
 
-export interface KnowledgeBaseItem {
+// ─── Service Knowledge Documents ────────────────────────
+
+export interface KnowledgeDocItem {
   id: number
-  name: string
-  description: string
+  serviceId: number
+  fileName: string
+  fileSize: number
+  fileType: string
+  parseStatus: string
+  parseError?: string
+  createdAt: string
 }
 
-export function fetchKnowledgeBases() {
-  return api.get<{ items: KnowledgeBaseItem[] }>("/api/v1/ai/knowledge-bases?page=1&pageSize=100").then((r) => r?.items ?? [])
+export function fetchKnowledgeDocs(serviceId: number) {
+  return api.get<KnowledgeDocItem[]>(`/api/v1/itsm/services/${serviceId}/knowledge-documents`).then((r) => r ?? [])
+}
+
+export function uploadKnowledgeDoc(serviceId: number, file: File) {
+  const form = new FormData()
+  form.append("file", file)
+  return api.upload<KnowledgeDocItem>(`/api/v1/itsm/services/${serviceId}/knowledge-documents`, form)
+}
+
+export function deleteKnowledgeDoc(serviceId: number, docId: number) {
+  return api.delete(`/api/v1/itsm/services/${serviceId}/knowledge-documents/${docId}`)
 }

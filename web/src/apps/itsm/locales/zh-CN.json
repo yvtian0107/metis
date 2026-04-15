@@ -303,8 +303,6 @@
     "agentPlaceholder": "选择 Agent",
     "collaborationSpec": "协作规范",
     "collaborationSpecPlaceholder": "描述服务处理流程、步骤规范、决策准则（支持 Markdown）",
-    "knowledgeBases": "关联知识库",
-    "noKnowledgeBases": "暂无可用知识库",
     "confidenceThreshold": "信心阈值",
     "decisionTimeout": "决策超时",
     "seconds": "秒",
@@ -342,5 +340,29 @@
     "overriddenBy": "覆盖人",
     "finishedAt": "完成时间",
     "aiCopilot": "AI 协助"
+  },
+  "knowledge": {
+    "title": "知识文档",
+    "upload": "上传文档",
+    "uploading": "上传中...",
+    "uploadSuccess": "文档上传成功",
+    "uploadError": "上传失败",
+    "delete": "删除文档",
+    "deleteTitle": "删除文档",
+    "deleteDesc": "确定要删除文档「{{name}}」吗？",
+    "confirmDelete": "确定删除",
+    "deleteSuccess": "文档已删除",
+    "empty": "暂无知识文档",
+    "emptyHint": "上传 PDF、Word、Excel、PPT、TXT 或 Markdown 文件作为服务知识",
+    "fileName": "文件名",
+    "fileSize": "大小",
+    "parseStatus": "解析状态",
+    "createdAt": "上传时间",
+    "statusPending": "待解析",
+    "statusProcessing": "解析中",
+    "statusCompleted": "已完成",
+    "statusFailed": "解析失败",
+    "supportedFormats": "支持 PDF、DOCX、XLSX、PPTX、TXT、MD 格式，最大 10MB",
+    "saveServiceFirst": "请先保存服务后再上传知识文档"
   }
 }

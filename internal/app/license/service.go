@@ -77,6 +77,13 @@ func (s *ProductService) CreateProduct(name, code, description string) (*Product
 		Status:      StatusUnpublished,
 	}
 
+	// Generate per-product license key for .lic file encryption
+	licenseKey, err := generateLicenseKey()
+	if err != nil {
+		return nil, err
+	}
+	product.LicenseKey = licenseKey
+
 	err = s.db.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(product).Error; err != nil {
 			return err
@@ -105,6 +112,15 @@ func (s *ProductService) GetProduct(id uint) (*Product, error) {
 		}
 		return nil, err
 	}
+
+	// Backfill licenseKey for products created before this field was added
+	if p.LicenseKey == "" {
+		if newKey, err := generateLicenseKey(); err == nil {
+			p.LicenseKey = newKey
+			_ = s.productRepo.Update(p)
+		}
+	}
+
 	return p, nil
 }
 

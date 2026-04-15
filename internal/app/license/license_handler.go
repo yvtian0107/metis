@@ -252,7 +252,8 @@ func (h *LicenseHandler) Export(c *gin.Context) {
 		return
 	}
 
-	licFile, filename, err := h.licenseSvc.ExportLicFile(id)
+	format := c.DefaultQuery("format", "v1")
+	licFile, filename, err := h.licenseSvc.ExportLicFile(id, format)
 	if err != nil {
 		if errors.Is(err, ErrLicenseNotFound) {
 			handler.Fail(c, http.StatusNotFound, err.Error())

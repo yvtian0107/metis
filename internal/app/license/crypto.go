@@ -136,11 +136,28 @@ func DeriveLicenseFileKey(registrationCode string, fileToken string) []byte {
 	return h[:]
 }
 
-// EncryptLicenseFile encrypts the full .lic JSON payload into a single base64url string.
+// DeriveLicenseFileKeyV2 derives a 32-byte AES key using fileToken, licenseKey, and registrationCode.
+func DeriveLicenseFileKeyV2(registrationCode string, fileToken string, licenseKey string) []byte {
+	h := sha256.Sum256([]byte(fileToken + ":" + licenseKey + ":" + registrationCode))
+	return h[:]
+}
+
+// EncryptLicenseFile encrypts the full .lic JSON payload into a single base64url string (v1 single-key).
 func EncryptLicenseFile(plaintext []byte, registrationCode string, productName string) (string, error) {
+	return EncryptLicenseFileV2(plaintext, registrationCode, productName, "")
+}
+
+// EncryptLicenseFileV2 encrypts the .lic JSON payload using dual-key derivation.
+// If licenseKey is empty, it falls back to v1 single-key derivation.
+func EncryptLicenseFileV2(plaintext []byte, registrationCode string, productName string, licenseKey string) (string, error) {
 	prefix := buildLicenseFilePrefix(productName)
 	fileToken := strings.TrimSuffix(prefix, ".")
-	key := DeriveLicenseFileKey(registrationCode, fileToken)
+	var key []byte
+	if licenseKey != "" {
+		key = DeriveLicenseFileKeyV2(registrationCode, fileToken, licenseKey)
+	} else {
+		key = DeriveLicenseFileKey(registrationCode, fileToken)
+	}
 	encrypted, err := encryptAESGCM(plaintext, key)
 	if err != nil {
 		return "", fmt.Errorf("encrypt license file: %w", err)
@@ -148,8 +165,14 @@ func EncryptLicenseFile(plaintext []byte, registrationCode string, productName s
 	return prefix + base64.RawURLEncoding.EncodeToString(encrypted), nil
 }
 
-// DecryptLicenseFile decrypts a base64url-encoded .lic string using the registration code.
+// DecryptLicenseFile decrypts a base64url-encoded .lic string using the registration code (v1 single-key).
 func DecryptLicenseFile(ciphertextBase64URL string, registrationCode string) ([]byte, error) {
+	return DecryptLicenseFileV2(ciphertextBase64URL, registrationCode, "")
+}
+
+// DecryptLicenseFileV2 decrypts a .lic string using dual-key derivation.
+// If licenseKey is empty, it falls back to v1 single-key derivation.
+func DecryptLicenseFileV2(ciphertextBase64URL string, registrationCode string, licenseKey string) ([]byte, error) {
 	original := strings.TrimSpace(ciphertextBase64URL)
 	if original == "" {
 		return nil, errors.New("license file is empty")
@@ -166,7 +189,13 @@ func DecryptLicenseFile(ciphertextBase64URL string, registrationCode string) ([]
 	if err != nil {
 		return nil, err
 	}
-	plaintext, err := decryptAESGCM(data, DeriveLicenseFileKey(registrationCode, fileToken))
+	var key []byte
+	if licenseKey != "" {
+		key = DeriveLicenseFileKeyV2(registrationCode, fileToken, licenseKey)
+	} else {
+		key = DeriveLicenseFileKey(registrationCode, fileToken)
+	}
+	plaintext, err := decryptAESGCM(data, key)
 	if err != nil {
 		return nil, fmt.Errorf("decrypt license file: %w", err)
 	}

@@ -303,8 +303,6 @@
     "agentPlaceholder": "Select Agent",
     "collaborationSpec": "Collaboration Spec",
     "collaborationSpecPlaceholder": "Describe the service process, step specs, and decision criteria (Markdown supported)",
-    "knowledgeBases": "Knowledge Bases",
-    "noKnowledgeBases": "No knowledge bases available",
     "confidenceThreshold": "Confidence Threshold",
     "decisionTimeout": "Decision Timeout",
     "seconds": "seconds",
@@ -342,5 +340,29 @@
     "overriddenBy": "Overridden By",
     "finishedAt": "Finished At",
     "aiCopilot": "AI Copilot"
+  },
+  "knowledge": {
+    "title": "Knowledge Documents",
+    "upload": "Upload Document",
+    "uploading": "Uploading...",
+    "uploadSuccess": "Document uploaded",
+    "uploadError": "Upload failed",
+    "delete": "Delete Document",
+    "deleteTitle": "Delete Document",
+    "deleteDesc": "Are you sure you want to delete \"{{name}}\"?",
+    "confirmDelete": "Confirm Delete",
+    "deleteSuccess": "Document deleted",
+    "empty": "No knowledge documents",
+    "emptyHint": "Upload PDF, Word, Excel, PPT, TXT, or Markdown files as service knowledge",
+    "fileName": "File Name",
+    "fileSize": "Size",
+    "parseStatus": "Parse Status",
+    "createdAt": "Uploaded",
+    "statusPending": "Pending",
+    "statusProcessing": "Processing",
+    "statusCompleted": "Completed",
+    "statusFailed": "Failed",
+    "supportedFormats": "Supports PDF, DOCX, XLSX, PPTX, TXT, MD. Max 10MB",
+    "saveServiceFirst": "Please save the service before uploading knowledge documents"
   }
 }

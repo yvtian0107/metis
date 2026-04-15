@@ -31,7 +31,6 @@ type CreateServiceDefRequest struct {
 	WorkflowJSON      JSONField `json:"workflowJson"`
 	CollaborationSpec string    `json:"collaborationSpec"`
 	AgentID           *uint     `json:"agentId"`
-	KnowledgeBaseIDs  JSONField `json:"knowledgeBaseIds"`
 	AgentConfig       JSONField `json:"agentConfig"`
 	SortOrder         int       `json:"sortOrder"`
 }
@@ -57,7 +56,6 @@ func (h *ServiceDefHandler) Create(c *gin.Context) {
 		WorkflowJSON:      req.WorkflowJSON,
 		CollaborationSpec: req.CollaborationSpec,
 		AgentID:           req.AgentID,
-		KnowledgeBaseIDs:  req.KnowledgeBaseIDs,
 		AgentConfig:       req.AgentConfig,
 		SortOrder:         req.SortOrder,
 	}
@@ -148,7 +146,6 @@ type UpdateServiceDefRequest struct {
 	WorkflowJSON      *JSONField `json:"workflowJson"`
 	CollaborationSpec *string    `json:"collaborationSpec"`
 	AgentID           *uint      `json:"agentId"`
-	KnowledgeBaseIDs  *JSONField `json:"knowledgeBaseIds"`
 	AgentConfig       *JSONField `json:"agentConfig"`
 	IsActive          *bool      `json:"isActive"`
 	SortOrder         *int       `json:"sortOrder"`
@@ -201,9 +198,6 @@ func (h *ServiceDefHandler) Update(c *gin.Context) {
 	}
 	if req.AgentID != nil {
 		updates["agent_id"] = *req.AgentID
-	}
-	if req.KnowledgeBaseIDs != nil {
-		updates["knowledge_base_ids"] = *req.KnowledgeBaseIDs
 	}
 	if req.AgentConfig != nil {
 		updates["agent_config"] = *req.AgentConfig

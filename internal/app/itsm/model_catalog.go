@@ -101,7 +101,6 @@ type ServiceDefinition struct {
 	WorkflowJSON      JSONField `json:"workflowJson" gorm:"type:text"`        // classic mode
 	CollaborationSpec string    `json:"collaborationSpec" gorm:"type:text"`    // smart mode
 	AgentID           *uint     `json:"agentId" gorm:"index"`                 // smart mode
-	KnowledgeBaseIDs  JSONField `json:"knowledgeBaseIds" gorm:"type:text"`    // smart mode
 	AgentConfig       JSONField `json:"agentConfig" gorm:"type:text"`         // smart mode
 	IsActive          bool      `json:"isActive" gorm:"not null;default:true"`
 	SortOrder         int       `json:"sortOrder" gorm:"default:0"`
@@ -121,7 +120,6 @@ type ServiceDefinitionResponse struct {
 	WorkflowJSON      JSONField `json:"workflowJson"`
 	CollaborationSpec string    `json:"collaborationSpec"`
 	AgentID           *uint     `json:"agentId"`
-	KnowledgeBaseIDs  JSONField `json:"knowledgeBaseIds"`
 	AgentConfig       JSONField `json:"agentConfig"`
 	IsActive          bool      `json:"isActive"`
 	SortOrder         int       `json:"sortOrder"`
@@ -142,7 +140,6 @@ func (s *ServiceDefinition) ToResponse() ServiceDefinitionResponse {
 		WorkflowJSON:      s.WorkflowJSON,
 		CollaborationSpec: s.CollaborationSpec,
 		AgentID:           s.AgentID,
-		KnowledgeBaseIDs:  s.KnowledgeBaseIDs,
 		AgentConfig:       s.AgentConfig,
 		IsActive:          s.IsActive,
 		SortOrder:         s.SortOrder,

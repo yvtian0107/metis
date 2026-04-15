@@ -1,6 +1,8 @@
 package license
 
 import (
+	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -432,7 +434,7 @@ type LicFile struct {
 	PublicKey      string `json:"publicKey"`
 }
 
-func (s *LicenseService) ExportLicFile(id uint) (string, string, error) {
+func (s *LicenseService) ExportLicFile(id uint, format string) (string, string, error) {
 	detail, err := s.licenseRepo.FindByID(id)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -456,6 +458,12 @@ func (s *LicenseService) ExportLicFile(id uint) (string, string, error) {
 		return "", "", err
 	}
 
+	// Get product's license key for v2 encryption
+	product, err := s.productRepo.FindByID(*detail.ProductID)
+	if err != nil {
+		return "", "", err
+	}
+
 	licFile := &LicFile{
 		ActivationCode: detail.ActivationCode,
 		PublicKey:      key.PublicKey,
@@ -471,7 +479,12 @@ func (s *LicenseService) ExportLicFile(id uint) (string, string, error) {
 		productIdentity = detail.ProductCode
 	}
 
-	encryptedContent, err := EncryptLicenseFile(plainJSON, detail.RegistrationCode, productIdentity)
+	var encryptedContent string
+	if format == "v2" && product.LicenseKey != "" {
+		encryptedContent, err = EncryptLicenseFileV2(plainJSON, detail.RegistrationCode, productIdentity, product.LicenseKey)
+	} else {
+		encryptedContent, err = EncryptLicenseFile(plainJSON, detail.RegistrationCode, productIdentity)
+	}
 	if err != nil {
 		return "", "", err
 	}
@@ -489,6 +502,14 @@ func (s *LicenseService) ExportLicFile(id uint) (string, string, error) {
 func generateRegistrationCode() (string, error) {
 	const charset = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
 	return generateRandomCode(charset, 16, "RG-")
+}
+
+func generateLicenseKey() (string, error) {
+	b := make([]byte, 24)
+	if _, err := rand.Read(b); err != nil {
+		return "", fmt.Errorf("generate license key: %w", err)
+	}
+	return base64.RawURLEncoding.EncodeToString(b), nil
 }
 
 type CreateLicenseRegistrationParams struct {

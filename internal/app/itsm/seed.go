@@ -26,13 +26,13 @@ func seedITSM(db *gorm.DB, enforcer *casbin.Enforcer) error {
 	if err := seedSLATemplates(db); err != nil {
 		return err
 	}
-	if err := seedServiceDefinitions(db); err != nil {
-		return err
-	}
 	if err := tools.SeedTools(db); err != nil {
 		return err
 	}
-	return tools.SeedAgents(db)
+	if err := tools.SeedAgents(db); err != nil {
+		return err
+	}
+	return seedServiceDefinitions(db)
 }
 
 func seedCatalogs(db *gorm.DB) error {
@@ -277,6 +277,10 @@ func seedPolicies(enforcer *casbin.Enforcer) error {
 		{"admin", "/api/v1/itsm/services/:id/actions", "GET"},
 		{"admin", "/api/v1/itsm/services/:id/actions/:actionId", "PUT"},
 		{"admin", "/api/v1/itsm/services/:id/actions/:actionId", "DELETE"},
+		// Service Knowledge Documents
+		{"admin", "/api/v1/itsm/services/:id/knowledge-documents", "POST"},
+		{"admin", "/api/v1/itsm/services/:id/knowledge-documents", "GET"},
+		{"admin", "/api/v1/itsm/services/:id/knowledge-documents/:docId", "DELETE"},
 		// Priorities
 		{"admin", "/api/v1/itsm/priorities", "POST"},
 		{"admin", "/api/v1/itsm/priorities", "GET"},
@@ -409,6 +413,16 @@ func seedSLATemplates(db *gorm.DB) error {
 }
 
 func seedServiceDefinitions(db *gorm.DB) error {
+	// Look up the decision agent for smart services
+	var decisionAgentID *uint
+	var agentRow struct{ ID uint }
+	if err := db.Table("ai_agents").Where("name = ?", "ITSM 流程决策").Select("id").First(&agentRow).Error; err == nil {
+		decisionAgentID = &agentRow.ID
+		slog.Info("seed: found decision agent for smart services", "agentId", agentRow.ID)
+	} else {
+		slog.Warn("seed: decision agent 'ITSM 流程决策' not found, smart services will have no agent")
+	}
+
 	type serviceSeed struct {
 		Name              string
 		Code              string
@@ -503,6 +517,7 @@ func seedServiceDefinitions(db *gorm.DB) error {
 			CatalogID:         catalog.ID,
 			EngineType:        "smart",
 			SLAID:             slaID,
+			AgentID:           decisionAgentID,
 			CollaborationSpec: s.CollaborationSpec,
 			IsActive:          true,
 		}
@@ -524,6 +539,13 @@ func seedServiceDefinitions(db *gorm.DB) error {
 			}
 			slog.Info("seed: created service action", "serviceCode", s.Code, "actionCode", action.Code)
 		}
+	}
+
+	// Backfill: update existing smart services that have no agent
+	if decisionAgentID != nil {
+		db.Model(&ServiceDefinition{}).
+			Where("engine_type = ? AND agent_id IS NULL", "smart").
+			Update("agent_id", *decisionAgentID)
 	}
 
 	return nil

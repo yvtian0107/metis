@@ -27,6 +27,10 @@ registerApp({
       ],
     },
     {
+      path: "itsm/services/create",
+      lazy: () => import("./pages/services/create/index"),
+    },
+    {
       path: "itsm/services/:id",
       lazy: () => import("./pages/services/[id]/index"),
     },

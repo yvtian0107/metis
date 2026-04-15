@@ -227,6 +227,9 @@ export const api = {
       body: data ? JSON.stringify(data) : undefined,
     }),
 
+  upload: <T>(url: string, form: FormData) =>
+    request<T>(url, { method: 'POST', body: form }),
+
   download,
 };
 

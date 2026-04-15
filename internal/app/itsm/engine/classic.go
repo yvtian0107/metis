@@ -592,7 +592,6 @@ type ticketModel struct {
 	AIFailureCount        int        `gorm:"column:ai_failure_count;default:0"`
 	CollaborationSpec     string     `gorm:"column:collaboration_spec;type:text"`  // via service join
 	AgentID               *uint      `gorm:"column:agent_id"`                      // via service join
-	KnowledgeBaseIDs      string     `gorm:"column:knowledge_base_ids;type:text"`  // via service join
 	AgentConfig           string     `gorm:"column:agent_config;type:text"`        // via service join
 }
 

@@ -101,6 +101,7 @@ type Product struct {
 	Code             string          `json:"code" gorm:"uniqueIndex;size:64;not null"`
 	Description      string          `json:"description" gorm:"type:text"`
 	Status           string          `json:"status" gorm:"size:16;not null;default:unpublished"`
+	LicenseKey       string          `json:"licenseKey" gorm:"size:43"`
 	ConstraintSchema JSONText `json:"constraintSchema" gorm:"type:text"`
 	Plans            []Plan          `json:"plans,omitempty" gorm:"foreignKey:ProductID"`
 }
@@ -138,6 +139,7 @@ type ProductResponse struct {
 	Code             string          `json:"code"`
 	Description      string          `json:"description"`
 	Status           string          `json:"status"`
+	LicenseKey       string          `json:"licenseKey"`
 	ConstraintSchema JSONText `json:"constraintSchema"`
 	PlanCount        int             `json:"planCount"`
 	Plans            []PlanResponse  `json:"plans,omitempty"`
@@ -152,6 +154,7 @@ func (p *Product) ToResponse() ProductResponse {
 		Code:             p.Code,
 		Description:      p.Description,
 		Status:           p.Status,
+		LicenseKey:       p.LicenseKey,
 		ConstraintSchema: p.ConstraintSchema,
 		PlanCount:        len(p.Plans),
 		CreatedAt:        p.CreatedAt,
@@ -273,6 +276,7 @@ type LicenseResponse struct {
 	PlanID            *uint           `json:"planId"`
 	PlanName          string          `json:"planName"`
 	RegistrationCode  string          `json:"registrationCode"`
+	LicenseKey        string          `json:"licenseKey"`
 	ConstraintValues  json.RawMessage `json:"constraintValues"`
 	ValidFrom         time.Time       `json:"validFrom"`
 	ValidUntil        *time.Time      `json:"validUntil"`

@@ -558,19 +558,7 @@ func (e *SmartEngine) callAgent(ctx context.Context, tx *gorm.DB, svc *serviceMo
 	// Build messages
 	systemPrompt := buildSystemPrompt(svc.CollaborationSpec, agentCfg.SystemPrompt)
 
-	// Inject knowledge context
-	if svc.KnowledgeBaseIDs != "" && e.knowledgeSearcher != nil {
-		var kbIDs []uint
-		if err := json.Unmarshal([]byte(svc.KnowledgeBaseIDs), &kbIDs); err == nil && len(kbIDs) > 0 {
-			results, err := e.knowledgeSearcher.Search(kbIDs, ticketCase.Ticket.Title+" "+ticketCase.Ticket.Description, 5)
-			if err == nil && len(results) > 0 {
-				systemPrompt += "\n\n## 相关知识\n\n"
-				for _, r := range results {
-					systemPrompt += fmt.Sprintf("### %s\n%s\n\n", r.Title, r.Content)
-				}
-			}
-		}
-	}
+	// Knowledge context will be injected from ServiceKnowledgeDocuments (TODO: itsm-service-knowledge-doc)
 
 	caseJSON, _ := json.MarshalIndent(ticketCase, "", "  ")
 	policyJSON, _ := json.MarshalIndent(policy, "", "  ")
@@ -1016,7 +1004,6 @@ type serviceModel struct {
 	EngineType        string `gorm:"column:engine_type"`
 	CollaborationSpec string `gorm:"column:collaboration_spec"`
 	AgentID           *uint  `gorm:"column:agent_id"`
-	KnowledgeBaseIDs  string `gorm:"column:knowledge_base_ids"`
 	AgentConfig       string `gorm:"column:agent_config"`
 }
 

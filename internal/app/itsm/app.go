@@ -47,6 +47,8 @@ func (a *ITSMApp) Models() []any {
 		// Incident models
 		&TicketLink{},
 		&PostMortem{},
+		// Knowledge documents
+		&ServiceKnowledgeDocument{},
 	}
 }
 
@@ -121,6 +123,8 @@ func (a *ITSMApp) Providers(i do.Injector) {
 	do.Provide(i, NewEscalationRuleService)
 	do.Provide(i, NewTicketService)
 	do.Provide(i, NewTimelineService)
+	do.Provide(i, NewKnowledgeDocRepo)
+	do.Provide(i, NewKnowledgeDocService)
 	// Handlers
 	do.Provide(i, NewCatalogHandler)
 	do.Provide(i, NewServiceDefHandler)
@@ -129,6 +133,7 @@ func (a *ITSMApp) Providers(i do.Injector) {
 	do.Provide(i, NewSLATemplateHandler)
 	do.Provide(i, NewEscalationRuleHandler)
 	do.Provide(i, NewTicketHandler)
+	do.Provide(i, NewKnowledgeDocHandler)
 }
 
 func (a *ITSMApp) Routes(api *gin.RouterGroup) {
@@ -139,6 +144,7 @@ func (a *ITSMApp) Routes(api *gin.RouterGroup) {
 	slaH := do.MustInvoke[*SLATemplateHandler](a.injector)
 	escalationH := do.MustInvoke[*EscalationRuleHandler](a.injector)
 	ticketH := do.MustInvoke[*TicketHandler](a.injector)
+	knowledgeDocH := do.MustInvoke[*KnowledgeDocHandler](a.injector)
 
 	g := api.Group("/itsm")
 	{
@@ -160,6 +166,11 @@ func (a *ITSMApp) Routes(api *gin.RouterGroup) {
 		g.GET("/services/:id/actions", actionH.List)
 		g.PUT("/services/:id/actions/:actionId", actionH.Update)
 		g.DELETE("/services/:id/actions/:actionId", actionH.Delete)
+
+		// Service Knowledge Documents
+		g.POST("/services/:id/knowledge-documents", knowledgeDocH.Upload)
+		g.GET("/services/:id/knowledge-documents", knowledgeDocH.List)
+		g.DELETE("/services/:id/knowledge-documents/:docId", knowledgeDocH.Delete)
 
 		// Priorities
 		g.POST("/priorities", priorityH.Create)
@@ -212,6 +223,7 @@ func (a *ITSMApp) Tasks() []scheduler.TaskDef {
 	db := do.MustInvoke[*database.DB](a.injector)
 	classicEngine := do.MustInvoke[*engine.ClassicEngine](a.injector)
 	smartEngine := do.MustInvoke[*engine.SmartEngine](a.injector)
+	knowledgeDocSvc := do.MustInvoke[*KnowledgeDocService](a.injector)
 
 	return []scheduler.TaskDef{
 		{
@@ -231,6 +243,12 @@ func (a *ITSMApp) Tasks() []scheduler.TaskDef {
 			Type:        scheduler.TypeAsync,
 			Description: "Execute AI decision cycle for smart engine tickets",
 			Handler:     engine.HandleSmartProgress(db.DB, smartEngine),
+		},
+		{
+			Name:        "itsm-doc-parse",
+			Type:        scheduler.TypeAsync,
+			Description: "Parse uploaded knowledge documents for ITSM services",
+			Handler:     handleDocParse(knowledgeDocSvc),
 		},
 	}
 }
