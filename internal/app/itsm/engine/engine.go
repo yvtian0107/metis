@@ -102,14 +102,14 @@ var ValidNodeTypes = map[string]bool{
 
 // UnimplementedNodeTypes lists node types that are registered but not yet executable.
 var UnimplementedNodeTypes = map[string]bool{
-	NodeScript: true, NodeSubprocess: true,
+	NodeSubprocess: true,
 	NodeTimer: true, NodeSignal: true,
 	NodeBTimer: true, NodeBError: true,
 }
 
 // IsAutoNode returns true for node types that execute automatically without human intervention.
 func IsAutoNode(nodeType string) bool {
-	return nodeType == NodeExclusive || nodeType == NodeAction || nodeType == NodeNotify
+	return nodeType == NodeExclusive || nodeType == NodeAction || nodeType == NodeNotify || nodeType == NodeScript
 }
 
 // IsHumanNode returns true for node types that require human interaction.

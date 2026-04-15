@@ -45,12 +45,19 @@ type NodeData struct {
 	WaitMode         string            `json:"wait_mode,omitempty"`         // signal | timer
 	Duration         string            `json:"duration,omitempty"`         // e.g. "2h", "30m"
 	GatewayDirection string            `json:"gateway_direction,omitempty"` // fork | join (parallel/inclusive only)
+	Assignments      []Assignment      `json:"assignments,omitempty"`      // script node variable assignments
 }
 
 // Participant defines who should handle a node.
 type Participant struct {
 	Type  string `json:"type"`  // user | position | department | requester_manager
 	Value string `json:"value"` // user ID, position ID, or department ID (string for flexibility)
+}
+
+// Assignment defines a variable assignment for script nodes.
+type Assignment struct {
+	Variable   string `json:"variable"`   // target variable name
+	Expression string `json:"expression"` // expr-lang/expr expression
 }
 
 // GatewayCondition defines a single condition for gateway evaluation.

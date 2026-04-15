@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // ClassicEngine implements WorkflowEngine via BPMN-style graph traversal.
@@ -277,6 +278,9 @@ func (e *ClassicEngine) processNode(
 		default:
 			return fmt.Errorf("%w: inclusive node %s has gateway_direction=%q", ErrGatewayMissingDirection, node.ID, nodeData.GatewayDirection)
 		}
+
+	case NodeScript:
+		return e.handleScript(ctx, tx, def, nodeMap, outEdges, token, operatorID, node, nodeData, depth)
 
 	default:
 		if UnimplementedNodeTypes[node.Type] {
@@ -803,6 +807,74 @@ func (e *ClassicEngine) tryCompleteJoin(
 	}
 
 	return e.processNode(ctx, tx, def, nodeMap, outEdges, &parentToken, operatorID, targetNode, depth+1)
+}
+
+// --- Script Node Handler (⑤a itsm-script-task) ---
+
+func (e *ClassicEngine) handleScript(
+	ctx context.Context, tx *gorm.DB,
+	def *WorkflowDef, nodeMap map[string]*WFNode, outEdges map[string][]*WFEdge,
+	token *executionTokenModel, operatorID uint,
+	node *WFNode, data *NodeData, depth int,
+) error {
+	// Build expression environment from process variables + ticket fields
+	env := buildScriptEnv(tx, token.TicketID, token.ScopeID)
+
+	// Execute each assignment in order
+	for _, assign := range data.Assignments {
+		if assign.Variable == "" || assign.Expression == "" {
+			continue
+		}
+
+		result, err := evaluateExpression(assign.Expression, env)
+		if err != nil {
+			// Non-fatal: log warning and skip this assignment
+			slog.Warn("script assignment eval failed",
+				"ticketID", token.TicketID, "node", node.ID,
+				"variable", assign.Variable, "expression", assign.Expression, "error", err)
+			e.recordTimeline(tx, token.TicketID, nil, 0, "warning",
+				fmt.Sprintf("脚本节点 %s 变量 %s 表达式求值失败: %v", node.ID, assign.Variable, err))
+			continue
+		}
+
+		// Write result to process variable
+		valueType := inferValueType(result)
+		serialized := serializeVarValue(result)
+
+		v := processVariableModel{
+			TicketID:  token.TicketID,
+			ScopeID:   token.ScopeID,
+			Key:       assign.Variable,
+			Value:     serialized,
+			ValueType: valueType,
+			Source:    fmt.Sprintf("script:%s", node.ID),
+		}
+		if err := tx.Clauses(clause.OnConflict{
+			Columns:   []clause.Column{{Name: "ticket_id"}, {Name: "scope_id"}, {Name: "key"}},
+			DoUpdates: clause.AssignmentColumns([]string{"value", "value_type", "source", "updated_at"}),
+		}).Create(&v).Error; err != nil {
+			return fmt.Errorf("script write variable %s: %w", assign.Variable, err)
+		}
+
+		// Update env so subsequent assignments can reference this variable
+		env[assign.Variable] = result
+	}
+
+	e.recordTimeline(tx, token.TicketID, nil, operatorID, "script_executed",
+		fmt.Sprintf("脚本节点 [%s] 执行完成，%d 个变量赋值", labelOrDefault(data, "脚本"), len(data.Assignments)))
+
+	// Continue to next node
+	edges := outEdges[node.ID]
+	if len(edges) == 0 {
+		return fmt.Errorf("script node %s has no outgoing edge", node.ID)
+	}
+
+	targetNode, ok := nodeMap[edges[0].Target]
+	if !ok {
+		return fmt.Errorf("script node target %q not found", edges[0].Target)
+	}
+
+	return e.processNode(ctx, tx, def, nodeMap, outEdges, token, operatorID, targetNode, depth+1)
 }
 
 // --- Helpers ---

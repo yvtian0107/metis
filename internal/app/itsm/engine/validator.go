@@ -248,5 +248,21 @@ func ValidateWorkflow(workflowJSON json.RawMessage) []ValidationError {
 		}
 	}
 
+	// 8. Script node constraints (⑤a itsm-script-task)
+	for i := range def.Nodes {
+		n := &def.Nodes[i]
+		if n.Type != NodeScript {
+			continue
+		}
+		nodeOutEdges := outEdges[n.ID]
+		if len(nodeOutEdges) != 1 {
+			errs = append(errs, ValidationError{
+				NodeID:  n.ID,
+				Level:   "error",
+				Message: fmt.Sprintf("脚本节点 %s 必须有且仅有一条出边", n.ID),
+			})
+		}
+	}
+
 	return errs
 }
