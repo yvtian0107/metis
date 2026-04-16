@@ -46,6 +46,9 @@ type NodeData struct {
 	Duration         string            `json:"duration,omitempty"`         // e.g. "2h", "30m"
 	GatewayDirection string            `json:"gateway_direction,omitempty"` // fork | join (parallel/inclusive only)
 	Assignments      []Assignment      `json:"assignments,omitempty"`      // script node variable assignments
+	AttachedTo       string            `json:"attached_to,omitempty"`      // boundary event: host node ID
+	Interrupting     bool              `json:"interrupting,omitempty"`     // boundary timer: interrupting mode
+	SubProcessDef    json.RawMessage   `json:"subprocess_def,omitempty"`   // embedded subprocess workflow definition
 }
 
 // Participant defines who should handle a node.
@@ -117,4 +120,21 @@ func (def *WorkflowDef) FindStartNode() (*WFNode, error) {
 		return nil, ErrNoStartNode
 	}
 	return start, nil
+}
+
+// BuildBoundaryMap scans all b_timer/b_error nodes and groups them by attached_to host node ID.
+func (def *WorkflowDef) BuildBoundaryMap() map[string][]*WFNode {
+	m := make(map[string][]*WFNode)
+	for i := range def.Nodes {
+		n := &def.Nodes[i]
+		if n.Type != NodeBTimer && n.Type != NodeBError {
+			continue
+		}
+		nd, err := ParseNodeData(n.Data)
+		if err != nil || nd.AttachedTo == "" {
+			continue
+		}
+		m[nd.AttachedTo] = append(m[nd.AttachedTo], n)
+	}
+	return m
 }

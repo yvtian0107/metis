@@ -102,9 +102,7 @@ var ValidNodeTypes = map[string]bool{
 
 // UnimplementedNodeTypes lists node types that are registered but not yet executable.
 var UnimplementedNodeTypes = map[string]bool{
-	NodeSubprocess: true,
 	NodeTimer: true, NodeSignal: true,
-	NodeBTimer: true, NodeBError: true,
 }
 
 // IsAutoNode returns true for node types that execute automatically without human intervention.

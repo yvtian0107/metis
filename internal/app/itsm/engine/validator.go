@@ -264,5 +264,169 @@ func ValidateWorkflow(workflowJSON json.RawMessage) []ValidationError {
 		}
 	}
 
+	// 9. Boundary event constraints (⑤b itsm-boundary-events)
+	for i := range def.Nodes {
+		n := &def.Nodes[i]
+		if n.Type != NodeBTimer && n.Type != NodeBError {
+			continue
+		}
+
+		nd, err := ParseNodeData(n.Data)
+		if err != nil {
+			errs = append(errs, ValidationError{
+				NodeID:  n.ID,
+				Level:   "error",
+				Message: fmt.Sprintf("节点 %s 数据解析失败: %v", n.ID, err),
+			})
+			continue
+		}
+
+		typeName := "边界定时器"
+		if n.Type == NodeBError {
+			typeName = "边界错误事件"
+		}
+
+		// attached_to required
+		if nd.AttachedTo == "" {
+			errs = append(errs, ValidationError{
+				NodeID:  n.ID,
+				Level:   "error",
+				Message: fmt.Sprintf("%s %s 必须配置 attached_to", typeName, n.ID),
+			})
+			continue
+		}
+
+		// attached_to must reference an existing node
+		hostNode, ok := nodeMap[nd.AttachedTo]
+		if !ok {
+			errs = append(errs, ValidationError{
+				NodeID:  n.ID,
+				Level:   "error",
+				Message: fmt.Sprintf("%s %s 的 attached_to 引用了不存在的节点 %s", typeName, n.ID, nd.AttachedTo),
+			})
+			continue
+		}
+
+		// b_timer must attach to human nodes (form/approve/process)
+		if n.Type == NodeBTimer {
+			if hostNode.Type != NodeForm && hostNode.Type != NodeApprove && hostNode.Type != NodeProcess {
+				errs = append(errs, ValidationError{
+					NodeID:  n.ID,
+					Level:   "error",
+					Message: fmt.Sprintf("边界定时器 %s 只能附着在人工节点（form/approve/process）上，当前附着在 %s", n.ID, hostNode.Type),
+				})
+			}
+			// b_timer must have duration
+			if nd.Duration == "" {
+				errs = append(errs, ValidationError{
+					NodeID:  n.ID,
+					Level:   "error",
+					Message: fmt.Sprintf("边界定时器 %s 必须配置 duration", n.ID),
+				})
+			}
+		}
+
+		// b_error must attach to action nodes
+		if n.Type == NodeBError {
+			if hostNode.Type != NodeAction {
+				errs = append(errs, ValidationError{
+					NodeID:  n.ID,
+					Level:   "error",
+					Message: fmt.Sprintf("边界错误事件 %s 只能附着在 action 节点上，当前附着在 %s", n.ID, hostNode.Type),
+				})
+			}
+		}
+
+		// boundary nodes must have exactly one outgoing edge
+		nodeOutEdges := outEdges[n.ID]
+		if len(nodeOutEdges) != 1 {
+			errs = append(errs, ValidationError{
+				NodeID:  n.ID,
+				Level:   "error",
+				Message: fmt.Sprintf("%s %s 必须有且仅有一条出边", typeName, n.ID),
+			})
+		}
+
+		// boundary nodes must have no incoming edges
+		if len(inEdges[n.ID]) > 0 {
+			errs = append(errs, ValidationError{
+				NodeID:  n.ID,
+				Level:   "error",
+				Message: fmt.Sprintf("%s %s 不应有入边", typeName, n.ID),
+			})
+		}
+	}
+
+	// 10. Subprocess node constraints (⑤c itsm-subprocess)
+	for i := range def.Nodes {
+		n := &def.Nodes[i]
+		if n.Type != NodeSubprocess {
+			continue
+		}
+
+		// Must have exactly one outgoing edge
+		nodeOutEdges := outEdges[n.ID]
+		if len(nodeOutEdges) != 1 {
+			errs = append(errs, ValidationError{
+				NodeID:  n.ID,
+				Level:   "error",
+				Message: fmt.Sprintf("子流程节点 %s 必须有且仅有一条出边", n.ID),
+			})
+		}
+
+		// SubProcessDef must be present and parseable
+		nd, err := ParseNodeData(n.Data)
+		if err != nil {
+			errs = append(errs, ValidationError{
+				NodeID:  n.ID,
+				Level:   "error",
+				Message: fmt.Sprintf("子流程节点 %s 数据解析失败: %v", n.ID, err),
+			})
+			continue
+		}
+
+		if len(nd.SubProcessDef) == 0 {
+			errs = append(errs, ValidationError{
+				NodeID:  n.ID,
+				Level:   "error",
+				Message: fmt.Sprintf("子流程节点 %s 必须配置 subprocess_def", n.ID),
+			})
+			continue
+		}
+
+		subDef, err := ParseWorkflowDef(nd.SubProcessDef)
+		if err != nil {
+			errs = append(errs, ValidationError{
+				NodeID:  n.ID,
+				Level:   "error",
+				Message: fmt.Sprintf("子流程节点 %s 的 subprocess_def 解析失败: %v", n.ID, err),
+			})
+			continue
+		}
+
+		// Reject nested subprocess (v1 limitation)
+		for _, subNode := range subDef.Nodes {
+			if subNode.Type == NodeSubprocess {
+				errs = append(errs, ValidationError{
+					NodeID:  n.ID,
+					Level:   "error",
+					Message: fmt.Sprintf("子流程节点 %s 内包含嵌套子流程 %s，当前版本不支持嵌套子流程", n.ID, subNode.ID),
+				})
+			}
+		}
+
+		// Recursively validate the subprocess definition
+		subErrs := ValidateWorkflow(nd.SubProcessDef)
+		for _, se := range subErrs {
+			prefix := fmt.Sprintf("子流程 %s → ", n.ID)
+			errs = append(errs, ValidationError{
+				NodeID:  se.NodeID,
+				EdgeID:  se.EdgeID,
+				Level:   se.Level,
+				Message: prefix + se.Message,
+			})
+		}
+	}
+
 	return errs
 }

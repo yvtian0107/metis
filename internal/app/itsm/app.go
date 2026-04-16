@@ -282,6 +282,12 @@ func (a *ITSMApp) Tasks() []scheduler.TaskDef {
 			Handler:     engine.HandleSmartProgress(db.DB, smartEngine),
 		},
 		{
+			Name:        "itsm-boundary-timer",
+			Type:        scheduler.TypeAsync,
+			Description: "Handle boundary timer expiry for ITSM workflow nodes",
+			Handler:     engine.HandleBoundaryTimer(db.DB, classicEngine),
+		},
+		{
 			Name:        "itsm-doc-parse",
 			Type:        scheduler.TypeAsync,
 			Description: "Parse uploaded knowledge documents for ITSM services",

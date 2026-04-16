@@ -115,12 +115,10 @@ func (e *ClassicEngine) Progress(ctx context.Context, tx *gorm.DB, params Progre
 		return fmt.Errorf("ticket not found: %w", err)
 	}
 
-	def, err := ParseWorkflowDef(json.RawMessage(ticket.WorkflowJSON))
+	def, nodeMap, outEdges, err := resolveWorkflowContext(tx, &token, ticket.WorkflowJSON)
 	if err != nil {
-		return fmt.Errorf("workflow parse error: %w", err)
+		return fmt.Errorf("resolve workflow context: %w", err)
 	}
-
-	nodeMap, outEdges := def.BuildMaps()
 
 	currentNode, ok := nodeMap[activity.NodeID]
 	if !ok {
@@ -152,6 +150,9 @@ func (e *ClassicEngine) Progress(ctx context.Context, tx *gorm.DB, params Progre
 	// Record timeline
 	msg := fmt.Sprintf("节点 [%s] 完成，结果: %s", nodeLabel(currentNode), params.Outcome)
 	e.recordTimeline(tx, params.TicketID, &params.ActivityID, params.OperatorID, "activity_completed", msg)
+
+	// Cancel any suspended boundary tokens (⑤b itsm-boundary-events)
+	cancelBoundaryTokens(tx, &token)
 
 	// Find matching outgoing edge
 	edge, err := e.matchEdge(outEdges[currentNode.ID], params.Outcome)
@@ -236,16 +237,29 @@ func (e *ClassicEngine) processNode(
 
 	switch node.Type {
 	case NodeEnd:
+		// Subprocess end: complete subprocess and resume parent flow
+		if token.TokenType == TokenSubprocess {
+			return e.completeSubprocess(ctx, tx, token, operatorID, node, nodeData, depth)
+		}
 		return e.handleEnd(tx, token, operatorID, node, nodeData)
 
 	case NodeForm:
-		return e.handleForm(tx, token, operatorID, node, nodeData)
+		if err := e.handleForm(tx, token, operatorID, node, nodeData); err != nil {
+			return err
+		}
+		return e.attachBoundaryEvents(tx, def, token, node)
 
 	case NodeApprove:
-		return e.handleApprove(tx, token, operatorID, node, nodeData)
+		if err := e.handleApprove(tx, token, operatorID, node, nodeData); err != nil {
+			return err
+		}
+		return e.attachBoundaryEvents(tx, def, token, node)
 
 	case NodeProcess:
-		return e.handleProcess(tx, token, operatorID, node, nodeData)
+		if err := e.handleProcess(tx, token, operatorID, node, nodeData); err != nil {
+			return err
+		}
+		return e.attachBoundaryEvents(tx, def, token, node)
 
 	case NodeAction:
 		return e.handleAction(tx, token, operatorID, node, nodeData)
@@ -281,6 +295,9 @@ func (e *ClassicEngine) processNode(
 
 	case NodeScript:
 		return e.handleScript(ctx, tx, def, nodeMap, outEdges, token, operatorID, node, nodeData, depth)
+
+	case NodeSubprocess:
+		return e.handleSubprocess(ctx, tx, token, operatorID, node, nodeData, depth)
 
 	default:
 		if UnimplementedNodeTypes[node.Type] {
@@ -318,7 +335,8 @@ func (e *ClassicEngine) handleEnd(tx *gorm.DB, token *executionTokenModel, opera
 		// Check if all siblings are done → reactivate parent
 		var remaining int64
 		tx.Model(&executionTokenModel{}).
-			Where("parent_token_id = ? AND status IN ?", *token.ParentTokenID, []string{TokenActive, TokenWaiting}).
+			Where("parent_token_id = ? AND status IN ? AND token_type != ?",
+				*token.ParentTokenID, []string{TokenActive, TokenWaiting}, TokenBoundary).
 			Count(&remaining)
 
 		if remaining == 0 {
@@ -775,7 +793,8 @@ func (e *ClassicEngine) tryCompleteJoin(
 	// Count remaining active/waiting siblings
 	var remaining int64
 	tx.Model(&executionTokenModel{}).
-		Where("parent_token_id = ? AND status IN ?", *token.ParentTokenID, []string{TokenActive, TokenWaiting}).
+		Where("parent_token_id = ? AND status IN ? AND token_type != ?",
+			*token.ParentTokenID, []string{TokenActive, TokenWaiting}, TokenBoundary).
 		Count(&remaining)
 
 	if remaining > 0 {
@@ -807,6 +826,126 @@ func (e *ClassicEngine) tryCompleteJoin(
 	}
 
 	return e.processNode(ctx, tx, def, nodeMap, outEdges, &parentToken, operatorID, targetNode, depth+1)
+}
+
+// --- Boundary Event Handlers (⑤b itsm-boundary-events) ---
+
+// attachBoundaryEvents scans for b_timer boundary nodes attached to the given host node,
+// creates suspended boundary tokens, and submits itsm-boundary-timer scheduler tasks.
+func (e *ClassicEngine) attachBoundaryEvents(
+	tx *gorm.DB, def *WorkflowDef, token *executionTokenModel, node *WFNode,
+) error {
+	boundaryMap := def.BuildBoundaryMap()
+	boundaries := boundaryMap[node.ID]
+	if len(boundaries) == 0 {
+		return nil
+	}
+
+	for _, bNode := range boundaries {
+		if bNode.Type != NodeBTimer {
+			continue // b_error tokens are created on-demand at failure time
+		}
+
+		bData, err := ParseNodeData(bNode.Data)
+		if err != nil {
+			continue
+		}
+
+		// Create suspended boundary token
+		bToken := &executionTokenModel{
+			TicketID:      token.TicketID,
+			ParentTokenID: &token.ID,
+			NodeID:        bNode.ID,
+			Status:        TokenSuspended,
+			TokenType:     TokenBoundary,
+			ScopeID:       token.ScopeID,
+		}
+		if err := tx.Create(bToken).Error; err != nil {
+			return fmt.Errorf("failed to create boundary token for %s: %w", bNode.ID, err)
+		}
+
+		// Submit boundary timer scheduler task
+		if e.scheduler != nil {
+			dur := parseDuration(bData.Duration)
+			executeAfter := time.Now().Add(dur)
+			payload, _ := json.Marshal(map[string]any{
+				"ticket_id":         token.TicketID,
+				"boundary_token_id": bToken.ID,
+				"boundary_node_id":  bNode.ID,
+				"host_token_id":     token.ID,
+				"execute_after":     executeAfter.Format(time.RFC3339),
+			})
+			if err := e.scheduler.SubmitTask("itsm-boundary-timer", payload); err != nil {
+				slog.Error("failed to submit boundary timer task", "error", err, "ticketID", token.TicketID)
+			}
+		}
+
+		e.recordTimeline(tx, token.TicketID, nil, 0, "boundary_timer_set",
+			fmt.Sprintf("边界定时器已设置: %s (节点 %s)", bData.Duration, labelOrDefault(bData, bNode.ID)))
+	}
+
+	return nil
+}
+
+// cancelBoundaryTokens cancels all suspended boundary tokens for a host token.
+func cancelBoundaryTokens(tx *gorm.DB, hostToken *executionTokenModel) {
+	tx.Model(&executionTokenModel{}).
+		Where("parent_token_id = ? AND token_type = ? AND status = ?",
+			hostToken.ID, TokenBoundary, TokenSuspended).
+		Update("status", TokenCancelled)
+}
+
+// triggerBoundaryError handles an action failure when a b_error boundary node exists.
+// It cancels the host activity/token, creates an active boundary token, and continues
+// from the b_error node's outgoing edge.
+func (e *ClassicEngine) triggerBoundaryError(
+	ctx context.Context, tx *gorm.DB,
+	def *WorkflowDef, nodeMap map[string]*WFNode, outEdges map[string][]*WFEdge,
+	ticketID, activityID uint, hostToken *executionTokenModel, bErrorNode *WFNode,
+) error {
+	now := time.Now()
+
+	// Cancel host activity
+	tx.Model(&activityModel{}).
+		Where("id = ?", activityID).
+		Updates(map[string]any{
+			"status":      ActivityCancelled,
+			"finished_at": now,
+		})
+
+	// Cancel host token
+	tx.Model(&executionTokenModel{}).
+		Where("id = ?", hostToken.ID).
+		Update("status", TokenCancelled)
+
+	// Create active boundary token
+	bToken := &executionTokenModel{
+		TicketID:      ticketID,
+		ParentTokenID: &hostToken.ID,
+		NodeID:        bErrorNode.ID,
+		Status:        TokenActive,
+		TokenType:     TokenBoundary,
+		ScopeID:       hostToken.ScopeID,
+	}
+	if err := tx.Create(bToken).Error; err != nil {
+		return fmt.Errorf("failed to create b_error boundary token: %w", err)
+	}
+
+	e.recordTimeline(tx, ticketID, &activityID, 0, "boundary_error_fired",
+		"动作执行失败，已触发错误边界事件")
+
+	// Continue from b_error node's outgoing edge
+	edges := outEdges[bErrorNode.ID]
+	if len(edges) == 0 {
+		return fmt.Errorf("b_error node %s has no outgoing edge", bErrorNode.ID)
+	}
+
+	targetNode, ok := nodeMap[edges[0].Target]
+	if !ok {
+		return fmt.Errorf("b_error target %q not found", edges[0].Target)
+	}
+
+	return e.processNode(ctx, tx, def, nodeMap, outEdges, bToken, 0, targetNode, 0)
 }
 
 // --- Script Node Handler (⑤a itsm-script-task) ---
@@ -875,6 +1014,133 @@ func (e *ClassicEngine) handleScript(
 	}
 
 	return e.processNode(ctx, tx, def, nodeMap, outEdges, token, operatorID, targetNode, depth+1)
+}
+
+// handleSubprocess executes an embedded subprocess by creating a subprocess token
+// and recursively processing the subprocess's internal workflow.
+func (e *ClassicEngine) handleSubprocess(
+	ctx context.Context, tx *gorm.DB,
+	token *executionTokenModel, operatorID uint,
+	node *WFNode, data *NodeData, depth int,
+) error {
+	if len(data.SubProcessDef) == 0 {
+		return fmt.Errorf("subprocess node %s has no subprocess_def", node.ID)
+	}
+
+	subDef, err := ParseWorkflowDef(data.SubProcessDef)
+	if err != nil {
+		return fmt.Errorf("subprocess node %s: subprocess_def parse error: %w", node.ID, err)
+	}
+
+	subNodeMap, subOutEdges := subDef.BuildMaps()
+
+	// Set parent token to waiting
+	tx.Model(&executionTokenModel{}).Where("id = ?", token.ID).Update("status", TokenWaiting)
+	token.Status = TokenWaiting
+
+	// Create subprocess token with isolated scope
+	subToken := &executionTokenModel{
+		TicketID:      token.TicketID,
+		ParentTokenID: &token.ID,
+		NodeID:        node.ID,
+		Status:        TokenActive,
+		TokenType:     TokenSubprocess,
+		ScopeID:       node.ID, // variable scope isolation
+	}
+	if err := tx.Create(subToken).Error; err != nil {
+		return fmt.Errorf("failed to create subprocess token for %s: %w", node.ID, err)
+	}
+
+	e.recordTimeline(tx, token.TicketID, nil, operatorID, "subprocess_started",
+		fmt.Sprintf("子流程 [%s] 已启动", labelOrDefault(data, node.ID)))
+
+	// Find start node in subprocess
+	startNode, err := subDef.FindStartNode()
+	if err != nil {
+		return fmt.Errorf("subprocess %s: %w", node.ID, err)
+	}
+
+	startEdges := subOutEdges[startNode.ID]
+	if len(startEdges) == 0 {
+		return fmt.Errorf("subprocess %s: start node has no outgoing edge", node.ID)
+	}
+
+	targetNode, ok := subNodeMap[startEdges[0].Target]
+	if !ok {
+		return fmt.Errorf("subprocess %s: start node target %q not found", node.ID, startEdges[0].Target)
+	}
+
+	return e.processNode(ctx, tx, subDef, subNodeMap, subOutEdges, subToken, operatorID, targetNode, depth+1)
+}
+
+// completeSubprocess handles the end of a subprocess: completes the subprocess token,
+// reactivates the parent token, and continues the parent flow past the subprocess node.
+func (e *ClassicEngine) completeSubprocess(
+	ctx context.Context, tx *gorm.DB,
+	token *executionTokenModel, operatorID uint,
+	node *WFNode, nodeData *NodeData, depth int,
+) error {
+	now := time.Now()
+
+	// Create completed activity for the subprocess end node
+	act := &activityModel{
+		TicketID:          token.TicketID,
+		TokenID:           &token.ID,
+		Name:              labelOrDefault(nodeData, "子流程结束"),
+		ActivityType:      NodeEnd,
+		Status:            ActivityCompleted,
+		NodeID:            node.ID,
+		TransitionOutcome: "completed",
+		StartedAt:         &now,
+		FinishedAt:        &now,
+	}
+	if err := tx.Create(act).Error; err != nil {
+		return err
+	}
+
+	// Complete subprocess token
+	tx.Model(&executionTokenModel{}).Where("id = ?", token.ID).Update("status", TokenCompleted)
+
+	if token.ParentTokenID == nil {
+		return fmt.Errorf("subprocess token %d has no parent token", token.ID)
+	}
+
+	// Reactivate parent token
+	var parentToken executionTokenModel
+	if err := tx.First(&parentToken, *token.ParentTokenID).Error; err != nil {
+		return fmt.Errorf("parent token %d not found: %w", *token.ParentTokenID, err)
+	}
+
+	tx.Model(&executionTokenModel{}).Where("id = ?", parentToken.ID).Update("status", TokenActive)
+	parentToken.Status = TokenActive
+
+	// Load main workflow to continue parent flow
+	var ticket ticketModel
+	if err := tx.First(&ticket, token.TicketID).Error; err != nil {
+		return fmt.Errorf("ticket %d not found: %w", token.TicketID, err)
+	}
+
+	mainDef, err := ParseWorkflowDef(json.RawMessage(ticket.WorkflowJSON))
+	if err != nil {
+		return fmt.Errorf("main workflow parse error: %w", err)
+	}
+	mainNodeMap, mainOutEdges := mainDef.BuildMaps()
+
+	e.recordTimeline(tx, token.TicketID, &act.ID, operatorID, "subprocess_completed",
+		fmt.Sprintf("子流程 [%s] 已完成", parentToken.NodeID))
+
+	// Continue past the subprocess node
+	edges := mainOutEdges[parentToken.NodeID]
+	if len(edges) == 0 {
+		return fmt.Errorf("subprocess node %s has no outgoing edge", parentToken.NodeID)
+	}
+
+	targetNode, ok := mainNodeMap[edges[0].Target]
+	if !ok {
+		return fmt.Errorf("subprocess node target %q not found", edges[0].Target)
+	}
+
+	return e.processNode(ctx, tx, mainDef, mainNodeMap, mainOutEdges, &parentToken, operatorID, targetNode, depth+1)
 }
 
 // --- Helpers ---
@@ -1087,4 +1353,47 @@ func resolveFormSchema(tx *gorm.DB, formCode string) string {
 		return ""
 	}
 	return fd.Schema
+}
+
+// resolveWorkflowContext returns the correct WorkflowDef and maps for a token.
+// For subprocess tokens, it navigates to the parent subprocess node and parses
+// the embedded SubProcessDef. For main/parallel tokens, it uses the ticket's workflow JSON directly.
+func resolveWorkflowContext(tx *gorm.DB, token *executionTokenModel, ticketWorkflowJSON string) (*WorkflowDef, map[string]*WFNode, map[string][]*WFEdge, error) {
+	def, err := ParseWorkflowDef(json.RawMessage(ticketWorkflowJSON))
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("workflow parse error: %w", err)
+	}
+	nodeMap, outEdges := def.BuildMaps()
+
+	if token.TokenType != TokenSubprocess || token.ParentTokenID == nil {
+		return def, nodeMap, outEdges, nil
+	}
+
+	// Subprocess token — find parent token's node (the subprocess node) and parse its SubProcessDef
+	var parentToken executionTokenModel
+	if err := tx.First(&parentToken, *token.ParentTokenID).Error; err != nil {
+		return nil, nil, nil, fmt.Errorf("parent token %d not found: %w", *token.ParentTokenID, err)
+	}
+
+	subNode, ok := nodeMap[parentToken.NodeID]
+	if !ok {
+		return nil, nil, nil, fmt.Errorf("subprocess node %s not found in workflow", parentToken.NodeID)
+	}
+
+	subData, err := ParseNodeData(subNode.Data)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("subprocess node %s data parse error: %w", subNode.ID, err)
+	}
+
+	if len(subData.SubProcessDef) == 0 {
+		return nil, nil, nil, fmt.Errorf("subprocess node %s has no subprocess_def", subNode.ID)
+	}
+
+	subDef, err := ParseWorkflowDef(subData.SubProcessDef)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("subprocess_def parse error for node %s: %w", subNode.ID, err)
+	}
+
+	subNodeMap, subOutEdges := subDef.BuildMaps()
+	return subDef, subNodeMap, subOutEdges, nil
 }
