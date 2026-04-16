@@ -249,6 +249,7 @@
       "basic": "Basic Info",
       "modelConfig": "Model Config",
       "execution": "Execution Config",
+      "prompts": "Prompts",
       "instructions": "Instructions"
     },
     "searchPlaceholder": "Search agent name",

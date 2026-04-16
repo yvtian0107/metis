@@ -12,16 +12,16 @@
 
 ## 3. LLM 工作流生成 fixture
 
-- [ ] 3.1 重写 `vpn_support_test.go`：用 LLM 生成 VPN 工作流（使用 VPN collaboration spec + itsmGeneratorSystemPrompt），包含重试和验证逻辑
-- [ ] 3.2 定义 `vpnSampleFormData` 变量
-- [ ] 3.3 实现 `publishVPNService(bc *bddContext) error`：LLM 生成 workflow → 创建 ServiceCatalog + Priority + ServiceDefinition
+- [x] 3.1 重写 `vpn_support_test.go`：用 LLM 生成 VPN 工作流（使用 VPN collaboration spec + itsmGeneratorSystemPrompt），包含重试和验证逻辑
+- [x] 3.2 定义 `vpnSampleFormData` 变量
+- [x] 3.3 实现 `publishVPNService(bc *bddContext, cfg llmConfig) error`：LLM 生成 workflow → 创建 ServiceCatalog + Priority + ServiceDefinition
 
 ## 4. BDD suite 环境门控
 
-- [ ] 4.1 在 `bdd_test.go` 的 `TestBDD` 中添加 LLM 环境变量检测，缺失时 skip 整个 suite
-- [ ] 4.2 在 `bddContext` 中存储 LLM 配置（baseURL, apiKey, model）供 publishVPNService 使用
+- [x] 4.1 在 `bdd_test.go` 的 `TestBDD` 中添加 LLM 环境变量检测，缺失时 skip 整个 suite
+- [x] 4.2 在 vpn_support_test.go 中定义 `llmConfig` 和 `hasLLMConfig`/`requireLLMConfig` 辅助函数
 
 ## 5. 验证
 
-- [ ] 5.1 运行 `go test ./internal/app/itsm/ -run TestBDD -v` 确认编译通过（无 LLM env 时 skip）
-- [ ] 5.2 删除 `vpn_support_validate_test.go`（硬编码 fixture 测试不再需要）
+- [x] 5.1 运行 `go test ./internal/app/itsm/ -run TestBDD -v` 确认编译通过（无 LLM env 时 skip）
+- [x] 5.2 删除 `vpn_support_validate_test.go`（硬编码 fixture 测试不再需要）

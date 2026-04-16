@@ -14,7 +14,7 @@ import { Textarea } from "@/components/ui/textarea"
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select"
-import { BindingCheckboxList } from "./binding-checkbox-list"
+import { BindingCheckboxList, type BindingItem } from "./binding-checkbox-list"
 
 interface ProviderItem {
   id: number
@@ -26,6 +26,11 @@ interface ModelItem {
   displayName: string
   modelId: string
   providerId: number
+}
+
+interface ToolkitGroup {
+  toolkit: string
+  tools: BindingItem[]
 }
 
 const agentSchema = z.object({
@@ -146,6 +151,34 @@ export function AgentForm({ agent, onSubmit }: AgentFormProps) {
     enabled: selectedProviderId !== "",
   })
 
+  // Fetch binding lists
+  // Tools API returns grouped: { items: [{ toolkit, tools: [] }] }
+  const { data: toolItems = [], isLoading: toolsLoading } = useQuery({
+    queryKey: ["ai-binding-tools"],
+    queryFn: () =>
+      api.get<{ items: ToolkitGroup[] }>("/api/v1/ai/tools").then((r) =>
+        (r?.items ?? []).flatMap((g) => g.tools)
+      ),
+  })
+
+  const { data: mcpItems = [], isLoading: mcpLoading } = useQuery({
+    queryKey: ["ai-binding-mcp-servers"],
+    queryFn: () =>
+      api.get<PaginatedResponse<BindingItem>>("/api/v1/ai/mcp-servers?pageSize=100").then((r) => r?.items ?? []),
+  })
+
+  const { data: skillItems = [], isLoading: skillsLoading } = useQuery({
+    queryKey: ["ai-binding-skills"],
+    queryFn: () =>
+      api.get<PaginatedResponse<BindingItem>>("/api/v1/ai/skills?pageSize=100").then((r) => r?.items ?? []),
+  })
+
+  const { data: kbItems = [], isLoading: kbLoading } = useQuery({
+    queryKey: ["ai-binding-knowledge-bases"],
+    queryFn: () =>
+      api.get<PaginatedResponse<BindingItem>>("/api/v1/ai/knowledge-bases?pageSize=100").then((r) => r?.items ?? []),
+  })
+
   function handleProviderChange(value: string) {
     form.setValue("providerId", value)
     form.setValue("modelId", undefined)
@@ -261,21 +294,6 @@ export function AgentForm({ agent, onSubmit }: AgentFormProps) {
                 )} />
               </div>
 
-              <FormField control={form.control} name="systemPrompt" render={({ field }) => (
-                <FormItem>
-                  <FormLabel>{t("ai:agents.systemPrompt")}</FormLabel>
-                  <FormControl>
-                    <Textarea
-                      placeholder={t("ai:agents.systemPromptPlaceholder")}
-                      rows={6}
-                      className="min-h-[120px] resize-y font-mono text-sm"
-                      {...field}
-                    />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )} />
-
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
                 <FormField control={form.control} name="temperature" render={({ field }) => (
                   <FormItem>
@@ -380,29 +398,29 @@ export function AgentForm({ agent, onSubmit }: AgentFormProps) {
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <BindingCheckboxList
                 title={t("ai:agents.tools")}
-                queryKey={["ai-binding-tools"]}
-                endpoint="/api/v1/ai/tools?pageSize=100"
+                items={toolItems}
+                isLoading={toolsLoading}
                 value={form.watch("toolIds")}
                 onChange={(ids) => form.setValue("toolIds", ids)}
               />
               <BindingCheckboxList
                 title={t("ai:agents.mcpServers")}
-                queryKey={["ai-binding-mcp-servers"]}
-                endpoint="/api/v1/ai/mcp-servers?pageSize=100"
+                items={mcpItems}
+                isLoading={mcpLoading}
                 value={form.watch("mcpServerIds")}
                 onChange={(ids) => form.setValue("mcpServerIds", ids)}
               />
               <BindingCheckboxList
                 title={t("ai:agents.skills")}
-                queryKey={["ai-binding-skills"]}
-                endpoint="/api/v1/ai/skills?pageSize=100"
+                items={skillItems}
+                isLoading={skillsLoading}
                 value={form.watch("skillIds")}
                 onChange={(ids) => form.setValue("skillIds", ids)}
               />
               <BindingCheckboxList
                 title={t("ai:agents.knowledgeBases")}
-                queryKey={["ai-binding-knowledge-bases"]}
-                endpoint="/api/v1/ai/knowledge-bases?pageSize=100"
+                items={kbItems}
+                isLoading={kbLoading}
                 value={form.watch("knowledgeBaseIds")}
                 onChange={(ids) => form.setValue("knowledgeBaseIds", ids)}
               />
@@ -410,14 +428,29 @@ export function AgentForm({ agent, onSubmit }: AgentFormProps) {
           </CardContent>
         </Card>
 
-        {/* === Instructions === */}
+        {/* === Prompts (always visible) === */}
         <Card>
           <CardHeader className="pb-4">
-            <CardTitle className="text-base">{t("ai:agents.sections.instructions")}</CardTitle>
+            <CardTitle className="text-base">{t("ai:agents.sections.prompts")}</CardTitle>
           </CardHeader>
-          <CardContent>
+          <CardContent className="space-y-4">
+            <FormField control={form.control} name="systemPrompt" render={({ field }) => (
+              <FormItem>
+                <FormLabel>{t("ai:agents.systemPrompt")}</FormLabel>
+                <FormControl>
+                  <Textarea
+                    placeholder={t("ai:agents.systemPromptPlaceholder")}
+                    rows={6}
+                    className="min-h-[120px] resize-y font-mono text-sm"
+                    {...field}
+                  />
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            )} />
             <FormField control={form.control} name="instructions" render={({ field }) => (
               <FormItem>
+                <FormLabel>{t("ai:agents.instructions")}</FormLabel>
                 <FormControl>
                   <Textarea
                     placeholder={t("ai:agents.instructionsPlaceholder")}

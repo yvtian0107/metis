@@ -777,7 +777,7 @@ const itsmGeneratorSystemPrompt = `你是 ITSM 工作流解析引擎。根据用
 | approve | 审批节点 | label, nodeType, participants, executionMode(single/parallel/sequential) |
 | process | 人工处理节点 | label, nodeType, participants |
 | action | 自动动作节点（webhook/脚本） | label, nodeType, actionId (关联可用动作) |
-| gateway | 条件分支网关 | label, nodeType, conditions (至少两条出边) |
+| exclusive | 排他网关（条件分支） | label, nodeType (至少两条出边) |
 | notify | 通知节点 | label, nodeType |
 | wait | 等待节点（定时/信号） | label, nodeType, waitMode(signal/timer), duration(如 "2h") |
 
@@ -801,15 +801,32 @@ participants 是数组，每个元素：
 当提到特定部门中的特定岗位（如"信息部的网络管理员"）时，使用 position_department 类型，设置 department_code 和 position_code。
 当提到具体用户（如"serial-reviewer"）时，使用 user 类型，设置 name。
 
-## 网关（gateway）条件格式
+## 排他网关（exclusive）条件格式
 
-网关节点的 data.conditions 数组定义各出边的路由条件：
-- field: 条件字段路径（如 "form.urgency", "ticket.priority"）
+排他网关的路由条件配置在**出边的 data.condition** 中（不是节点上）：
+
+条件边的 data：
+{
+  "condition": {
+    "field": "form.request_kind",
+    "operator": "equals",
+    "value": "network_support",
+    "edge_id": "edge_xxx"
+  }
+}
+
+默认边（兜底）的 data：
+{
+  "default": true
+}
+
+condition 字段说明：
+- field: 条件字段路径（如 "form.urgency", "form.request_kind"）
 - operator: equals | not_equals | contains_any | gt | lt | gte | lte
 - value: 比较值
-- edge_id: 对应出边 id
+- edge_id: 此条件对应的出边 id
 
-网关必须有至少两条出边，其中一条应标记 data.default = true 作为兜底。
+排他网关必须有至少两条出边，其中一条应标记 data.default = true 作为兜底。
 
 ## 布局规则
 

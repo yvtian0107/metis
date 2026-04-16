@@ -249,6 +249,7 @@
       "basic": "基本信息",
       "modelConfig": "模型配置",
       "execution": "执行配置",
+      "prompts": "提示词",
       "instructions": "附加指令"
     },
     "searchPlaceholder": "搜索智能体名称",

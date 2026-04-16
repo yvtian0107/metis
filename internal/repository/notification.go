@@ -200,12 +200,18 @@ func (r *NotificationRepo) ListAnnouncements(params ListParams) ([]model.Announc
 	}
 
 	var rows []row
-	err := r.db.Table("notifications").
+	query := r.db.Table("notifications").
 		Select("notifications.id, notifications.title, notifications.content, notifications.created_at, notifications.updated_at, users.username AS creator_username").
 		Joins("LEFT JOIN users ON users.id = notifications.created_by").
 		Where("notifications.type = ?", model.NotificationTypeAnnouncement).
-		Where("notifications.deleted_at IS NULL").
-		Order("notifications.created_at DESC").
+		Where("notifications.deleted_at IS NULL")
+
+	if params.Keyword != "" {
+		like := "%" + params.Keyword + "%"
+		query = query.Where("notifications.title LIKE ?", like)
+	}
+
+	err := query.Order("notifications.created_at DESC").
 		Offset(offset).Limit(params.PageSize).
 		Find(&rows).Error
 	if err != nil {
