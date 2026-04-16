@@ -367,7 +367,7 @@ export function Component() {
 
       <IssueLicenseSheet open={formOpen} onOpenChange={setFormOpen} />
 
-      <UpgradeLicenseSheet license={upgradeTarget} open={!!upgradeTarget} onOpenChange={() => setUpgradeTarget(null)} />
+      <UpgradeLicenseSheet license={upgradeTarget as any} open={!!upgradeTarget} onOpenChange={() => setUpgradeTarget(null)} />
 
       <RenewLicenseSheet license={renewTarget} open={!!renewTarget} onOpenChange={() => setRenewTarget(null)} />
 

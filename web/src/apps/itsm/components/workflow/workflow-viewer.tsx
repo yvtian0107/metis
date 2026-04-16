@@ -1,4 +1,4 @@
-import { useMemo, useCallback, useState, useRef } from "react"
+import { useMemo, useCallback, useState } from "react"
 import { useTranslation } from "react-i18next"
 import {
   ReactFlow,
@@ -10,7 +10,6 @@ import {
   MarkerType,
 } from "@xyflow/react"
 import "@xyflow/react/dist/style.css"
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Badge } from "@/components/ui/badge"
 import { nodeTypes } from "./nodes"
 import { edgeTypes } from "./custom-edges"
@@ -24,10 +23,9 @@ interface WorkflowViewerProps {
   currentActivityId?: number | null
 }
 
-export function WorkflowViewer({ workflowJson, activities, tokens = [], currentActivityId }: WorkflowViewerProps) {
+export function WorkflowViewer({ workflowJson, activities, tokens = [] }: WorkflowViewerProps) {
   const { t } = useTranslation("itsm")
   const [popoverNodeId, setPopoverNodeId] = useState<string | null>(null)
-  const [popoverAnchor, setPopoverAnchor] = useState<{ x: number; y: number }>({ x: 0, y: 0 })
 
   const useTokenMode = tokens.length > 0
 
@@ -99,8 +97,8 @@ export function WorkflowViewer({ workflowJson, activities, tokens = [], currentA
       if (srcDone && tgtDone) visitedEdgeIds.add(e.id)
     }
 
-    const nodes: Node[] = rawNodes.map((n) => {
-      const nodeData = (n.data ?? {}) as WFNodeData
+    const nodes = rawNodes.map((n) => {
+      const nodeData = (n.data ?? {}) as unknown as WFNodeData
       const isActive = activeNodeIds.has(n.id)
       const isCompleted = completedNodeIds.has(n.id)
       const isCancelled = cancelledNodeIds.has(n.id)
@@ -120,7 +118,7 @@ export function WorkflowViewer({ workflowJson, activities, tokens = [], currentA
         selectable: false,
         draggable: false,
       }
-    })
+    }) as unknown as Node[]
 
     const edges: Edge[] = rawEdges.map((e) => ({
       id: e.id,
@@ -153,7 +151,7 @@ export function WorkflowViewer({ workflowJson, activities, tokens = [], currentA
       <ReactFlow
         nodes={nodes}
         edges={edges}
-        nodeTypes={nodeTypes}
+        nodeTypes={nodeTypes as any}
         edgeTypes={edgeTypes}
         onNodeClick={onNodeClick}
         onPaneClick={onPaneClick}
@@ -167,7 +165,7 @@ export function WorkflowViewer({ workflowJson, activities, tokens = [], currentA
         <Controls showInteractive={false} />
         <MiniMap
           nodeColor={(n) => {
-            const nodeData = n.data as WFNodeData
+            const nodeData = n.data as unknown as WFNodeData
             if (useTokenMode) {
               const tks = tokensByNode.get(n.id)
               if (tks?.some((tk) => tk.status === "active")) return "#22c55e"

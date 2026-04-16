@@ -12,7 +12,6 @@ import {
   type Connection,
   type Node,
   type Edge,
-  type ReactFlowInstance,
   MarkerType,
   Panel,
   useReactFlow,
@@ -58,7 +57,7 @@ function InnerEditor({ initialData, onSave, saving, serviceId, validationErrors 
   // Migrate legacy "workflow" type to specific nodeType
   const migratedNodes = (initialData?.nodes ?? []).map((n) => ({
     ...n,
-    type: (n.data as WFNodeData).nodeType ?? n.type,
+    type: (n.data as unknown as WFNodeData).nodeType ?? n.type,
   }))
   const migratedEdges = (initialData?.edges ?? []).map((e) => ({
     ...e,
@@ -97,7 +96,7 @@ function InnerEditor({ initialData, onSave, saving, serviceId, validationErrors 
       ...params,
       type: "workflow",
       markerEnd: { type: MarkerType.ArrowClosed },
-      data: { outcome: "", isDefault: false } as WFEdgeData,
+      data: { outcome: "", isDefault: false } as Record<string, unknown>,
     }, eds))
   }, [setEdges])
 
@@ -128,7 +127,7 @@ function InnerEditor({ initialData, onSave, saving, serviceId, validationErrors 
         ...(nodeType === "wait" || nodeType === "timer" ? { waitMode: nodeType === "timer" ? "timer" : "signal" } : {}),
       } satisfies WFNodeData,
     }
-    setNodes((nds) => [...nds, newNode])
+    setNodes((nds) => [...nds, newNode] as typeof nds)
   }, [rfInstance, setNodes, t])
 
   const onNodeClick = useCallback((_: React.MouseEvent, node: Node) => {
@@ -152,27 +151,27 @@ function InnerEditor({ initialData, onSave, saving, serviceId, validationErrors 
 
   function handleAutoLayout() {
     const layouted = applyDagreLayout(nodes, edges)
-    setNodes(layouted)
+    setNodes(layouted as typeof nodes)
   }
 
   function handleUndo() {
     const state = undo()
     if (state) {
-      setNodes(state.nodes)
-      setEdges(state.edges)
+      setNodes(state.nodes as typeof nodes)
+      setEdges(state.edges as typeof edges)
     }
   }
 
   function handleRedo() {
     const state = redo()
     if (state) {
-      setNodes(state.nodes)
-      setEdges(state.edges)
+      setNodes(state.nodes as typeof nodes)
+      setEdges(state.edges as typeof edges)
     }
   }
 
   function handleCopy() {
-    const selected = nodes.filter((n) => n.selected && (n.data as WFNodeData).nodeType !== "start" && (n.data as WFNodeData).nodeType !== "end")
+    const selected = nodes.filter((n) => n.selected && (n.data as unknown as WFNodeData).nodeType !== "start" && (n.data as unknown as WFNodeData).nodeType !== "end")
     if (selected.length === 0) return
     const selectedIds = new Set(selected.map((n) => n.id))
     const selectedEdges = edges.filter((e) => selectedIds.has(e.source) && selectedIds.has(e.target))
@@ -196,12 +195,12 @@ function InnerEditor({ initialData, onSave, saving, serviceId, validationErrors 
       target: idMap.get(e.target) ?? e.target,
       selected: false,
     }))
-    setNodes((nds) => [...nds, ...newNodes])
-    setEdges((eds) => [...eds, ...newEdges])
+    setNodes((nds) => [...nds, ...newNodes] as typeof nds)
+    setEdges((eds) => [...eds, ...newEdges] as typeof eds)
   }
 
   function handleDeleteSelected() {
-    const nodesToDelete = nodes.filter((n) => n.selected && (n.data as WFNodeData).nodeType !== "start" && (n.data as WFNodeData).nodeType !== "end")
+    const nodesToDelete = nodes.filter((n) => n.selected && (n.data as unknown as WFNodeData).nodeType !== "start" && (n.data as unknown as WFNodeData).nodeType !== "end")
     const edgesToDelete = edges.filter((e) => e.selected)
     if (nodesToDelete.length > 0 || edgesToDelete.length > 0) {
       rfInstance.deleteElements({ nodes: nodesToDelete.map((n) => ({ id: n.id })), edges: edgesToDelete.map((e) => ({ id: e.id })) })
@@ -258,7 +257,7 @@ function InnerEditor({ initialData, onSave, saving, serviceId, validationErrors 
   })
 
   const edgeSourceNodeType = selectedEdge
-    ? (nodes.find((n) => n.id === selectedEdge.source)?.data as WFNodeData | undefined)?.nodeType
+    ? (nodes.find((n) => n.id === selectedEdge.source)?.data as unknown as WFNodeData | undefined)?.nodeType
     : undefined
 
   return (
@@ -279,7 +278,7 @@ function InnerEditor({ initialData, onSave, saving, serviceId, validationErrors 
                 onNodeClick={onNodeClick}
                 onEdgeClick={onEdgeClick}
                 onPaneClick={onPaneClick}
-                nodeTypes={nodeTypes}
+                nodeTypes={nodeTypes as any}
                 edgeTypes={edgeTypes}
                 defaultEdgeOptions={{
                   type: "workflow",
@@ -293,7 +292,7 @@ function InnerEditor({ initialData, onSave, saving, serviceId, validationErrors 
                 <Background />
                 <Controls />
                 <MiniMap
-                  nodeColor={(n) => NODE_COLORS[(n.data as WFNodeData)?.nodeType] ?? "#6b7280"}
+                  nodeColor={(n) => NODE_COLORS[(n.data as unknown as WFNodeData)?.nodeType] ?? "#6b7280"}
                   maskColor="rgba(0,0,0,0.1)"
                 />
                 <Panel position="top-right" className="flex gap-1">
@@ -330,7 +329,7 @@ function InnerEditor({ initialData, onSave, saving, serviceId, validationErrors 
             </div>
           </ContextMenuTrigger>
           <ContextMenuContent>
-            <ContextMenuItem onClick={handlePaste} disabled={!clipboardRef.current}>
+            <ContextMenuItem onClick={handlePaste}>
               <ClipboardPaste className="mr-2 h-4 w-4" />{t("workflow.ctx.paste")}
             </ContextMenuItem>
             <ContextMenuItem onClick={handleAutoLayout}>

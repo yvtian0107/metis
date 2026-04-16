@@ -347,7 +347,7 @@ function FeatureRow({
           {t(`constraints.${feature.type}` as const) ?? feature.type}
         </Badge>
         <span className="flex-1 truncate text-xs text-muted-foreground">
-          {featureSummary(feature, t)}
+          {featureSummary(feature, t as (key: string, opts?: object) => string)}
         </span>
         {!disabled && (
           <>

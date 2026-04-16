@@ -202,7 +202,7 @@ function ServiceDetailPage() {
                       <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
                       <XAxis dataKey="time" tick={{ fontSize: 9 }} className="text-muted-foreground" />
                       <YAxis tick={{ fontSize: 9 }} className="text-muted-foreground" unit="%" />
-                      <Tooltip contentStyle={tooltipStyle} formatter={(v: number) => [`${v.toFixed(2)}%`]} />
+                      <Tooltip contentStyle={tooltipStyle} formatter={(v) => [`${Number(v).toFixed(2)}%`]} />
                       <Area type="monotone" dataKey="errorRate" stroke="#ef4444" fill="#ef444420" strokeWidth={1.5} name="Error Rate" />
                     </AreaChart>
                   </ResponsiveContainer>
@@ -216,7 +216,7 @@ function ServiceDetailPage() {
                       <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
                       <XAxis dataKey="time" tick={{ fontSize: 9 }} className="text-muted-foreground" />
                       <YAxis tick={{ fontSize: 9 }} className="text-muted-foreground" />
-                      <Tooltip contentStyle={tooltipStyle} formatter={(v: number) => [`${v.toFixed(1)}ms`]} />
+                      <Tooltip contentStyle={tooltipStyle} formatter={(v) => [`${Number(v).toFixed(1)}ms`]} />
                       <Line type="monotone" dataKey="p50" stroke="hsl(var(--primary))" strokeWidth={1.5} dot={false} name="P50" />
                       <Line type="monotone" dataKey="p95" stroke="#f59e0b" strokeWidth={1.5} dot={false} name="P95" />
                       <Line type="monotone" dataKey="p99" stroke="#ef4444" strokeWidth={1.5} dot={false} name="P99" />

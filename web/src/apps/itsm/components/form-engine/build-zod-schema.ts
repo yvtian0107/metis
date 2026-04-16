@@ -88,7 +88,7 @@ function buildStringSchema(field: FormField): ZodTypeAny {
 }
 
 function buildNumberSchema(field: FormField): ZodTypeAny {
-  let n = z.number({ invalid_type_error: "请输入数字" })
+  let n = z.number({ error: "请输入数字" })
 
   if (field.validation) {
     for (const rule of field.validation) {

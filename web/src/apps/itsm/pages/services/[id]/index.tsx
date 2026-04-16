@@ -545,7 +545,7 @@ export function Component() {
       <section>
         <div className="mb-4 flex items-center justify-between">
           <h3 className="text-sm font-semibold text-muted-foreground">{t("itsm:services.tabWorkflow")}</h3>
-          {service.engineType === "classic" && service.workflowJson && (
+          {service.engineType === "classic" && !!service.workflowJson && (
             <Button variant="outline" size="sm" onClick={() => navigate(`/itsm/services/${serviceId}/workflow`)}>
               <Pencil className="mr-1.5 h-3.5 w-3.5" />{t("itsm:workflow.editWorkflow")}
             </Button>

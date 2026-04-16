@@ -80,9 +80,9 @@ export function Component() {
   return (
     <TooltipProvider delayDuration={200}>
       <div className="space-y-4">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex items-center justify-between gap-3">
           <div>
-            <h2 className="text-xl font-semibold tracking-tight">{t("license:products.title")}</h2>
+            <h2 className="text-lg font-semibold">{t("license:products.title")}</h2>
             <p className="text-sm text-muted-foreground">{t("license:products.subtitle", "管理商品、套餐与授权密钥")}</p>
           </div>
           {canCreate && (
@@ -126,13 +126,13 @@ export function Component() {
         <DataTableCard>
           <Table>
             <TableHeader>
-              <TableRow className="bg-muted/50 hover:bg-muted/50">
+              <TableRow>
                 <TableHead className="min-w-[200px]">{t("common:name")}</TableHead>
                 <TableHead className="w-[160px]">{t("license:products.code")}</TableHead>
                 <TableHead className="w-[110px]">{t("common:status")}</TableHead>
                 <TableHead className="w-[100px] text-right">{t("license:products.planCount")}</TableHead>
                 <TableHead className="w-[160px]">{t("common:createdAt")}</TableHead>
-                <DataTableActionsHead className="w-[100px]">{t("common:actions")}</DataTableActionsHead>
+                <DataTableActionsHead className="w-[96px]">{t("common:actions")}</DataTableActionsHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -152,15 +152,20 @@ export function Component() {
                   return (
                     <TableRow
                       key={item.id}
-                      className="cursor-pointer transition-colors hover:bg-muted/60"
+                      className="cursor-pointer"
                       onClick={() => navigate(`/license/products/${item.id}`)}
                     >
-                      <TableCell className="font-medium">
-                        <div className="flex flex-col">
-                          <span className="truncate">{item.name}</span>
-                          {item.description && (
-                            <span className="text-xs text-muted-foreground line-clamp-1 mt-0.5">{item.description}</span>
-                          )}
+                      <TableCell>
+                        <div className="flex items-center gap-2.5">
+                          <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
+                            <Package className="h-3.5 w-3.5" />
+                          </div>
+                          <div className="min-w-0 space-y-0.5">
+                            <div className="font-medium">{item.name}</div>
+                            {item.description && (
+                              <p className="line-clamp-1 text-xs text-muted-foreground">{item.description}</p>
+                            )}
+                          </div>
                         </div>
                       </TableCell>
                       <TableCell>
@@ -177,7 +182,7 @@ export function Component() {
                         </Badge>
                       </TableCell>
                       <TableCell className="text-right text-sm tabular-nums">{item.planCount}</TableCell>
-                      <TableCell className="text-sm text-muted-foreground whitespace-nowrap">
+                      <TableCell className="whitespace-nowrap text-sm text-muted-foreground">
                         {formatDateTime(item.createdAt)}
                       </TableCell>
                       <DataTableActionsCell>

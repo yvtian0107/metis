@@ -6,9 +6,6 @@ import {
   ArrowLeft,
   Check,
   Copy,
-  Eye,
-  EyeOff,
-  Key,
   Loader2,
   Pencil,
   RefreshCw,
@@ -18,12 +15,7 @@ import { usePermission } from "@/hooks/use-permission"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import {
-  Card,
-  CardContent,
-  CardTitle,
-  CardDescription,
-} from "@/components/ui/card"
+import { Separator } from "@/components/ui/separator"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import {
   AlertDialog,
@@ -108,7 +100,6 @@ export function Component() {
   const [editOpen, setEditOpen] = useState(false)
   const [impactOpen, setImpactOpen] = useState(false)
   const [bulkReissueOpen, setBulkReissueOpen] = useState(false)
-  const [showLicenseKey, setShowLicenseKey] = useState(false)
   const [copiedField, setCopiedField] = useState<string | null>(null)
 
   const canUpdate = usePermission("license:product:update")
@@ -157,7 +148,7 @@ export function Component() {
   })
 
   const bulkReissueMutation = useMutation({
-    mutationFn: () => api.post(`/api/v1/license/products/${id}/bulk-reissue`, { licenseIds: [] }),
+    mutationFn: () => api.post<{ reissued: number }>(`/api/v1/license/products/${id}/bulk-reissue`, { licenseIds: [] }),
     onSuccess: (data: { reissued: number }) => {
       queryClient.invalidateQueries({ queryKey: ["license-licenses"] })
       queryClient.invalidateQueries({ queryKey: ["license-product-key-impact", id] })
@@ -220,24 +211,28 @@ export function Component() {
   }
 
   return (
-    <div className="space-y-6">
-      <Card className="flex-row items-center gap-4 py-4">
-        <Button variant="ghost" size="icon" onClick={() => navigate("/license/products")} className="ml-4 shrink-0">
-          <ArrowLeft className="h-4 w-4" />
-        </Button>
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 flex-wrap">
-            <CardTitle className="text-lg">{product.name}</CardTitle>
-            <Badge
-              variant={statusStyle.variant}
-              className={statusStyle.className}
-            >
-              {t(`license:status.${statusKey}`, product.status)}
-            </Badge>
+    <div className="space-y-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex items-center gap-3">
+          <Button variant="outline" size="icon" onClick={() => navigate("/license/products")} className="h-8 w-8 shrink-0">
+            <ArrowLeft className="h-4 w-4" />
+          </Button>
+          <div className="flex flex-col gap-1">
+            <div className="flex items-center gap-2.5 flex-wrap">
+              <h2 className="text-lg font-semibold">{product.name}</h2>
+              <Badge
+                variant={statusStyle.variant}
+                className={statusStyle.className}
+              >
+                {t(`license:status.${statusKey}`, product.status)}
+              </Badge>
+            </div>
+            <div className="flex items-center gap-2 text-xs text-muted-foreground font-mono">
+              <span className="bg-muted px-1.5 py-0.5 rounded text-xs">{product.code}</span>
+            </div>
           </div>
-          <CardDescription className="font-mono mt-1">{product.code}</CardDescription>
         </div>
-        <div className="mr-4 flex shrink-0 items-center gap-2">
+        <div className="flex shrink-0 items-center gap-2">
           {canUpdate && actions.map((action) => {
             const ActionIcon = action.icon
             const actionLabel = t(`license:${action.labelKey}`)
@@ -276,61 +271,75 @@ export function Component() {
             </Button>
           )}
         </div>
-      </Card>
+      </div>
 
       <Tabs value={activeTab} onValueChange={handleTabChange}>
-        <TabsList className="h-auto w-fit max-w-full flex-wrap justify-start gap-1 rounded-lg bg-muted/50 p-1">
+        <TabsList variant="line" className="h-auto w-full justify-start gap-0 rounded-none border-b bg-transparent p-0">
           <TabsTrigger
             value="info"
-            className="h-8 flex-none px-3 text-xs sm:text-sm data-[state=active]:bg-background data-[state=active]:shadow-sm"
+            className="h-auto flex-none rounded-md border-0 px-4 pb-3 pt-0 text-sm font-medium focus-visible:ring-0 focus-visible:outline-none data-[state=active]:bg-muted/60 data-[state=active]:shadow-none after:bg-primary"
           >
             {t("license:products.basicInfo")}
           </TabsTrigger>
           <TabsTrigger
             value="schema"
-            className="h-8 flex-none px-3 text-xs sm:text-sm data-[state=active]:bg-background data-[state=active]:shadow-sm"
+            className="h-auto flex-none rounded-md border-0 px-4 pb-3 pt-0 text-sm font-medium focus-visible:ring-0 focus-visible:outline-none data-[state=active]:bg-muted/60 data-[state=active]:shadow-none after:bg-primary"
           >
             {t("license:products.constraintDef")}
           </TabsTrigger>
           <TabsTrigger
             value="plans"
-            className="h-8 flex-none px-3 text-xs sm:text-sm data-[state=active]:bg-background data-[state=active]:shadow-sm"
+            className="h-auto flex-none rounded-md border-0 px-4 pb-3 pt-0 text-sm font-medium focus-visible:ring-0 focus-visible:outline-none data-[state=active]:bg-muted/60 data-[state=active]:shadow-none after:bg-primary"
           >
             {t("license:products.planManagement")}
           </TabsTrigger>
           <TabsTrigger
             value="keys"
-            className="h-8 flex-none px-3 text-xs sm:text-sm data-[state=active]:bg-background data-[state=active]:shadow-sm"
+            className="h-auto flex-none rounded-md border-0 px-4 pb-3 pt-0 text-sm font-medium focus-visible:ring-0 focus-visible:outline-none data-[state=active]:bg-muted/60 data-[state=active]:shadow-none after:bg-primary"
           >
             {t("license:products.keyManagement")}
           </TabsTrigger>
         </TabsList>
 
         <TabsContent value="info" className="space-y-4">
-          <Card>
-            <CardContent className="pt-6">
-              <div className="grid gap-4 text-sm sm:grid-cols-3">
-                <div className="rounded-lg border bg-muted/30 p-3">
-                  <p className="text-xs text-muted-foreground">{t("license:products.licenseModules")}</p>
-                  <p className="mt-1 font-medium tabular-nums">{modules.length}</p>
-                </div>
-                <div className="rounded-lg border bg-muted/30 p-3">
-                  <p className="text-xs text-muted-foreground">{t("license:products.planQuantity")}</p>
-                  <p className="mt-1 font-medium tabular-nums">{product.planCount}</p>
-                </div>
-                <div className="rounded-lg border bg-muted/30 p-3">
-                  <p className="text-xs text-muted-foreground">{t("common:updatedAt")}</p>
-                  <p className="mt-1">{formatDateTime(product.updatedAt)}</p>
-                </div>
-                {product.description && (
-                  <div className="rounded-lg border bg-muted/30 p-3 sm:col-span-3">
-                    <p className="text-xs text-muted-foreground">{t("common:description")}</p>
-                    <p className="mt-1 leading-6">{product.description}</p>
-                  </div>
-                )}
+          <section className="space-y-3">
+            <div className="grid gap-x-6 gap-y-4 sm:grid-cols-2 xl:grid-cols-4">
+              <div className="space-y-1">
+                <p className="text-sm text-muted-foreground">{t("common:name")}</p>
+                <p className="font-medium text-foreground">{product.name}</p>
               </div>
-            </CardContent>
-          </Card>
+              <div className="space-y-1">
+                <p className="text-sm text-muted-foreground">{t("license:products.code")}</p>
+                <code className="text-sm font-mono text-foreground">{product.code}</code>
+              </div>
+              <div className="space-y-1">
+                <p className="text-sm text-muted-foreground">{t("license:products.licenseModules")}</p>
+                <p className="font-medium tabular-nums text-foreground">{modules.length}</p>
+              </div>
+              <div className="space-y-1">
+                <p className="text-sm text-muted-foreground">{t("license:products.planQuantity")}</p>
+                <p className="font-medium tabular-nums text-foreground">{product.planCount}</p>
+              </div>
+              <div className="space-y-1">
+                <p className="text-sm text-muted-foreground">{t("common:createdAt")}</p>
+                <p className="text-sm text-foreground">{formatDateTime(product.createdAt)}</p>
+              </div>
+              <div className="space-y-1">
+                <p className="text-sm text-muted-foreground">{t("common:updatedAt")}</p>
+                <p className="text-sm text-foreground">{formatDateTime(product.updatedAt)}</p>
+              </div>
+            </div>
+          </section>
+
+          {product.description && (
+            <>
+              <Separator />
+              <section className="space-y-2">
+                <h3 className="text-sm font-medium text-muted-foreground">{t("common:description")}</h3>
+                <p className="text-sm leading-6 text-foreground/90">{product.description}</p>
+              </section>
+            </>
+          )}
         </TabsContent>
 
         <TabsContent value="schema">
@@ -352,110 +361,105 @@ export function Component() {
         </TabsContent>
 
         <TabsContent value="keys" className="space-y-4">
-          {/* License Key */}
           {product.licenseKey && (
-            <Card>
-              <CardContent className="space-y-3 pt-5">
-                <p className="text-xs font-medium text-muted-foreground">{t("license:licenses.licenseKey")}</p>
-                <div className="flex items-center gap-2">
-                  <code className="flex-1 truncate rounded-md bg-slate-950 px-3 py-2 text-xs font-mono text-slate-50 dark:bg-slate-900">
-                    {showLicenseKey ? product.licenseKey : "••••••••••••••••••••••••••••••••"}
-                  </code>
+            <section className="space-y-2.5">
+              <div className="flex items-start justify-between gap-3">
+                <div className="space-y-1">
+                  <h3 className="text-sm font-medium text-foreground">{t("license:licenses.licenseKey")}</h3>
+                  <p className="text-xs text-muted-foreground">{t("license:products.licenseKeyHint", "Use this key to issue licenses for this product.")}</p>
+                </div>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={copiedField === "licenseKey" ? "default" : "outline"}
+                  className="shrink-0"
+                  onClick={() => handleCopy(product.licenseKey, "licenseKey")}
+                >
+                  {copiedField === "licenseKey" ? (
+                    <>
+                      <Check className="mr-2 h-3.5 w-3.5" />
+                      {t("common:copied")}
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="mr-2 h-3.5 w-3.5" />
+                      {t("common:copy")}
+                    </>
+                  )}
+                </Button>
+              </div>
+              <div className="rounded-md border bg-muted/20 px-3 py-2.5">
+                <code className="block text-xs font-mono leading-6 text-foreground break-all">
+                  {product.licenseKey}
+                </code>
+              </div>
+            </section>
+          )}
+
+          <Separator />
+
+          <section className="space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="space-y-1">
+                <h3 className="text-sm font-medium text-foreground">{t("license:products.currentKey")}</h3>
+                {publicKey ? (
+                  <p className="text-xs text-muted-foreground">
+                    {t("common:createdAt")} {formatDateTime(publicKey.createdAt)}
+                  </p>
+                ) : (
+                  <p className="text-xs text-muted-foreground">{t("license:products.noKeyInfo")}</p>
+                )}
+              </div>
+              {publicKey && (
+                <Badge variant="secondary" className="px-2.5 py-0.5 text-xs font-medium">v{publicKey.version}</Badge>
+              )}
+            </div>
+
+            {publicKey && (
+              <div className="space-y-2.5">
+                <div className="flex items-center justify-between gap-3">
+                  <h4 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{t("license:products.publicKey")}</h4>
                   <Button
                     type="button"
-                    variant="ghost"
-                    size="icon"
-                    className="h-8 w-8 shrink-0"
-                    onClick={() => setShowLicenseKey((v) => !v)}
-                  >
-                    {showLicenseKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                  </Button>
-                  <Button
-                    type="button"
-                    variant={copiedField === "licenseKey" ? "default" : "outline"}
+                    variant="outline"
                     size="sm"
-                    className="h-8 shrink-0 px-2"
-                    onClick={() => handleCopy(product.licenseKey, "licenseKey")}
+                    className="h-8 px-3"
+                    onClick={() => handleCopy(publicKey.publicKey, "publicKey")}
                   >
-                    {copiedField === "licenseKey" ? (
+                    {copiedField === "publicKey" ? (
                       <>
-                        <Check className="h-3.5 w-3.5" />
-                        <span className="ml-1">{t("common:copied")}</span>
+                        <Check className="mr-2 h-3.5 w-3.5" />
+                        {t("common:copied")}
                       </>
                     ) : (
                       <>
-                        <Copy className="h-3.5 w-3.5" />
-                        <span className="ml-1">{t("common:copy")}</span>
+                        <Copy className="mr-2 h-3.5 w-3.5" />
+                        {t("common:copy")}
                       </>
                     )}
                   </Button>
                 </div>
-              </CardContent>
-            </Card>
-          )}
-
-          {/* Signing Key */}
-          <Card>
-            <CardContent className="space-y-4 pt-5">
-              <div className="flex items-center gap-2">
-                <Key className="h-4 w-4 text-muted-foreground" />
-                <p className="text-sm font-medium">{t("license:products.currentKey")}</p>
-                {publicKey && (
-                  <Badge variant="secondary">v{publicKey.version}</Badge>
+                <div className="rounded-md border bg-muted/20 px-3 py-2.5">
+                  <pre className="text-xs break-all whitespace-pre-wrap font-mono leading-6 text-foreground">
+                    {publicKey.publicKey}
+                  </pre>
+                </div>
+              </div>
+            )}
+            {canManageKey && (
+              <div className="flex flex-wrap items-center gap-2 pt-1">
+                <Button variant="outline" onClick={handleRotateKeyClick}>
+                  <RefreshCw className="mr-2 h-4 w-4" />
+                  {t("license:products.rotateKey")}
+                </Button>
+                {impact && impact.affectedCount > 0 && (
+                  <Button variant="secondary" onClick={() => setBulkReissueOpen(true)}>
+                    {t("license:products.bulkReissue")}
+                  </Button>
                 )}
               </div>
-              {publicKey ? (
-                <>
-                  <div>
-                    <p className="text-xs text-muted-foreground">{t("license:products.publicKey")}</p>
-                    <div className="relative mt-2">
-                      <pre className="rounded-md bg-slate-950 p-4 text-xs break-all whitespace-pre-wrap font-mono text-slate-50 dark:bg-slate-900">
-                        {publicKey.publicKey}
-                      </pre>
-                      <Button
-                        type="button"
-                        variant="secondary"
-                        size="sm"
-                        className="absolute right-2 top-2 h-7 px-2"
-                        onClick={() => handleCopy(publicKey.publicKey, "publicKey")}
-                      >
-                        {copiedField === "publicKey" ? (
-                          <>
-                            <Check className="h-3.5 w-3.5" />
-                            <span className="ml-1">{t("common:copied")}</span>
-                          </>
-                        ) : (
-                          <>
-                            <Copy className="h-3.5 w-3.5" />
-                            <span className="ml-1">{t("common:copy")}</span>
-                          </>
-                        )}
-                      </Button>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2 text-sm">
-                    <p className="text-muted-foreground">{t("common:createdAt")}</p>
-                    <p>{formatDateTime(publicKey.createdAt)}</p>
-                  </div>
-                </>
-              ) : (
-                <p className="text-sm text-muted-foreground">{t("license:products.noKeyInfo")}</p>
-              )}
-              {canManageKey && (
-                <div className="flex flex-wrap items-center gap-2 border-t pt-4">
-                  <Button variant="outline" size="sm" className="border-amber-200 text-amber-700 hover:bg-amber-50 hover:text-amber-800 dark:border-amber-900 dark:text-amber-400 dark:hover:bg-amber-950" onClick={handleRotateKeyClick}>
-                    <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
-                    {t("license:products.rotateKey")}
-                  </Button>
-                  {impact && impact.affectedCount > 0 && (
-                    <Button variant="secondary" size="sm" onClick={() => setBulkReissueOpen(true)}>
-                      {t("license:products.bulkReissue")}
-                    </Button>
-                  )}
-                </div>
-              )}
-            </CardContent>
-          </Card>
+            )}
+          </section>
         </TabsContent>
       </Tabs>
 

@@ -192,12 +192,6 @@ export function Component() {
               <SmartServiceConfig
                 collaborationSpec={form.watch("collaborationSpec")}
                 onCollaborationSpecChange={(v) => form.setValue("collaborationSpec", v)}
-                agentId={form.watch("agentId")}
-                onAgentIdChange={(v) => form.setValue("agentId", v)}
-                confidenceThreshold={form.watch("confidenceThreshold")}
-                onConfidenceThresholdChange={(v) => form.setValue("confidenceThreshold", v)}
-                decisionTimeout={form.watch("decisionTimeout")}
-                onDecisionTimeoutChange={(v) => form.setValue("decisionTimeout", v)}
               />
               <Alert>
                 <Info className="h-4 w-4" />

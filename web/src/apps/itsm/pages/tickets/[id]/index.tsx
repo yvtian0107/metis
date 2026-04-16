@@ -370,7 +370,7 @@ export function Component() {
       )}
 
       {/* Workflow Viewer (classic engine only) */}
-      {ticket.engineType === "classic" && ticket.workflowJson && (
+      {ticket.engineType === "classic" && !!ticket.workflowJson && (
         <Card>
           <CardHeader>
             <CardTitle className="text-base">{t("itsm:workflow.viewer.workflowGraph")}</CardTitle>

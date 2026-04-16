@@ -40,11 +40,11 @@ function useLicenseeSchema() {
   const { t } = useTranslation("license")
   return z.object({
     name: z.string().min(1, t("validation.nameRequired")).max(128),
-    notes: z.string().optional().default(""),
+    notes: z.string().default(""),
   })
 }
 
-type FormValues = z.infer<ReturnType<typeof useLicenseeSchema>>
+type FormValues = z.input<ReturnType<typeof useLicenseeSchema>>
 
 interface LicenseeSheetProps {
   open: boolean
@@ -126,9 +126,9 @@ export function LicenseeSheet({ open, onOpenChange, licensee }: LicenseeSheetPro
           </SheetDescription>
         </SheetHeader>
         <Form {...form}>
-          <form onSubmit={form.handleSubmit(onSubmit)} className="flex flex-1 flex-col gap-5 px-4">
+          <form onSubmit={form.handleSubmit(onSubmit as any)} className="flex flex-1 flex-col gap-5 px-4">
             <FormField
-              control={form.control}
+              control={form.control as any}
               name="name"
               render={({ field }) => (
                 <FormItem>
@@ -141,7 +141,7 @@ export function LicenseeSheet({ open, onOpenChange, licensee }: LicenseeSheetPro
               )}
             />
             <FormField
-              control={form.control}
+              control={form.control as any}
               name="notes"
               render={({ field }) => (
                 <FormItem>

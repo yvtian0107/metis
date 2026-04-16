@@ -83,7 +83,7 @@ function getThroughputIconBg(requestCount: number): string {
 }
 
 export const ServiceNode = memo(function ServiceNode({ data, selected }: NodeProps) {
-  const node = data as ServiceNodeData
+  const node = data as unknown as ServiceNodeData
   const colorMode = node.colorMode ?? "errorRate"
 
   // Determine ring + icon bg based on color mode

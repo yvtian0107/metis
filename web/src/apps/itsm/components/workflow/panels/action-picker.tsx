@@ -4,7 +4,7 @@ import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Button } from "@/components/ui/button"
 import { X, Zap } from "lucide-react"
-import { fetchServiceActions, type ServiceActionItem } from "../../../api"
+import { fetchServiceActions } from "../../../api"
 
 interface ActionPickerProps {
   serviceId: number

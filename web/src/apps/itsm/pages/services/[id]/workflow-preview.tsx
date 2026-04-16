@@ -22,8 +22,8 @@ interface WorkflowPreviewProps {
 function formatParticipant(p: Participant): string {
   if (p.type === "position_department") {
     const parts = [
-      (p as Record<string, unknown>).department_code,
-      (p as Record<string, unknown>).position_code,
+      (p as unknown as Record<string, unknown>).department_code,
+      (p as unknown as Record<string, unknown>).position_code,
     ].filter(Boolean)
     if (parts.length > 0) return parts.join(" / ")
   }
@@ -102,7 +102,7 @@ export default function WorkflowPreview({ workflowJson }: WorkflowPreviewProps) 
         <ReactFlow
           nodes={nodes}
           edges={edges}
-          nodeTypes={nodeTypes}
+          nodeTypes={nodeTypes as any}
           edgeTypes={edgeTypes}
           nodesDraggable={false}
           nodesConnectable={false}

@@ -63,7 +63,7 @@ function JsonTreeView({ data }: { data: Record<string, string> | null | undefine
 
   if (!JsonView) {
     import("react-json-view-lite").then((mod) => {
-      setJsonView(() => mod.JsonView)
+      setJsonView(() => mod.JsonView as React.ComponentType<{ data: unknown; shouldExpandNode?: () => boolean }>)
     })
     return <p className="text-xs text-muted-foreground">Loading...</p>
   }

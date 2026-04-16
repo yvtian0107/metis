@@ -120,18 +120,16 @@ export function ProductSheet({ open, onOpenChange, product }: ProductSheetProps)
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent className="sm:max-w-lg flex flex-col">
-        <SheetHeader className="pb-4">
+      <SheetContent className="sm:max-w-md flex flex-col">
+        <SheetHeader className="pb-2">
           <SheetTitle>{isEditing ? t("license:products.editProduct") : t("license:products.create")}</SheetTitle>
           <SheetDescription className="sr-only">
             {isEditing ? t("license:products.editProduct") : t("license:products.create")}
           </SheetDescription>
         </SheetHeader>
         <Form {...form}>
-          <form onSubmit={form.handleSubmit(onSubmit)} className="flex flex-1 flex-col gap-5 px-4">
-            <div className="text-sm font-medium text-muted-foreground">
-              {t("license:products.basicInfo")}
-            </div>
+          <form onSubmit={form.handleSubmit(onSubmit)} className="flex flex-1 flex-col gap-4 px-4">
+            <div className="text-sm font-medium text-muted-foreground">{t("license:products.basicInfo")}</div>
 
             <FormField
               control={form.control}
@@ -153,7 +151,7 @@ export function ProductSheet({ open, onOpenChange, product }: ProductSheetProps)
                 <FormItem>
                   <FormLabel>{t("license:products.productCode")}</FormLabel>
                   {isEditing ? (
-                    <div className="rounded-md border bg-muted px-3 py-2 text-sm text-muted-foreground font-mono">
+                    <div className="rounded-md border bg-muted px-3 py-2 text-sm font-mono text-muted-foreground">
                       {field.value}
                     </div>
                   ) : (
@@ -170,6 +168,7 @@ export function ProductSheet({ open, onOpenChange, product }: ProductSheetProps)
                 </FormItem>
               )}
             />
+
             <FormField
               control={form.control}
               name="description"

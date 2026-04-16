@@ -10,7 +10,7 @@ import {
   Plus, Pencil, Trash2, FolderTree,
   ShieldCheck, Monitor, Globe, Container, ShieldAlert, Bell,
   User, Lock, KeyRound, LayoutGrid, Video, Server, Database,
-  Bug, FileSearch, LineChart, BellRing, Clock,
+  Bug, FileSearch, LineChart, BellRing, Clock, ChevronsUpDown,
   type LucideIcon,
 } from "lucide-react"
 import { usePermission } from "@/hooks/use-permission"
@@ -39,6 +39,9 @@ import {
 import {
   Form, FormControl, FormField, FormItem, FormLabel, FormMessage,
 } from "@/components/ui/form"
+import {
+  Popover, PopoverContent, PopoverTrigger,
+} from "@/components/ui/popover"
 import {
   type CatalogItem, fetchCatalogTree, createCatalog, updateCatalog, deleteCatalog,
 } from "../../api"
@@ -215,7 +218,37 @@ export function Component() {
               <FormField control={form.control} name="icon" render={({ field }) => (
                 <FormItem>
                   <FormLabel>{t("itsm:catalogs.icon")}</FormLabel>
-                  <FormControl><Input placeholder={t("itsm:catalogs.iconPlaceholder")} {...field} /></FormControl>
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <FormControl>
+                        <Button variant="outline" role="combobox" className="w-full justify-between">
+                          <span className="inline-flex items-center gap-2">
+                            <CatalogIcon name={field.value} className="h-4 w-4 text-muted-foreground" />
+                            <span className="text-muted-foreground">{field.value || t("itsm:catalogs.iconPlaceholder")}</span>
+                          </span>
+                          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                        </Button>
+                      </FormControl>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-72 p-2">
+                      <div className="grid grid-cols-6 gap-1">
+                        {Object.keys(iconMap).map((iconName) => (
+                          <button
+                            key={iconName}
+                            type="button"
+                            onClick={() => field.onChange(iconName)}
+                            className={cn(
+                              "flex h-9 w-9 items-center justify-center rounded-md transition-colors",
+                              field.value === iconName ? "bg-accent text-accent-foreground" : "hover:bg-muted"
+                            )}
+                            title={iconName}
+                          >
+                            <CatalogIcon name={iconName} className="h-4 w-4" />
+                          </button>
+                        ))}
+                      </div>
+                    </PopoverContent>
+                  </Popover>
                   <FormMessage />
                 </FormItem>
               )} />

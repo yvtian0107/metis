@@ -4,7 +4,7 @@ import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Button } from "@/components/ui/button"
 import { X, FileText } from "lucide-react"
-import { fetchFormDefs, type FormDefItem } from "../../../api"
+import { fetchFormDefs } from "../../../api"
 
 interface FormBindingPickerProps {
   formDefinitionId?: number

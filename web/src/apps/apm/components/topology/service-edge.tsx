@@ -53,7 +53,7 @@ function getThroughputLevel(callCount: number) {
 
 export const ServiceEdge = memo(function ServiceEdge(props: EdgeProps) {
   const { sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, data } = props
-  const edge = data as ServiceEdgeData
+  const edge = data as unknown as ServiceEdgeData
   const colorMode = edge.colorMode ?? "errorRate"
   const [hovered, setHovered] = useState(false)
 

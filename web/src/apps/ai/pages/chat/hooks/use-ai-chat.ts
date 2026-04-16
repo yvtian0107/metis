@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { Chat, useChat, type UseChatHelpers } from "@ai-sdk/react"
 import type { ChatTransport, UIMessage, UIMessageChunk } from "ai"
 import { sessionApi, type SessionMessage } from "@/lib/api"
@@ -198,7 +198,8 @@ export function useAiChat(
     })
     // Override expensive structuredClone with fast shallow clone
     // to eliminate per-chunk cloning bottleneck during streaming.
-    chat.state.snapshot = fastSnapshot
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ;(chat as any).state.snapshot = fastSnapshot
     return chat
   }, [sessionId, transport])
 

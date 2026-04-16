@@ -1,4 +1,4 @@
-import type { WFNodeData, NodeType } from "../types"
+import type { NodeType } from "../types"
 import { EventNode } from "./event-node"
 import { TaskNode } from "./task-node"
 import { GatewayNode } from "./gateway-node"
@@ -18,6 +18,7 @@ function resolveNodeComponent(nodeType: NodeType) {
 }
 
 // Build nodeTypes map: each NodeType gets its own entry mapping to the right renderer
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const nodeTypes: Record<string, React.ComponentType<any>> = {}
 for (const nt of ["start", "end", "timer", "signal", "form", "approve", "process", "action", "script", "notify", "exclusive", "parallel", "inclusive", "subprocess", "wait"] as NodeType[]) {
   nodeTypes[nt] = resolveNodeComponent(nt)
