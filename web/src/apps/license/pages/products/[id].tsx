@@ -12,9 +12,6 @@ import {
   Loader2,
   Pencil,
   RefreshCw,
-  Archive,
-  RotateCcw,
-  Rocket,
 } from "lucide-react"
 import { api } from "@/lib/api"
 import { usePermission } from "@/hooks/use-permission"
@@ -24,10 +21,8 @@ import { Badge } from "@/components/ui/badge"
 import {
   Card,
   CardContent,
-  CardHeader,
   CardTitle,
   CardDescription,
-  CardAction,
 } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import {
@@ -53,41 +48,7 @@ import { formatDateTime } from "@/lib/utils"
 import { ProductSheet, type ProductItem } from "../../components/product-sheet"
 import { ConstraintEditor } from "../../components/constraint-editor"
 import { PlanTab } from "../../components/plan-tab"
-
-const STATUS_STYLES: Record<
-  string,
-  { variant: "default" | "secondary" | "outline" | "destructive"; className: string }
-> = {
-  unpublished: {
-    variant: "secondary",
-    className: "bg-amber-100 text-amber-700 border-amber-200 dark:bg-amber-950 dark:text-amber-300 dark:border-amber-900",
-  },
-  published: {
-    variant: "default",
-    className: "bg-emerald-100 text-emerald-700 border-emerald-200 dark:bg-emerald-950 dark:text-emerald-300 dark:border-emerald-900",
-  },
-  archived: {
-    variant: "outline",
-    className: "bg-slate-100 text-slate-600 border-slate-200 dark:bg-slate-900 dark:text-slate-400 dark:border-slate-800",
-  },
-}
-
-const STATUS_ACTION_CONFIG: Record<
-  string,
-  Array<{ status: string; labelKey: string; variant: "default" | "secondary" | "outline" | "destructive"; icon: React.ElementType }>
-> = {
-  unpublished: [
-    { status: "published", labelKey: "status.publish", variant: "default", icon: Rocket },
-    { status: "archived", labelKey: "status.archiveAction", variant: "outline", icon: Archive },
-  ],
-  published: [
-    { status: "unpublished", labelKey: "status.unpublish", variant: "secondary", icon: EyeOff },
-    { status: "archived", labelKey: "status.archiveAction", variant: "outline", icon: Archive },
-  ],
-  archived: [
-    { status: "unpublished", labelKey: "status.restoreAction", variant: "default", icon: RotateCcw },
-  ],
-}
+import { STATUS_STYLES, STATUS_ACTION_CONFIG } from "../../constants"
 
 interface ConstraintFeature {
   key: string
@@ -276,14 +237,45 @@ export function Component() {
           </div>
           <CardDescription className="font-mono mt-1">{product.code}</CardDescription>
         </div>
-        {canUpdate && (
-          <CardAction className="mr-4">
+        <div className="mr-4 flex shrink-0 items-center gap-2">
+          {canUpdate && actions.map((action) => {
+            const ActionIcon = action.icon
+            const actionLabel = t(`license:${action.labelKey}`)
+            return (
+              <AlertDialog key={action.status}>
+                <AlertDialogTrigger asChild>
+                  <Button variant={action.variant} size="sm">
+                    <ActionIcon className="mr-1.5 h-3.5 w-3.5" />
+                    <span className="hidden sm:inline">{actionLabel}</span>
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>{t("license:products.confirmAction", { action: actionLabel })}</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      {t("license:products.confirmActionDesc", { name: product.name, action: actionLabel })}
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>{t("common:cancel")}</AlertDialogCancel>
+                    <AlertDialogAction
+                      onClick={() => statusMutation.mutate(action.status)}
+                      disabled={statusMutation.isPending}
+                    >
+                      {actionLabel}
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+            )
+          })}
+          {canUpdate && (
             <Button variant="outline" size="sm" onClick={() => setEditOpen(true)}>
               <Pencil className="mr-1.5 h-3.5 w-3.5" />
-              {t("common:edit")}
+              <span className="hidden sm:inline">{t("common:edit")}</span>
             </Button>
-          </CardAction>
-        )}
+          )}
+        </div>
       </Card>
 
       <Tabs value={activeTab} onValueChange={handleTabChange}>
@@ -317,85 +309,28 @@ export function Component() {
         <TabsContent value="info" className="space-y-4">
           <Card>
             <CardContent className="pt-6">
-              <div className="grid gap-4 text-sm sm:grid-cols-2 lg:grid-cols-3">
-                <div className="rounded-lg border bg-muted/30 p-3">
-                  <p className="text-xs text-muted-foreground">{t("common:name")}</p>
-                  <p className="mt-1 font-medium">{product.name}</p>
-                </div>
-                <div className="rounded-lg border bg-muted/30 p-3">
-                  <p className="text-xs text-muted-foreground">{t("license:products.code")}</p>
-                  <p className="mt-1 font-mono">{product.code}</p>
-                </div>
-                <div className="rounded-lg border bg-muted/30 p-3">
-                  <p className="text-xs text-muted-foreground">{t("common:status")}</p>
-                  <div className="mt-1">
-                    <Badge
-                      variant={statusStyle.variant}
-                      className={statusStyle.className}
-                    >
-                      {t(`license:status.${statusKey}`, product.status)}
-                    </Badge>
-                  </div>
-                </div>
+              <div className="grid gap-4 text-sm sm:grid-cols-3">
                 <div className="rounded-lg border bg-muted/30 p-3">
                   <p className="text-xs text-muted-foreground">{t("license:products.licenseModules")}</p>
-                  <p className="mt-1 font-medium">{modules.length}</p>
+                  <p className="mt-1 font-medium tabular-nums">{modules.length}</p>
                 </div>
                 <div className="rounded-lg border bg-muted/30 p-3">
                   <p className="text-xs text-muted-foreground">{t("license:products.planQuantity")}</p>
-                  <p className="mt-1 font-medium">{product.planCount}</p>
+                  <p className="mt-1 font-medium tabular-nums">{product.planCount}</p>
                 </div>
                 <div className="rounded-lg border bg-muted/30 p-3">
                   <p className="text-xs text-muted-foreground">{t("common:updatedAt")}</p>
                   <p className="mt-1">{formatDateTime(product.updatedAt)}</p>
                 </div>
-                <div className="rounded-lg border-l-4 border-l-primary bg-muted/30 p-3 sm:col-span-2 lg:col-span-3">
-                  <p className="text-xs text-muted-foreground">{t("common:description")}</p>
-                  <p className="mt-1 leading-6">
-                    {product.description || t("license:products.noDescription")}
-                  </p>
-                </div>
+                {product.description && (
+                  <div className="rounded-lg border bg-muted/30 p-3 sm:col-span-3">
+                    <p className="text-xs text-muted-foreground">{t("common:description")}</p>
+                    <p className="mt-1 leading-6">{product.description}</p>
+                  </div>
+                )}
               </div>
             </CardContent>
           </Card>
-
-          <div className="flex flex-wrap items-center justify-end gap-2">
-            {canUpdate && actions.length > 0 && (
-              <>
-                {actions.map((action) => {
-                  const ActionIcon = action.icon
-                  const actionLabel = t(`license:${action.labelKey}`)
-                  return (
-                    <AlertDialog key={action.status}>
-                      <AlertDialogTrigger asChild>
-                        <Button variant={action.variant} size="sm">
-                          <ActionIcon className="mr-1.5 h-3.5 w-3.5" />
-                          {actionLabel}
-                        </Button>
-                      </AlertDialogTrigger>
-                      <AlertDialogContent>
-                        <AlertDialogHeader>
-                          <AlertDialogTitle>{t("license:products.confirmAction", { action: actionLabel })}</AlertDialogTitle>
-                          <AlertDialogDescription>
-                            {t("license:products.confirmActionDesc", { name: product.name, action: actionLabel })}
-                          </AlertDialogDescription>
-                        </AlertDialogHeader>
-                        <AlertDialogFooter>
-                          <AlertDialogCancel>{t("common:cancel")}</AlertDialogCancel>
-                          <AlertDialogAction
-                            onClick={() => statusMutation.mutate(action.status)}
-                            disabled={statusMutation.isPending}
-                          >
-                            {actionLabel}
-                          </AlertDialogAction>
-                        </AlertDialogFooter>
-                      </AlertDialogContent>
-                    </AlertDialog>
-                  )
-                })}
-              </>
-            )}
-          </div>
         </TabsContent>
 
         <TabsContent value="schema">
@@ -419,11 +354,9 @@ export function Component() {
         <TabsContent value="keys" className="space-y-4">
           {/* License Key */}
           {product.licenseKey && (
-            <Card className="overflow-hidden">
-              <CardHeader className="bg-muted/30 pb-4">
-                <CardTitle className="text-sm font-medium">{t("license:licenses.licenseKey")}</CardTitle>              
-              </CardHeader>
-              <CardContent className="pt-4">
+            <Card>
+              <CardContent className="space-y-3 pt-5">
+                <p className="text-xs font-medium text-muted-foreground">{t("license:licenses.licenseKey")}</p>
                 <div className="flex items-center gap-2">
                   <code className="flex-1 truncate rounded-md bg-slate-950 px-3 py-2 text-xs font-mono text-slate-50 dark:bg-slate-900">
                     {showLicenseKey ? product.licenseKey : "••••••••••••••••••••••••••••••••"}
@@ -462,17 +395,15 @@ export function Component() {
           )}
 
           {/* Signing Key */}
-          <Card className="overflow-hidden">
-            <CardHeader className="bg-muted/30 pb-4">
+          <Card>
+            <CardContent className="space-y-4 pt-5">
               <div className="flex items-center gap-2">
                 <Key className="h-4 w-4 text-muted-foreground" />
-                <CardTitle className="text-sm font-medium">{t("license:products.currentKey")}</CardTitle>
+                <p className="text-sm font-medium">{t("license:products.currentKey")}</p>
                 {publicKey && (
                   <Badge variant="secondary">v{publicKey.version}</Badge>
                 )}
               </div>
-            </CardHeader>
-            <CardContent className="space-y-4 pt-4">
               {publicKey ? (
                 <>
                   <div>
@@ -510,22 +441,21 @@ export function Component() {
               ) : (
                 <p className="text-sm text-muted-foreground">{t("license:products.noKeyInfo")}</p>
               )}
+              {canManageKey && (
+                <div className="flex flex-wrap items-center gap-2 border-t pt-4">
+                  <Button variant="outline" size="sm" className="border-amber-200 text-amber-700 hover:bg-amber-50 hover:text-amber-800 dark:border-amber-900 dark:text-amber-400 dark:hover:bg-amber-950" onClick={handleRotateKeyClick}>
+                    <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
+                    {t("license:products.rotateKey")}
+                  </Button>
+                  {impact && impact.affectedCount > 0 && (
+                    <Button variant="secondary" size="sm" onClick={() => setBulkReissueOpen(true)}>
+                      {t("license:products.bulkReissue")}
+                    </Button>
+                  )}
+                </div>
+              )}
             </CardContent>
           </Card>
-
-          {canManageKey && (
-            <div className="flex flex-wrap justify-end gap-2">
-              {impact && impact.affectedCount > 0 && (
-                <Button variant="secondary" size="sm" onClick={() => setBulkReissueOpen(true)}>
-                  {t("license:products.bulkReissue")}
-                </Button>
-              )}
-              <Button variant="outline" size="sm" className="border-amber-200 text-amber-700 hover:bg-amber-50 hover:text-amber-800 dark:border-amber-900 dark:text-amber-400 dark:hover:bg-amber-950" onClick={handleRotateKeyClick}>
-                <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
-                {t("license:products.rotateKey")}
-              </Button>
-            </div>
-          )}
         </TabsContent>
       </Tabs>
 

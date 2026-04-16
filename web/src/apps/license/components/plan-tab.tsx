@@ -7,6 +7,12 @@ import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip"
+import {
   AlertDialog,
   AlertDialogAction,
   AlertDialogCancel,
@@ -153,6 +159,7 @@ export function PlanTab({
   }
 
   return (
+    <TooltipProvider delayDuration={200}>
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-end gap-2">
         {canManage && (
@@ -194,10 +201,19 @@ export function PlanTab({
                       </Badge>
                     )}
                     {warnings.length > 0 && (
-                      <Badge variant="destructive" className="gap-1" title={warnings.join("\n")}>
-                        <AlertTriangle className="h-3 w-3" />
-                        {t("license:plans.needsUpdate")}
-                      </Badge>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Badge variant="destructive" className="gap-1 cursor-help">
+                            <AlertTriangle className="h-3 w-3" />
+                            {t("license:plans.needsUpdate")}
+                          </Badge>
+                        </TooltipTrigger>
+                        <TooltipContent side="bottom" className="max-w-xs">
+                          <ul className="text-xs space-y-1">
+                            {warnings.map((w, i) => <li key={i}>{w}</li>)}
+                          </ul>
+                        </TooltipContent>
+                      </Tooltip>
                     )}
                   </div>
                   {modules.length > 0 && (
@@ -271,5 +287,6 @@ export function PlanTab({
         constraintSchema={constraintSchema}
       />
     </div>
+    </TooltipProvider>
   )
 }

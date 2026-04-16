@@ -131,7 +131,7 @@ export function ConstraintEditor({ productId, schema, canEdit }: ConstraintEdito
 
       {modules.map((mod, moduleIndex) => (
         <ModuleCard
-          key={moduleIndex}
+          key={mod.key}
           module={mod}
           disabled={!canEdit}
           onUpdate={(updated) => handleUpdateModule(moduleIndex, updated)}
@@ -265,7 +265,7 @@ function ModuleCard({
             <div className="space-y-1 pt-3">
               {mod.features.map((feature, featureIndex) => (
                 <FeatureRow
-                  key={featureIndex}
+                  key={feature.key}
                   feature={feature}
                   disabled={disabled}
                   onUpdate={(f) => onUpdateFeature(featureIndex, f)}
