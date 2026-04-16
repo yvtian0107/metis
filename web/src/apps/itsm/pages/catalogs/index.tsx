@@ -219,13 +219,6 @@ export function Component() {
                   <FormMessage />
                 </FormItem>
               )} />
-              <FormField control={form.control} name="sortOrder" render={({ field }) => (
-                <FormItem>
-                  <FormLabel>{t("itsm:catalogs.sort")}</FormLabel>
-                  <FormControl><Input type="number" {...field} onChange={(e) => field.onChange(Number(e.target.value))} /></FormControl>
-                  <FormMessage />
-                </FormItem>
-              )} />
               <FormField control={form.control} name="description" render={({ field }) => (
                 <FormItem>
                   <FormLabel>{t("itsm:catalogs.description")}</FormLabel>
