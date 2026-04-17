@@ -11,6 +11,7 @@ import (
 
 	"github.com/samber/do/v2"
 
+	"metis/internal/app"
 	"metis/internal/llm"
 	"metis/internal/pkg/crypto"
 )
@@ -373,4 +374,53 @@ func (gw *AgentGateway) buildToolDefinitions(agentID uint) ([]ToolDefinition, er
 	}
 
 	return defs, nil
+}
+
+// --- app.AIAgentProvider implementation ---
+
+// GetAgentConfig returns agent configuration by ID for external consumers (e.g. ITSM SmartEngine).
+func (gw *AgentGateway) GetAgentConfig(agentID uint) (*app.AIAgentConfig, error) {
+	agent, err := gw.agentSvc.Get(agentID)
+	if err != nil {
+		return nil, err
+	}
+	return gw.buildAgentConfig(agent)
+}
+
+// GetAgentConfigByCode returns agent configuration by code for external consumers.
+func (gw *AgentGateway) GetAgentConfigByCode(code string) (*app.AIAgentConfig, error) {
+	agent, err := gw.agentSvc.GetByCode(code)
+	if err != nil {
+		return nil, err
+	}
+	return gw.buildAgentConfig(agent)
+}
+
+func (gw *AgentGateway) buildAgentConfig(agent *Agent) (*app.AIAgentConfig, error) {
+	cfg := &app.AIAgentConfig{
+		Name:         agent.Name,
+		SystemPrompt: agent.SystemPrompt,
+		Temperature:  agent.Temperature,
+		MaxTokens:    agent.MaxTokens,
+	}
+	if agent.ModelID == nil {
+		return cfg, nil
+	}
+	m, err := gw.modelRepo.FindByID(*agent.ModelID)
+	if err != nil {
+		return nil, fmt.Errorf("model not found: %w", err)
+	}
+	cfg.Model = m.ModelID
+	provider, err := gw.providerRepo.FindByID(m.ProviderID)
+	if err != nil {
+		return nil, fmt.Errorf("provider not found: %w", err)
+	}
+	cfg.Protocol = provider.Protocol
+	cfg.BaseURL = provider.BaseURL
+	apiKey, err := decryptAPIKey(provider.APIKeyEncrypted, gw.encKey)
+	if err != nil {
+		return nil, fmt.Errorf("decrypt API key: %w", err)
+	}
+	cfg.APIKey = apiKey
+	return cfg, nil
 }

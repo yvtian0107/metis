@@ -69,7 +69,11 @@ func (s *DepartmentService) Tree() ([]DepartmentTreeNode, error) {
 	if err != nil {
 		return nil, err
 	}
-	return buildDepartmentTree(depts, counts), nil
+	managers, err := s.repo.ListManagerNames()
+	if err != nil {
+		return nil, err
+	}
+	return buildDepartmentTree(depts, counts, managers), nil
 }
 
 type UpdateDepartmentInput struct {
@@ -126,6 +130,28 @@ func (s *DepartmentService) Update(id uint, input UpdateDepartmentInput) (*Depar
 	return dept, nil
 }
 
+func (s *DepartmentService) GetAllowedPositions(deptID uint) ([]PositionResponse, error) {
+	if _, err := s.Get(deptID); err != nil {
+		return nil, err
+	}
+	positions, err := s.repo.GetAllowedPositions(deptID)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]PositionResponse, len(positions))
+	for i, p := range positions {
+		result[i] = p.ToResponse()
+	}
+	return result, nil
+}
+
+func (s *DepartmentService) SetAllowedPositions(deptID uint, positionIDs []uint) error {
+	if _, err := s.Get(deptID); err != nil {
+		return err
+	}
+	return s.repo.SetAllowedPositions(deptID, positionIDs)
+}
+
 func (s *DepartmentService) Delete(id uint) error {
 	if _, err := s.repo.FindByID(id); err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -157,11 +183,12 @@ func (s *DepartmentService) Delete(id uint) error {
 
 type DepartmentTreeNode struct {
 	DepartmentResponse
+	ManagerName string               `json:"managerName"`
 	MemberCount int                  `json:"memberCount"`
 	Children    []DepartmentTreeNode `json:"children,omitempty"`
 }
 
-func buildDepartmentTree(depts []Department, counts map[uint]int) []DepartmentTreeNode {
+func buildDepartmentTree(depts []Department, counts map[uint]int, managers map[uint]string) []DepartmentTreeNode {
 	byParent := make(map[uint][]Department)
 	for _, d := range depts {
 		pid := uint(0)
@@ -181,6 +208,7 @@ func buildDepartmentTree(depts []Department, counts map[uint]int) []DepartmentTr
 		for _, d := range items {
 			result = append(result, DepartmentTreeNode{
 				DepartmentResponse: d.ToResponse(),
+				ManagerName:        managers[d.ID],
 				MemberCount:        counts[d.ID],
 				Children:           build(d.ID),
 			})

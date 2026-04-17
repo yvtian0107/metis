@@ -144,7 +144,6 @@ func TestPosition_ToResponse(t *testing.T) {
 	p := &Position{
 		Name:        "Senior Engineer",
 		Code:        "se",
-		Level:       5,
 		Description: "L5",
 		IsActive:    true,
 	}
@@ -153,7 +152,7 @@ func TestPosition_ToResponse(t *testing.T) {
 	p.UpdatedAt = now
 
 	r := p.ToResponse()
-	if r.ID != 2 || r.Name != "Senior Engineer" || r.Code != "se" || r.Level != 5 || r.Description != "L5" || !r.IsActive {
+	if r.ID != 2 || r.Name != "Senior Engineer" || r.Code != "se" || r.Description != "L5" || !r.IsActive {
 		t.Fatalf("response mismatch: %+v", r)
 	}
 	if !r.CreatedAt.Equal(now) {

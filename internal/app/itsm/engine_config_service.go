@@ -263,3 +263,9 @@ func (s *EngineConfigService) setConfigValue(key, value string) {
 func (s *EngineConfigService) FallbackAssigneeID() uint {
 	return uint(s.getConfigInt("itsm.engine.general.fallback_assignee", 0))
 }
+
+// DecisionMode returns the decision mode ("direct_first" or "ai_only").
+// Implements engine.EngineConfigProvider.
+func (s *EngineConfigService) DecisionMode() string {
+	return s.getConfigValue("itsm.engine.decision.decision_mode", "direct_first")
+}

@@ -86,7 +86,7 @@ func TestPositionService_Update(t *testing.T) {
 	other := seedPosition(t, db, "Manager", "mgr", true)
 
 	name := "Staff Engineer"
-	updated, err := svc.Update(pos.ID, &name, nil, nil, nil, nil)
+	updated, err := svc.Update(pos.ID, &name, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("update failed: %v", err)
 	}
@@ -95,7 +95,7 @@ func TestPositionService_Update(t *testing.T) {
 	}
 
 	// code collision
-	_, err = svc.Update(other.ID, nil, &pos.Code, nil, nil, nil)
+	_, err = svc.Update(other.ID, nil, &pos.Code, nil, nil)
 	if err != ErrPositionCodeExists {
 		t.Fatalf("expected ErrPositionCodeExists, got %v", err)
 	}

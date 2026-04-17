@@ -30,7 +30,6 @@ export interface PositionItem {
   id: number
   name: string
   code: string
-  level: number
   description: string
   isActive: boolean
   createdAt: string
@@ -42,7 +41,6 @@ function usePositionSchema() {
   return z.object({
     name: z.string().min(1, t("validation.nameRequired")),
     code: z.string().min(1, t("validation.codeRequired")),
-    level: z.number().default(0),
     description: z.string().optional(),
   })
 }
@@ -64,7 +62,7 @@ export function PositionSheet({ open, onOpenChange, position }: PositionSheetPro
   const form = useForm<FormValues>({
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     resolver: zodResolver(schema as any),
-    defaultValues: { name: "", code: "", level: 0, description: "" },
+    defaultValues: { name: "", code: "", description: "" },
   })
 
   useEffect(() => {
@@ -73,11 +71,10 @@ export function PositionSheet({ open, onOpenChange, position }: PositionSheetPro
         form.reset({
           name: position.name,
           code: position.code,
-          level: position.level,
           description: position.description,
         })
       } else {
-        form.reset({ name: "", code: "", level: 0, description: "" })
+        form.reset({ name: "", code: "", description: "" })
       }
     }
   }, [open, position, form])
@@ -87,7 +84,6 @@ export function PositionSheet({ open, onOpenChange, position }: PositionSheetPro
       api.post("/api/v1/org/positions", {
         name: values.name,
         code: values.code,
-        level: values.level,
         description: values.description,
       }),
     onSuccess: () => {
@@ -103,7 +99,6 @@ export function PositionSheet({ open, onOpenChange, position }: PositionSheetPro
       api.put(`/api/v1/org/positions/${position!.id}`, {
         name: values.name,
         code: values.code,
-        level: values.level,
         description: values.description,
       }),
     onSuccess: () => {
@@ -158,23 +153,6 @@ export function PositionSheet({ open, onOpenChange, position }: PositionSheetPro
                   <FormLabel>{t("org:positions.code")}</FormLabel>
                   <FormControl>
                     <Input placeholder={t("org:positions.codePlaceholder")} {...field} />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-            <FormField
-              control={form.control}
-              name="level"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>{t("org:positions.level")}</FormLabel>
-                  <FormControl>
-                    <Input
-                      type="number"
-                      {...field}
-                      onChange={(e) => field.onChange(Number(e.target.value))}
-                    />
                   </FormControl>
                   <FormMessage />
                 </FormItem>

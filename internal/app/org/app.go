@@ -21,7 +21,7 @@ type OrgApp struct {
 func (a *OrgApp) Name() string { return "org" }
 
 func (a *OrgApp) Models() []any {
-	return []any{&Department{}, &Position{}, &UserPosition{}}
+	return []any{&Department{}, &Position{}, &UserPosition{}, &DepartmentPosition{}}
 }
 
 func (a *OrgApp) Seed(db *gorm.DB, enforcer *casbin.Enforcer, install bool) error {

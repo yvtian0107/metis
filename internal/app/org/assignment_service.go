@@ -8,10 +8,11 @@ import (
 )
 
 var (
-	ErrAssignmentNotFound = errors.New("assignment not found")
-	ErrAlreadyAssigned    = errors.New("user already assigned to this department")
-	ErrDepartmentInactive = errors.New("department is inactive")
-	ErrPositionInactive   = errors.New("position is inactive")
+	ErrAssignmentNotFound       = errors.New("assignment not found")
+	ErrAlreadyAssigned          = errors.New("user already assigned to this department")
+	ErrDepartmentInactive       = errors.New("department is inactive")
+	ErrPositionInactive         = errors.New("position is inactive")
+	ErrPositionNotAllowedInDept = errors.New("position is not allowed in this department")
 )
 
 type AssignmentService struct {
@@ -80,6 +81,15 @@ func (s *AssignmentService) AddUserPosition(userID, deptID, posID uint, isPrimar
 		return nil, ErrPositionInactive
 	}
 
+	// Validate position is allowed in this department
+	allowed, err := s.deptRepo.IsPositionAllowed(deptID, posID)
+	if err != nil {
+		return nil, err
+	}
+	if !allowed {
+		return nil, ErrPositionNotAllowedInDept
+	}
+
 	exists, err := s.repo.ExistsByUserAndDept(userID, deptID)
 	if err != nil {
 		return nil, err
@@ -110,6 +120,21 @@ func (s *AssignmentService) RemoveUserPosition(userID, assignmentID uint) error 
 func (s *AssignmentService) UpdateUserPosition(userID, assignmentID uint, positionID *uint, isPrimary *bool) error {
 	fields := map[string]any{}
 	if positionID != nil {
+		// Validate position is allowed in the assignment's department
+		assignment, err := s.repo.FindByID(assignmentID)
+		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return ErrAssignmentNotFound
+			}
+			return err
+		}
+		allowed, err := s.deptRepo.IsPositionAllowed(assignment.DepartmentID, *positionID)
+		if err != nil {
+			return err
+		}
+		if !allowed {
+			return ErrPositionNotAllowedInDept
+		}
 		fields["position_id"] = *positionID
 	}
 	setPrimary := isPrimary != nil && *isPrimary

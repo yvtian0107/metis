@@ -229,6 +229,23 @@ func (p *testAgentProvider) GetAgentConfig(agentID uint) (*engine.SmartAgentConf
 	}, nil
 }
 
+func (p *testAgentProvider) GetAgentConfigByCode(code string) (*engine.SmartAgentConfig, error) {
+	var agent ai.Agent
+	if err := p.db.Where("code = ?", code).First(&agent).Error; err != nil {
+		return nil, fmt.Errorf("agent code %q not found: %w", code, err)
+	}
+	return &engine.SmartAgentConfig{
+		Name:         agent.Name,
+		SystemPrompt: agent.SystemPrompt,
+		Temperature:  agent.Temperature,
+		MaxTokens:    agent.MaxTokens,
+		Protocol:     "openai",
+		BaseURL:      p.llmCfg.baseURL,
+		APIKey:       p.llmCfg.apiKey,
+		Model:        p.llmCfg.model,
+	}, nil
+}
+
 var _ engine.AgentProvider = (*testAgentProvider)(nil)
 
 // testUserProvider implements engine.UserProvider for BDD tests.

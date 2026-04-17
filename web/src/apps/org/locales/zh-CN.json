@@ -31,7 +31,6 @@
     "edit": "编辑岗位",
     "name": "岗位名称",
     "code": "岗位编码",
-    "level": "职级",
     "description": "描述",
     "status": "状态",
     "active": "启用",

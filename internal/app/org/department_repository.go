@@ -91,3 +91,74 @@ func (r *DepartmentRepo) ListAllIDsWithParent(activeOnly bool) ([]IDParent, erro
 	}
 	return items, nil
 }
+
+// GetAllowedPositions returns the positions allowed for a department.
+func (r *DepartmentRepo) GetAllowedPositions(deptID uint) ([]Position, error) {
+	var positions []Position
+	err := r.db.
+		Joins("JOIN department_positions dp ON dp.position_id = positions.id").
+		Where("dp.department_id = ? AND dp.deleted_at IS NULL", deptID).
+		Order("positions.sort ASC, positions.id ASC").
+		Find(&positions).Error
+	return positions, err
+}
+
+// SetAllowedPositions replaces all allowed positions for a department in a transaction.
+func (r *DepartmentRepo) SetAllowedPositions(deptID uint, positionIDs []uint) error {
+	return r.db.Transaction(func(tx *database.DB) error {
+		if err := tx.Where("department_id = ?", deptID).Delete(&DepartmentPosition{}).Error; err != nil {
+			return err
+		}
+		for _, posID := range positionIDs {
+			dp := DepartmentPosition{DepartmentID: deptID, PositionID: posID}
+			if err := tx.Create(&dp).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+// IsPositionAllowed returns true if the position is allowed in the department,
+// or if the department has no allowed positions configured (no restriction).
+func (r *DepartmentRepo) IsPositionAllowed(deptID, positionID uint) (bool, error) {
+	var count int64
+	if err := r.db.Model(&DepartmentPosition{}).Where("department_id = ?", deptID).Count(&count).Error; err != nil {
+		return false, err
+	}
+	if count == 0 {
+		return true, nil // no restriction
+	}
+	var match int64
+	if err := r.db.Model(&DepartmentPosition{}).
+		Where("department_id = ? AND position_id = ?", deptID, positionID).
+		Count(&match).Error; err != nil {
+		return false, err
+	}
+	return match > 0, nil
+}
+
+// ManagerInfo holds the manager username for a department (used in Tree queries).
+type ManagerInfo struct {
+	DepartmentID uint
+	ManagerName  string
+}
+
+// ListManagerNames returns manager usernames for all departments via LEFT JOIN.
+func (r *DepartmentRepo) ListManagerNames() (map[uint]string, error) {
+	var results []ManagerInfo
+	err := r.db.
+		Table("departments").
+		Select("departments.id as department_id, users.username as manager_name").
+		Joins("LEFT JOIN users ON departments.manager_id = users.id").
+		Where("departments.manager_id IS NOT NULL AND departments.deleted_at IS NULL").
+		Find(&results).Error
+	if err != nil {
+		return nil, err
+	}
+	m := make(map[uint]string, len(results))
+	for _, r := range results {
+		m[r.DepartmentID] = r.ManagerName
+	}
+	return m, nil
+}

@@ -133,30 +133,41 @@ export function Component() {
     queryFn: fetchEngineConfig,
   })
 
-  // Local form state
+  // Local form state — generator
   const [genProviderId, setGenProviderId] = useState(0)
   const [genModelId, setGenModelId] = useState(0)
   const [genTemp, setGenTemp] = useState(0.3)
-  const [rtProviderId, setRtProviderId] = useState(0)
-  const [rtModelId, setRtModelId] = useState(0)
-  const [rtTemp, setRtTemp] = useState(0.1)
+  // servicedesk agent
+  const [sdProviderId, setSdProviderId] = useState(0)
+  const [sdModelId, setSdModelId] = useState(0)
+  const [sdTemp, setSdTemp] = useState(0.7)
+  // decision agent
+  const [decProviderId, setDecProviderId] = useState(0)
+  const [decModelId, setDecModelId] = useState(0)
+  const [decTemp, setDecTemp] = useState(0.1)
   const [decisionMode, setDecisionMode] = useState("direct_first")
+  // general
   const [maxRetries, setMaxRetries] = useState(3)
   const [timeoutSeconds, setTimeoutSeconds] = useState(30)
   const [reasoningLog, setReasoningLog] = useState("full")
+  const [fallbackAssignee, setFallbackAssignee] = useState(0)
 
   useEffect(() => {
     if (!config) return
     setGenProviderId(config.generator.providerId)
     setGenModelId(config.generator.modelId)
     setGenTemp(config.generator.temperature)
-    setRtProviderId(config.runtime.providerId)
-    setRtModelId(config.runtime.modelId)
-    setRtTemp(config.runtime.temperature)
-    setDecisionMode(config.runtime.decisionMode || "direct_first")
+    setSdProviderId(config.servicedesk.providerId)
+    setSdModelId(config.servicedesk.modelId)
+    setSdTemp(config.servicedesk.temperature)
+    setDecProviderId(config.decision.providerId)
+    setDecModelId(config.decision.modelId)
+    setDecTemp(config.decision.temperature)
+    setDecisionMode(config.decision.decisionMode || "direct_first")
     setMaxRetries(config.general.maxRetries)
     setTimeoutSeconds(config.general.timeoutSeconds)
     setReasoningLog(config.general.reasoningLog)
+    setFallbackAssignee(config.general.fallbackAssignee)
   }, [config])
 
   const saveMut = useMutation({
@@ -171,8 +182,9 @@ export function Component() {
   function handleSave() {
     saveMut.mutate({
       generator: { modelId: genModelId, temperature: genTemp },
-      runtime: { modelId: rtModelId, temperature: rtTemp, decisionMode },
-      general: { maxRetries, timeoutSeconds, reasoningLog },
+      servicedesk: { modelId: sdModelId, temperature: sdTemp },
+      decision: { modelId: decModelId, temperature: decTemp, decisionMode },
+      general: { maxRetries, timeoutSeconds, reasoningLog, fallbackAssignee },
     })
   }
 
@@ -215,20 +227,38 @@ export function Component() {
         </CardContent>
       </Card>
 
-      {/* Runtime Engine */}
+      {/* Servicedesk Agent */}
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">{t("itsm:engineConfig.runtimeTitle")}</CardTitle>
-          <CardDescription>{t("itsm:engineConfig.runtimeDesc")}</CardDescription>
+          <CardTitle className="text-base">{t("itsm:engineConfig.servicedeskTitle")}</CardTitle>
+          <CardDescription>{t("itsm:engineConfig.servicedeskDesc")}</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <LLMFields
-            providerId={rtProviderId}
-            modelId={rtModelId}
-            temperature={rtTemp}
-            onProviderChange={setRtProviderId}
-            onModelChange={setRtModelId}
-            onTemperatureChange={setRtTemp}
+            providerId={sdProviderId}
+            modelId={sdModelId}
+            temperature={sdTemp}
+            onProviderChange={setSdProviderId}
+            onModelChange={setSdModelId}
+            onTemperatureChange={setSdTemp}
+          />
+        </CardContent>
+      </Card>
+
+      {/* Decision Agent */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">{t("itsm:engineConfig.decisionTitle")}</CardTitle>
+          <CardDescription>{t("itsm:engineConfig.decisionDesc")}</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <LLMFields
+            providerId={decProviderId}
+            modelId={decModelId}
+            temperature={decTemp}
+            onProviderChange={setDecProviderId}
+            onModelChange={setDecModelId}
+            onTemperatureChange={setDecTemp}
           />
           <div className="space-y-1.5">
             <Label>{t("itsm:engineConfig.decisionMode")}</Label>

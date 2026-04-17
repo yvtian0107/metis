@@ -691,18 +691,21 @@ export interface EngineAgentConfig {
 
 export interface EngineConfig {
   generator: EngineAgentConfig
-  runtime: EngineAgentConfig & { decisionMode: string }
+  servicedesk: EngineAgentConfig
+  decision: EngineAgentConfig & { decisionMode: string }
   general: {
     maxRetries: number
     timeoutSeconds: number
     reasoningLog: string
+    fallbackAssignee: number
   }
 }
 
 export interface EngineConfigUpdate {
   generator: { modelId: number; temperature: number }
-  runtime: { modelId: number; temperature: number; decisionMode: string }
-  general: { maxRetries: number; timeoutSeconds: number; reasoningLog: string }
+  servicedesk: { modelId: number; temperature: number }
+  decision: { modelId: number; temperature: number; decisionMode: string }
+  general: { maxRetries: number; timeoutSeconds: number; reasoningLog: string; fallbackAssignee: number }
 }
 
 export function fetchEngineConfig() {

@@ -13,10 +13,18 @@ import (
 // testConfigProvider implements engine.EngineConfigProvider for BDD tests.
 type testConfigProvider struct {
 	fallbackAssigneeID uint
+	decisionMode       string
 }
 
 func (p *testConfigProvider) FallbackAssigneeID() uint {
 	return p.fallbackAssigneeID
+}
+
+func (p *testConfigProvider) DecisionMode() string {
+	if p.decisionMode != "" {
+		return p.decisionMode
+	}
+	return "ai_only"
 }
 
 var _ engine.EngineConfigProvider = (*testConfigProvider)(nil)

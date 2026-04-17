@@ -117,17 +117,16 @@ export function Component() {
             <TableRow>
               <TableHead className="min-w-[180px]">{t("org:positions.name")}</TableHead>
               <TableHead className="w-[120px]">{t("org:positions.code")}</TableHead>
-              <TableHead className="w-[80px]">{t("org:positions.level")}</TableHead>
               <TableHead className="w-[100px]">{t("common:status")}</TableHead>
               <DataTableActionsHead className="min-w-[140px]">{t("common:actions")}</DataTableActionsHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {isLoading ? (
-              <DataTableLoadingRow colSpan={5} />
+              <DataTableLoadingRow colSpan={4} />
             ) : items.length === 0 ? (
               <DataTableEmptyRow
-                colSpan={5}
+                colSpan={4}
                 icon={Briefcase}
                 title={t("org:positions.empty")}
                 description={canCreate ? t("org:positions.emptyHint") : undefined}
@@ -137,7 +136,6 @@ export function Component() {
                 <TableRow key={item.id}>
                   <TableCell className="font-medium">{item.name}</TableCell>
                   <TableCell className="text-sm text-muted-foreground">{item.code}</TableCell>
-                  <TableCell className="text-sm">{item.level}</TableCell>
                   <TableCell>
                     <Badge variant={item.isActive ? "default" : "secondary"}>
                       {item.isActive ? t("org:positions.active") : t("org:positions.inactive")}

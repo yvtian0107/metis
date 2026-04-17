@@ -5,11 +5,13 @@ package itsm
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
 	"github.com/cucumber/godog"
 
+	"metis/internal/app/ai"
 	"metis/internal/app/itsm/engine"
 	"metis/internal/model"
 )
@@ -17,6 +19,7 @@ import (
 // registerDeterministicSteps registers all deterministic smart engine step definitions.
 func registerDeterministicSteps(sc *godog.ScenarioContext, bc *bddContext) {
 	// Given
+	sc.Given(`^已基于静态工作流发布 VPN 开通服务（智能引擎）$`, bc.givenStaticSmartServicePublished)
 	sc.Given(`^引擎已配置兜底处理人为已停用用户$`, bc.givenFallbackAssigneeInactive)
 
 	// When
@@ -38,6 +41,77 @@ func registerDeterministicSteps(sc *godog.ScenarioContext, bc *bddContext) {
 }
 
 // --- Given steps ---
+
+// givenStaticSmartServicePublished creates a smart service with a static workflow JSON,
+// bypassing LLM generation. Deterministic tests only use ExecuteConfirmedPlan, so the
+// workflow content doesn't matter — we just need valid service + ticket records.
+func (bc *bddContext) givenStaticSmartServicePublished() error {
+	// Static workflow — minimal but valid structure.
+	staticWorkflow := json.RawMessage(`{
+		"nodes": [
+			{"id": "start", "type": "start", "label": "开始"},
+			{"id": "approval", "type": "approve", "label": "审批", "config": {"participant_type": "position_department", "position_code": "network_admin", "department_code": "it"}},
+			{"id": "end", "type": "end", "label": "结束"}
+		],
+		"edges": [
+			{"source": "start", "target": "approval"},
+			{"source": "approval", "target": "end", "condition": "approved"}
+		]
+	}`)
+
+	catalog := &ServiceCatalog{
+		Name:     "VPN服务(智能-确定性)",
+		Code:     "vpn-smart-deterministic",
+		IsActive: true,
+	}
+	if err := bc.db.Create(catalog).Error; err != nil {
+		return fmt.Errorf("create service catalog: %w", err)
+	}
+
+	priority := &Priority{
+		Name:     "普通",
+		Code:     "normal-smart-det",
+		Value:    3,
+		Color:    "#52c41a",
+		IsActive: true,
+	}
+	if err := bc.db.Create(priority).Error; err != nil {
+		return fmt.Errorf("create priority: %w", err)
+	}
+	bc.priority = priority
+
+	agent := &ai.Agent{
+		Name:         "流程决策智能体(确定性)",
+		Type:         "assistant",
+		IsActive:     true,
+		Visibility:   "private",
+		Strategy:     "react",
+		SystemPrompt: "确定性测试用智能体",
+		Temperature:  0.2,
+		MaxTokens:    2048,
+		MaxTurns:     1,
+		CreatedBy:    1,
+	}
+	if err := bc.db.Create(agent).Error; err != nil {
+		return fmt.Errorf("create agent: %w", err)
+	}
+
+	svc := &ServiceDefinition{
+		Name:              "VPN开通申请(智能-确定性)",
+		Code:              "vpn-activation-smart-det",
+		CatalogID:         catalog.ID,
+		EngineType:        "smart",
+		WorkflowJSON:      JSONField(staticWorkflow),
+		CollaborationSpec: vpnCollaborationSpec,
+		AgentID:           &agent.ID,
+		IsActive:          true,
+	}
+	if err := bc.db.Create(svc).Error; err != nil {
+		return fmt.Errorf("create service definition: %w", err)
+	}
+	bc.service = svc
+	return nil
+}
 
 func (bc *bddContext) givenFallbackAssigneeInactive() error {
 	// Create a user then deactivate it (GORM default:true on IsActive skips false on Create).

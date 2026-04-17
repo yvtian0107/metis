@@ -10,7 +10,7 @@ Feature: VPN 开通申请 — 智能引擎确定性覆盖
       | 网络管理员审批人   | network-operator   | it   | network_admin  |
       | 安全管理员审批人   | security-operator  | it   | security_admin |
     And 已定义 VPN 开通申请协作规范
-    And 已基于协作规范发布 VPN 开通服务（智能引擎）
+    And 已基于静态工作流发布 VPN 开通服务（智能引擎）
 
   Scenario: process 类型决策创建处理活动并指派参与者
     Given "vpn-requester" 已创建 VPN 工单，访问原因为 "network_support"

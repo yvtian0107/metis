@@ -146,6 +146,15 @@ type UserPositionResponse struct {
 	Position     *PositionResponse   `json:"position,omitempty"`
 }
 
+// DepartmentPosition 部门可用职位关联
+type DepartmentPosition struct {
+	model.BaseModel
+	DepartmentID uint `json:"departmentId" gorm:"not null;uniqueIndex:idx_dept_pos"`
+	PositionID   uint `json:"positionId" gorm:"not null;uniqueIndex:idx_dept_pos"`
+}
+
+func (DepartmentPosition) TableName() string { return "department_positions" }
+
 type AssignmentItem struct {
 	UserID       uint      `json:"userId"`
 	Username     string    `json:"username"`

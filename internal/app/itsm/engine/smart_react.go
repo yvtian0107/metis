@@ -15,17 +15,17 @@ import (
 // The agent queries context on-demand via decision tools instead of receiving
 // all information upfront, enabling scalable multi-step reasoning.
 func (e *SmartEngine) agenticDecision(ctx context.Context, tx *gorm.DB, ticketID uint, svc *serviceModel) (*DecisionPlan, error) {
-	if svc.AgentID == nil {
-		return nil, fmt.Errorf("service has no bound agent")
-	}
-
-	agentCfg, err := e.agentProvider.GetAgentConfig(*svc.AgentID)
+	agentCfg, err := e.agentProvider.GetAgentConfigByCode("itsm.decision")
 	if err != nil {
-		return nil, fmt.Errorf("get agent config: %w", err)
+		return nil, fmt.Errorf("get decision agent config: %w", err)
 	}
 
 	// Build initial seed messages
-	systemMsg, userMsg, err := e.buildInitialSeed(tx, ticketID, svc, agentCfg)
+	var decisionMode string
+	if e.configProvider != nil {
+		decisionMode = e.configProvider.DecisionMode()
+	}
+	systemMsg, userMsg, err := e.buildInitialSeed(tx, ticketID, svc, agentCfg, decisionMode)
 	if err != nil {
 		return nil, fmt.Errorf("build initial seed: %w", err)
 	}
@@ -132,9 +132,9 @@ func executeDecisionTool(
 
 // buildInitialSeed constructs the system and user messages for the agentic decision.
 // The seed is intentionally lightweight — the agent queries detailed context via tools.
-func (e *SmartEngine) buildInitialSeed(tx *gorm.DB, ticketID uint, svc *serviceModel, agentCfg *SmartAgentConfig) (string, string, error) {
+func (e *SmartEngine) buildInitialSeed(tx *gorm.DB, ticketID uint, svc *serviceModel, agentCfg *SmartAgentConfig, decisionMode string) (string, string, error) {
 	// --- System message ---
-	systemMsg := buildAgenticSystemPrompt(svc.CollaborationSpec, agentCfg.SystemPrompt)
+	systemMsg := buildAgenticSystemPrompt(svc.CollaborationSpec, agentCfg.SystemPrompt, decisionMode)
 
 	// --- User message: lightweight ticket snapshot + policy constraints ---
 	var ticket struct {
@@ -192,13 +192,20 @@ func (e *SmartEngine) buildInitialSeed(tx *gorm.DB, ticketID uint, svc *serviceM
 }
 
 // buildAgenticSystemPrompt constructs the system prompt for the agentic decision agent.
-func buildAgenticSystemPrompt(collaborationSpec, agentSystemPrompt string) string {
+func buildAgenticSystemPrompt(collaborationSpec, agentSystemPrompt, decisionMode string) string {
 	prompt := ""
 	if collaborationSpec != "" {
 		prompt += "## 服务处理规范\n\n" + collaborationSpec + "\n\n---\n\n"
 	}
 	if agentSystemPrompt != "" {
 		prompt += "## 角色定义\n\n" + agentSystemPrompt + "\n\n---\n\n"
+	}
+	// DecisionMode prompt injection
+	switch decisionMode {
+	case "ai_only":
+		prompt += "## 决策策略\n\n始终使用 AI 推理决定下一步，不依赖预定义路径。\n\n---\n\n"
+	default: // "direct_first" or empty
+		prompt += "## 决策策略\n\n优先走确定路径（workflow_hints），无法确定时使用 AI 推理。\n\n---\n\n"
 	}
 	prompt += agenticToolGuidance
 	prompt += "\n\n---\n\n"
