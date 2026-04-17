@@ -121,7 +121,7 @@ func (bc *bddContext) reset() {
 	// Build ClassicEngine with test dependencies.
 	orgSvc := &testOrgService{db: db}
 	resolver := engine.NewParticipantResolver(orgSvc)
-	bc.engine = engine.NewClassicEngine(resolver, &noopSubmitter{})
+	bc.engine = engine.NewClassicEngine(resolver, &noopSubmitter{}, nil)
 
 	// Build SmartEngine with test dependencies.
 	agentProvider := &testAgentProvider{db: db, llmCfg: bc.llmCfg}

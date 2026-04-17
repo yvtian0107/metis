@@ -28,11 +28,11 @@
 
 ## 5. 通知集成
 
-- [ ] 5.1 在 `engine/` 包定义 `NotificationSender` 接口：`Send(ctx, channelID uint, subject, body string, recipientIDs []uint) error`
-- [ ] 5.2 `ClassicEngine` 结构体增加 `notifier NotificationSender` 可选字段
-- [ ] 5.3 `handleNotify()` 调用 `notifier.Send()`，失败仅记 timeline warning
-- [ ] 5.4 实现模板变量替换：`{{ticket.code}}`、`{{ticket.status}}`、`{{activity.name}}`、`{{var.xxx}}`
-- [ ] 5.5 `app.go` 中从 IOC 解析 `service.MessageChannelService` 并适配为 NotificationSender 注入
+- [x] 5.1 在 `engine/` 包定义 `NotificationSender` 接口：`Send(ctx, channelID uint, subject, body string, recipientIDs []uint) error`
+- [x] 5.2 `ClassicEngine` 结构体增加 `notifier NotificationSender` 可选字段
+- [x] 5.3 `handleNotify()` 调用 `notifier.Send()`，失败仅记 timeline warning
+- [x] 5.4 实现模板变量替换：`{{ticket.code}}`、`{{ticket.status}}`、`{{activity.name}}`、`{{var.xxx}}`
+- [x] 5.5 `app.go` 中从 IOC 解析 `service.MessageChannelService` 并适配为 NotificationSender 注入
 - [ ] 5.6 单元测试：mock NotificationSender 验证调用参数和失败降级
 
 ## 6. 条件表达式扩展

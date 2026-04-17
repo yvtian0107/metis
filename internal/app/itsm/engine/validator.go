@@ -170,6 +170,16 @@ func ValidateWorkflow(workflowJSON json.RawMessage) []ValidationError {
 		}
 	}
 
+	// 6b. Validate compound conditions on edges
+	for i := range def.Edges {
+		e := &def.Edges[i]
+		if e.Data.Condition != nil {
+			if condErrs := validateGatewayCondition(*e.Data.Condition, e.ID); len(condErrs) > 0 {
+				errs = append(errs, condErrs...)
+			}
+		}
+	}
+
 	// 7. Parallel / Inclusive gateway constraints (④ itsm-gateway-parallel)
 	for i := range def.Nodes {
 		n := &def.Nodes[i]
@@ -424,6 +434,50 @@ func ValidateWorkflow(workflowJSON json.RawMessage) []ValidationError {
 				EdgeID:  se.EdgeID,
 				Level:   se.Level,
 				Message: prefix + se.Message,
+			})
+		}
+	}
+
+	return errs
+}
+
+// validateGatewayCondition recursively validates a gateway condition.
+func validateGatewayCondition(cond GatewayCondition, edgeID string) []ValidationError {
+	var errs []ValidationError
+
+	if cond.Logic != "" {
+		// Compound condition
+		if cond.Logic != "and" && cond.Logic != "or" {
+			errs = append(errs, ValidationError{
+				EdgeID:  edgeID,
+				Level:   "error",
+				Message: fmt.Sprintf("边 %s 的条件 logic 值 %q 不合法，仅支持 and/or", edgeID, cond.Logic),
+			})
+		}
+		if len(cond.Conditions) == 0 {
+			errs = append(errs, ValidationError{
+				EdgeID:  edgeID,
+				Level:   "error",
+				Message: fmt.Sprintf("边 %s 的复合条件（logic=%s）缺少子条件", edgeID, cond.Logic),
+			})
+		}
+		for _, sub := range cond.Conditions {
+			errs = append(errs, validateGatewayCondition(sub, edgeID)...)
+		}
+	} else {
+		// Leaf condition: must have field and operator
+		if cond.Field == "" {
+			errs = append(errs, ValidationError{
+				EdgeID:  edgeID,
+				Level:   "error",
+				Message: fmt.Sprintf("边 %s 的条件缺少 field", edgeID),
+			})
+		}
+		if cond.Operator == "" {
+			errs = append(errs, ValidationError{
+				EdgeID:  edgeID,
+				Level:   "error",
+				Message: fmt.Sprintf("边 %s 的条件缺少 operator", edgeID),
 			})
 		}
 	}

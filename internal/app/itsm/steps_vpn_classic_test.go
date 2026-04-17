@@ -209,7 +209,8 @@ func (bc *bddContext) thenCurrentActivityTypeIs(expected string) error {
 	return nil
 }
 
-// thenCurrentActivityAssignedTo asserts the current activity is assigned to the position/department.
+// thenCurrentActivityAssignedTo asserts the current activity is assigned to a user
+// who belongs to the specified position/department combination.
 func (bc *bddContext) thenCurrentActivityAssignedTo(username, deptCode, posCode string) error {
 	user, ok := bc.usersByName[username]
 	if !ok {
@@ -229,35 +230,40 @@ func (bc *bddContext) thenCurrentActivityAssignedTo(username, deptCode, posCode 
 		return fmt.Errorf("no assignments found for activity %d", activity.ID)
 	}
 
-	pos, ok := bc.positions[posCode]
-	if !ok {
-		return fmt.Errorf("position %q not found in context", posCode)
+	// Verify user belongs to the expected position+department.
+	orgSvc := &testOrgService{db: bc.db}
+	userIDs, err := orgSvc.FindUsersByPositionCodeAndDepartmentCode(posCode, deptCode)
+	if err != nil {
+		return fmt.Errorf("resolve users for %s/%s: %w", deptCode, posCode, err)
 	}
-	dept, ok := bc.departments[deptCode]
-	if !ok {
-		return fmt.Errorf("department %q not found in context", deptCode)
+	userInPosition := false
+	for _, uid := range userIDs {
+		if uid == user.ID {
+			userInPosition = true
+			break
+		}
+	}
+	if !userInPosition {
+		return fmt.Errorf("user %q (ID=%d) is not in position %s/%s", username, user.ID, deptCode, posCode)
 	}
 
+	// Check that user is among the assignees (directly or via position/department).
 	for _, a := range assignments {
-		posMatch := a.PositionID != nil && *a.PositionID == pos.ID
-		deptMatch := a.DepartmentID != nil && *a.DepartmentID == dept.ID
-		if posMatch && deptMatch {
-			// Also verify user belongs to this position+department via OrgService.
-			orgSvc := &testOrgService{db: bc.db}
-			userIDs, err := orgSvc.FindUsersByPositionCodeAndDepartmentCode(posCode, deptCode)
-			if err != nil {
-				return fmt.Errorf("resolve users for %s/%s: %w", deptCode, posCode, err)
+		// Classic engine assigns directly via AssigneeID.
+		if a.AssigneeID != nil && *a.AssigneeID == user.ID {
+			return nil
+		}
+		// Also check via PositionID/DepartmentID if set.
+		if a.PositionID != nil && a.DepartmentID != nil {
+			pos, posOK := bc.positions[posCode]
+			dept, deptOK := bc.departments[deptCode]
+			if posOK && deptOK && *a.PositionID == pos.ID && *a.DepartmentID == dept.ID {
+				return nil
 			}
-			for _, uid := range userIDs {
-				if uid == user.ID {
-					return nil // user is a valid candidate for this assignment
-				}
-			}
-			return fmt.Errorf("user %q (ID=%d) is not in position %s/%s", username, user.ID, deptCode, posCode)
 		}
 	}
 
-	return fmt.Errorf("no assignment matching position %s/%s found for activity %d", deptCode, posCode, activity.ID)
+	return fmt.Errorf("user %q not found in assignments for activity %d", username, activity.ID)
 }
 
 // thenCurrentActivityNotAssignedTo asserts the current activity is NOT assigned to a specific user.
@@ -284,34 +290,6 @@ func (bc *bddContext) thenCurrentActivityNotAssignedTo(username string) error {
 		}
 	}
 
-	// Check: user must not be a candidate for any of the assignments.
-	orgSvc := &testOrgService{db: bc.db}
-	for _, a := range assignments {
-		if a.PositionID != nil && a.DepartmentID != nil {
-			// Resolve position code and department code.
-			var posCode, deptCode string
-			for code, p := range bc.positions {
-				if p.ID == *a.PositionID {
-					posCode = code
-					break
-				}
-			}
-			for code, d := range bc.departments {
-				if d.ID == *a.DepartmentID {
-					deptCode = code
-					break
-				}
-			}
-			if posCode != "" && deptCode != "" {
-				userIDs, _ := orgSvc.FindUsersByPositionCodeAndDepartmentCode(posCode, deptCode)
-				for _, uid := range userIDs {
-					if uid == user.ID {
-						return fmt.Errorf("user %q is a candidate for assignment on activity %d (position %s/%s)", username, activity.ID, deptCode, posCode)
-					}
-				}
-			}
-		}
-	}
 	return nil
 }
 

@@ -65,12 +65,14 @@ type Assignment struct {
 	Expression string `json:"expression"` // expr-lang/expr expression
 }
 
-// GatewayCondition defines a single condition for gateway evaluation.
+// GatewayCondition defines a single or compound condition for gateway evaluation.
 type GatewayCondition struct {
-	Field    string `json:"field"`    // e.g. "ticket.priority", "form.urgency"
-	Operator string `json:"operator"` // equals | not_equals | contains_any | gt | lt | gte | lte
-	Value    any    `json:"value"`    // comparison value
-	EdgeID   string `json:"edge_id"`  // the edge this condition maps to
+	Field      string             `json:"field"`                 // e.g. "ticket.priority", "form.urgency"
+	Operator   string             `json:"operator"`              // equals | not_equals | contains_any | gt | lt | gte | lte | in | not_in | is_empty | is_not_empty | between | matches
+	Value      any                `json:"value"`                 // comparison value
+	EdgeID     string             `json:"edge_id"`               // the edge this condition maps to
+	Logic      string             `json:"logic,omitempty"`       // "and" | "or" for compound conditions
+	Conditions []GatewayCondition `json:"conditions,omitempty"`  // sub-conditions for compound evaluation
 }
 
 // ParseWorkflowDef parses workflow JSON into a WorkflowDef.

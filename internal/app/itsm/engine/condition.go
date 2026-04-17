@@ -3,6 +3,7 @@ package engine
 import (
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -91,8 +92,46 @@ func deserializeVarValue(raw string, valueType string) any {
 	}
 }
 
-// evaluateCondition checks a single exclusive gateway condition against the context.
+// evaluateCondition checks a single or compound gateway condition against the context.
 func evaluateCondition(cond GatewayCondition, ctx evalContext) bool {
+	// Compound condition: recursively evaluate sub-conditions
+	if cond.Logic != "" && len(cond.Conditions) > 0 {
+		switch cond.Logic {
+		case "and":
+			for _, sub := range cond.Conditions {
+				if !evaluateCondition(sub, ctx) {
+					return false
+				}
+			}
+			return true
+		case "or":
+			for _, sub := range cond.Conditions {
+				if evaluateCondition(sub, ctx) {
+					return true
+				}
+			}
+			return false
+		default:
+			return false
+		}
+	}
+
+	// Operators that don't need the field to exist
+	switch cond.Operator {
+	case "is_empty":
+		fieldVal, exists := ctx[cond.Field]
+		if !exists {
+			return true
+		}
+		return isEmpty(fieldVal)
+	case "is_not_empty":
+		fieldVal, exists := ctx[cond.Field]
+		if !exists {
+			return false
+		}
+		return !isEmpty(fieldVal)
+	}
+
 	fieldVal, exists := ctx[cond.Field]
 	if !exists {
 		return false
@@ -113,6 +152,14 @@ func evaluateCondition(cond GatewayCondition, ctx evalContext) bool {
 		return compareNumeric(fieldVal, cond.Value) >= 0
 	case "lte":
 		return compareNumeric(fieldVal, cond.Value) <= 0
+	case "in":
+		return inSet(fieldVal, cond.Value)
+	case "not_in":
+		return !inSet(fieldVal, cond.Value)
+	case "between":
+		return betweenRange(fieldVal, cond.Value)
+	case "matches":
+		return matchesRegex(fieldVal, cond.Value)
 	default:
 		return false
 	}
@@ -179,4 +226,68 @@ func toFloat64(v any) float64 {
 	default:
 		return 0
 	}
+}
+
+// isEmpty returns true if the value is nil, empty string, or zero numeric value.
+func isEmpty(v any) bool {
+	if v == nil {
+		return true
+	}
+	switch val := v.(type) {
+	case string:
+		return val == ""
+	case float64:
+		return val == 0
+	case int:
+		return val == 0
+	case bool:
+		return !val
+	default:
+		return fmt.Sprintf("%v", v) == ""
+	}
+}
+
+// inSet returns true if fieldVal exactly matches any element in condVal (array).
+func inSet(fieldVal, condVal any) bool {
+	fieldStr := fmt.Sprintf("%v", fieldVal)
+	switch v := condVal.(type) {
+	case []any:
+		for _, item := range v {
+			if fieldStr == fmt.Sprintf("%v", item) {
+				return true
+			}
+		}
+	case []string:
+		for _, item := range v {
+			if fieldStr == item {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// betweenRange checks if fieldVal is between condVal[0] and condVal[1] (inclusive, numeric).
+func betweenRange(fieldVal, condVal any) bool {
+	arr, ok := condVal.([]any)
+	if !ok || len(arr) != 2 {
+		return false
+	}
+	fv := toFloat64(fieldVal)
+	min := toFloat64(arr[0])
+	max := toFloat64(arr[1])
+	return fv >= min && fv <= max
+}
+
+// matchesRegex checks if fieldVal matches the regex pattern in condVal.
+func matchesRegex(fieldVal, condVal any) bool {
+	pattern, ok := condVal.(string)
+	if !ok {
+		return false
+	}
+	re, err := regexp.Compile(pattern)
+	if err != nil {
+		return false
+	}
+	return re.MatchString(fmt.Sprintf("%v", fieldVal))
 }

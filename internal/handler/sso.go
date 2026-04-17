@@ -29,6 +29,7 @@ type SSOHandler struct {
 	authSvc               *service.AuthService
 	stateMgr              *identity.SSOStateManager
 	getOIDCProvider       func(ctx context.Context, sourceID uint, cfg *model.OIDCConfig) (oidcProvider, error)
+	extractClaims         func(idToken *gooidc.IDToken) (*identity.OIDCClaims, error)
 	provisionExternalUser func(params service.ExternalUserParams) (*model.User, error)
 	generateTokenPair     func(user *model.User, ip, ua string) (*service.TokenPair, error)
 }
@@ -38,6 +39,13 @@ func (h *SSOHandler) resolveOIDCProvider(ctx context.Context, sourceID uint, cfg
 		return h.getOIDCProvider(ctx, sourceID, cfg)
 	}
 	return identity.GetOIDCProvider(ctx, sourceID, cfg)
+}
+
+func (h *SSOHandler) resolveExtractClaims(idToken *gooidc.IDToken) (*identity.OIDCClaims, error) {
+	if h.extractClaims != nil {
+		return h.extractClaims(idToken)
+	}
+	return identity.ExtractClaims(idToken)
 }
 
 func (h *SSOHandler) resolveProvisionExternalUser(params service.ExternalUserParams) (*model.User, error) {
@@ -207,7 +215,7 @@ func (h *SSOHandler) SSOCallback(c *gin.Context) {
 		return
 	}
 
-	claims, err := identity.ExtractClaims(idToken)
+	claims, err := h.resolveExtractClaims(idToken)
 	if err != nil {
 		Fail(c, http.StatusInternalServerError, "failed to extract claims")
 		return
