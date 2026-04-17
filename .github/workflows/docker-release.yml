@@ -63,9 +63,6 @@ jobs:
             type=match,pattern=\w+/v(.*),group=1
             type=raw,value=latest
 
-      - name: Setup QEMU
-        uses: docker/setup-qemu-action@v3
-
       - name: Setup Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -80,7 +77,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/amd64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
