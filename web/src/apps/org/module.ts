@@ -15,6 +15,10 @@ registerApp({
           index: true,
           lazy: () => import("./pages/departments/index"),
         },
+        {
+          path: ":id",
+          lazy: () => import("./pages/departments/[id]"),
+        },
       ],
     },
     {
@@ -28,12 +32,10 @@ registerApp({
     },
     {
       path: "org/assignments",
-      children: [
-        {
-          index: true,
-          lazy: () => import("./pages/assignments/index"),
-        },
-      ],
+      lazy: async () => {
+        const { redirect } = await import("react-router")
+        return { loader: () => redirect("/org/departments") }
+      },
     },
   ],
 })

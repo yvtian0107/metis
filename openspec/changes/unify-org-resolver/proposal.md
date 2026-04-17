@@ -1,34 +1,37 @@
 ## Why
 
-三个 Org 相关接口散落在不同包中（`app.OrgScopeResolver`、`app.OrgUserResolver`、`ai.OrgResolver`），各自定义了部分组织查询能力。AI App 里还承载了本属于 Org 模块的 `org_context` 工具定义和 handler。同时 App Seed 顺序依赖 Go import 顺序，当前 Org 排在最后，而 AI 和 ITSM 实际上依赖 Org 的数据和服务。需要统一接口、理清 seed 顺序、让工具归属到正确的模块。
+组织管理（Org）的查询能力分散在 4 套接口中（`app.OrgResolver`、`engine.OrgService`、旧 `app.OrgUserResolver`、旧 `ai.OrgResolver`），导致：ITSM `validate_participants` 直接 JOIN 4 张 org 表绕过所有抽象；`ParticipantResolver.orgService` 在生产环境始终为 nil，position/department/manager 类型的参与人解析全部失败；同一领域概念的接口和实现散布在 3 个 App 中。
+
+前一轮重构已将 DataScope + ID 映射 + 富上下文查询合并为 `app.OrgResolver`，并将 `organization.org_context` 工具迁入 Org App。但 "按组织条件找人" 的能力仍然缺失，`engine.OrgService` 接口仍然存在且未接通。
 
 ## What Changes
 
-- **合并三个 Org 接口为统一的 `app.OrgResolver`**：将 `OrgScopeResolver`（DataScope）、`OrgUserResolver`（ITSM 参与者匹配）、`ai.OrgResolver`（AI 工具）合并为一个接口，DTO 类型统一定义在 `app` 包
-- **将 `org_context` 工具移至 Org App**：Org App 实现 `ToolRegistryProvider`，拥有 `organization.org_context` 的 seed 记录和 handler 实现
-- **AI App 清理**：删除 `ai.OrgResolver` 接口及全部 Org DTO，删除 `org_context` handler 和 seed 记录，`GeneralToolRegistry` 改用 `app.OrgResolver`
-- **调整 App Seed 顺序**：`edition_full.go` import 顺序改为 `org → ai → itsm`，确保依赖方在被依赖方之后初始化
-- **Org App 合并 Resolver 实现**：`OrgScopeResolverImpl` + `OrgUserResolverImpl` 合并为 `OrgResolverImpl`，新增 `QueryContext` 等方法实现
+- 扩展 `app.OrgResolver` 接口，新增 5 个 "找人" 方法：`FindUsersByPositionCode`、`FindUsersByPositionAndDepartment`、`FindUsersByPositionID`、`FindUsersByDepartmentID`、`FindManagerByUserID`
+- `OrgResolverImpl` 实现这 5 个方法（基于 Org App 已有的 AssignmentRepo/DB 查询）
+- **BREAKING**（仅内部）：删除 `engine.OrgService` 接口，`ParticipantResolver` 改为直接消费 `app.OrgResolver`
+- ITSM `app.go` 正确注入 `app.OrgResolver` 到 `ParticipantResolver`（不再 nil）
+- ITSM `operator.go` 的 `ValidateParticipants` 从 raw SQL 改为调用 `app.OrgResolver` 方法
+- ITSM `ticket_service.go` 从旧 `app.OrgUserResolver`（已删除）迁移到 `app.OrgResolver`
 
 ## Capabilities
 
 ### New Capabilities
 
-- `org-tool-registry`: Org App 作为 ToolRegistryProvider，注册并处理 `organization.org_context` 工具调用
+（无新能力——本次是既有接口的归一和接通）
 
 ### Modified Capabilities
 
-- `org-scope-resolver`: 合并为统一 `app.OrgResolver` 接口，增加 AI 工具所需的查询方法
-- `ai-tool-registry`: 移除 org_context 工具定义和 handler，GeneralToolRegistry 改用 `app.OrgResolver`
-- `seed-init`: 调整 edition_full.go 的 import 顺序以反映模块间 seed 依赖
+- `org-scope-resolver`: 扩展 OrgResolver 接口，新增 5 个按组织条件查找用户的方法
+- `itsm-smart-engine`: ParticipantResolver 从 engine.OrgService 迁移到 app.OrgResolver，接通生产环境
+- `itsm-service-desk-toolkit`: validate_participants 工具从 raw SQL 改为通过 OrgResolver 接口调用
 
 ## Impact
 
-- **`internal/app/app.go`**：删除 `OrgScopeResolver` 和 `OrgUserResolver`，新增统一 `OrgResolver` 接口 + DTO 类型
-- **`internal/app/org/`**：合并 resolver 实现，新增 ToolRegistryProvider，seed 中新增 org_context BuiltinTool
-- **`internal/app/ai/`**：删除 Org 相关接口/DTO/handler/seed，调整 GeneralToolRegistry 依赖
-- **`internal/app/itsm/`**：引用从 `app.OrgUserResolver` 改为 `app.OrgResolver`
-- **`internal/middleware/data_scope.go`**：引用从 `app.OrgScopeResolver` 改为 `app.OrgResolver`
-- **`internal/handler/handler.go`**：同上
-- **`cmd/server/edition_full.go`**：import 顺序调整
-- **无 API 变更，无前端变更，无数据库迁移**
+- **后端 internal/app/app.go**: OrgResolver 接口扩展（5 个新方法）
+- **后端 internal/app/org/**: OrgResolverImpl 实现新方法
+- **后端 internal/app/itsm/engine/**: 删除 OrgService 接口，ParticipantResolver 改用 app.OrgResolver
+- **后端 internal/app/itsm/tools/**: Operator 接收 OrgResolver 依赖，消除 raw SQL
+- **后端 internal/app/itsm/app.go**: IOC 注入接通
+- **后端 internal/app/itsm/ticket_service.go**: 迁移到新接口
+- **测试 internal/app/itsm/steps_common_test.go**: testOrgService 适配新接口
+- **无前端改动、无 API 改动、无数据库迁移**

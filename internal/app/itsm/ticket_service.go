@@ -41,7 +41,7 @@ type TicketService struct {
 	formDefRepo     *FormDefRepo
 	classicEngine   *engine.ClassicEngine
 	smartEngine     *engine.SmartEngine
-	orgUserResolver app.OrgUserResolver // nil when Org App not installed
+	orgUserResolver app.OrgResolver // nil when Org App not installed
 }
 
 func NewTicketService(i do.Injector) (*TicketService, error) {
@@ -55,11 +55,11 @@ func NewTicketService(i do.Injector) (*TicketService, error) {
 		classicEngine: do.MustInvoke[*engine.ClassicEngine](i),
 		smartEngine:   do.MustInvoke[*engine.SmartEngine](i),
 	}
-	// Optional: resolve OrgUserResolver if Org App is installed
-	resolver, err := do.InvokeAs[app.OrgUserResolver](i)
+	// Optional: resolve OrgResolver if Org App is installed
+	resolver, err := do.InvokeAs[app.OrgResolver](i)
 	if err == nil && resolver != nil {
 		svc.orgUserResolver = resolver
-		slog.Info("ITSM TicketService: OrgUserResolver available for multi-dimensional participant matching")
+		slog.Info("ITSM TicketService: OrgResolver available for multi-dimensional participant matching")
 	}
 	return svc, nil
 }

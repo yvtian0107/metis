@@ -12,6 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Slider } from "@/components/ui/slider"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import {
+  type AgentItem,
   type EngineConfigUpdate,
   fetchEngineConfig,
   updateEngineConfig,
@@ -20,7 +21,42 @@ import {
   fetchAgents,
 } from "../../api"
 
-// Provider → Model → Temperature fields (no Card wrapper) — used only by Generator
+type ConfigHealth = "configured" | "unconfigured" | "error"
+
+function ConfigStatus({ status }: { status: ConfigHealth }) {
+  const { t } = useTranslation("itsm")
+  const styles = {
+    configured: "bg-green-500",
+    unconfigured: "bg-gray-400",
+    error: "bg-red-500",
+  }
+  const labels = {
+    configured: t("engineConfig.statusConfigured"),
+    unconfigured: t("engineConfig.statusUnconfigured"),
+    error: t("engineConfig.statusError"),
+  }
+  return (
+    <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+      <span className={`h-2 w-2 rounded-full ${styles[status]}`} />
+      {labels[status]}
+    </span>
+  )
+}
+
+function AgentPreview({ agent }: { agent: AgentItem | undefined }) {
+  const { t } = useTranslation("itsm")
+  if (!agent) return null
+  const strategyLabel = agent.strategy === "plan_and_execute"
+    ? t("engineConfig.strategyPlanAndExecute")
+    : t("engineConfig.strategyReact")
+  return (
+    <p className="text-xs text-muted-foreground">
+      {t("engineConfig.previewStrategy")}: {strategyLabel} · {t("engineConfig.previewTemperature")}: {agent.temperature.toFixed(2)} · {t("engineConfig.previewMaxTurns")}: {agent.maxTurns}
+    </p>
+  )
+}
+
+// Provider → Model → Temperature fields — used only by Generator
 function LLMFields({
   providerId,
   modelId,
@@ -125,22 +161,19 @@ function LLMFields({
   )
 }
 
-// Agent selector field — used by Servicedesk & Decision
+// Agent selector with preview — used by Servicedesk & Decision
 function AgentField({
   agentId,
+  agents,
   onAgentChange,
 }: {
   agentId: number
+  agents: AgentItem[]
   onAgentChange: (id: number) => void
 }) {
   const { t } = useTranslation("itsm")
   const navigate = useNavigate()
-
-  const { data: agents = [] } = useQuery({
-    queryKey: ["ai-agents-for-engine"],
-    queryFn: fetchAgents,
-    select: (list) => list.filter((a) => a.type === "assistant" && a.isActive),
-  })
+  const selectedAgent = agentId ? agents.find((a) => a.id === agentId) : undefined
 
   if (agents.length === 0) {
     return (
@@ -157,25 +190,35 @@ function AgentField({
   }
 
   return (
-    <div className="space-y-1.5">
-      <Label>{t("engineConfig.agent")}</Label>
-      <Select
-        value={agentId ? String(agentId) : ""}
-        onValueChange={(v) => onAgentChange(Number(v))}
-      >
-        <SelectTrigger>
-          <SelectValue placeholder={t("engineConfig.agentPlaceholder")} />
-        </SelectTrigger>
-        <SelectContent>
-          {agents.map((a) => (
-            <SelectItem key={a.id} value={String(a.id)}>
-              {a.name}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
+    <div className="space-y-2">
+      <div className="space-y-1.5">
+        <Label>{t("engineConfig.agent")}</Label>
+        <Select
+          value={agentId ? String(agentId) : ""}
+          onValueChange={(v) => onAgentChange(Number(v))}
+        >
+          <SelectTrigger>
+            <SelectValue placeholder={t("engineConfig.agentPlaceholder")} />
+          </SelectTrigger>
+          <SelectContent>
+            {agents.map((a) => (
+              <SelectItem key={a.id} value={String(a.id)}>
+                {a.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+      <AgentPreview agent={selectedAgent} />
     </div>
   )
+}
+
+function useAgentHealth(agentId: number, agents: AgentItem[]): ConfigHealth {
+  if (agentId === 0) return "unconfigured"
+  const agent = agents.find((a) => a.id === agentId)
+  if (!agent || !agent.isActive) return "error"
+  return "configured"
 }
 
 export function Component() {
@@ -185,6 +228,12 @@ export function Component() {
   const { data: config, isLoading } = useQuery({
     queryKey: ["itsm-engine-config"],
     queryFn: fetchEngineConfig,
+  })
+
+  const { data: agents = [] } = useQuery({
+    queryKey: ["ai-agents-for-engine"],
+    queryFn: fetchAgents,
+    select: (list) => list.filter((a) => a.type === "assistant" && a.isActive),
   })
 
   // Local form state — generator
@@ -225,6 +274,10 @@ export function Component() {
     onError: (err) => toast.error(err.message),
   })
 
+  const generatorHealth: ConfigHealth = genModelId > 0 ? "configured" : "unconfigured"
+  const sdHealth = useAgentHealth(sdAgentId, agents)
+  const decHealth = useAgentHealth(decAgentId, agents)
+
   function handleSave() {
     saveMut.mutate({
       generator: { modelId: genModelId, temperature: genTemp },
@@ -258,7 +311,10 @@ export function Component() {
       {/* Generator Engine */}
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">{t("itsm:engineConfig.generatorTitle")}</CardTitle>
+          <div className="flex items-center justify-between">
+            <CardTitle className="text-base">{t("itsm:engineConfig.generatorTitle")}</CardTitle>
+            <ConfigStatus status={generatorHealth} />
+          </div>
           <CardDescription>{t("itsm:engineConfig.generatorDesc")}</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -273,44 +329,54 @@ export function Component() {
         </CardContent>
       </Card>
 
-      {/* Servicedesk Agent */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">{t("itsm:engineConfig.servicedeskTitle")}</CardTitle>
-          <CardDescription>{t("itsm:engineConfig.servicedeskDesc")}</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <AgentField agentId={sdAgentId} onAgentChange={setSdAgentId} />
-        </CardContent>
-      </Card>
+      {/* Servicedesk & Decision — two-column */}
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+        <Card>
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-base">{t("itsm:engineConfig.servicedeskTitle")}</CardTitle>
+              <ConfigStatus status={sdHealth} />
+            </div>
+            <CardDescription>{t("itsm:engineConfig.servicedeskDesc")}</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <AgentField agentId={sdAgentId} agents={agents} onAgentChange={setSdAgentId} />
+          </CardContent>
+        </Card>
 
-      {/* Decision Agent */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">{t("itsm:engineConfig.decisionTitle")}</CardTitle>
-          <CardDescription>{t("itsm:engineConfig.decisionDesc")}</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <AgentField agentId={decAgentId} onAgentChange={setDecAgentId} />
-          <div className="space-y-1.5">
-            <Label>{t("itsm:engineConfig.decisionMode")}</Label>
-            <Select value={decisionMode} onValueChange={setDecisionMode}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="direct_first">{t("itsm:engineConfig.modeDirectFirst")}</SelectItem>
-                <SelectItem value="ai_only">{t("itsm:engineConfig.modeAiOnly")}</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-        </CardContent>
-      </Card>
+        <Card>
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-base">{t("itsm:engineConfig.decisionTitle")}</CardTitle>
+              <ConfigStatus status={decHealth} />
+            </div>
+            <CardDescription>{t("itsm:engineConfig.decisionDesc")}</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <AgentField agentId={decAgentId} agents={agents} onAgentChange={setDecAgentId} />
+            <div className="space-y-1.5">
+              <Label>{t("itsm:engineConfig.decisionMode")}</Label>
+              <Select value={decisionMode} onValueChange={setDecisionMode}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="direct_first">{t("itsm:engineConfig.modeDirectFirst")}</SelectItem>
+                  <SelectItem value="ai_only">{t("itsm:engineConfig.modeAiOnly")}</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
 
       {/* General Settings */}
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">{t("itsm:engineConfig.generalTitle")}</CardTitle>
+          <div className="flex items-center justify-between">
+            <CardTitle className="text-base">{t("itsm:engineConfig.generalTitle")}</CardTitle>
+            <ConfigStatus status="configured" />
+          </div>
           <CardDescription>{t("itsm:engineConfig.generalDesc")}</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">

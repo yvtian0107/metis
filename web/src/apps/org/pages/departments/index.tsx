@@ -1,61 +1,29 @@
-"use client"
-
 import { useState, useMemo, useEffect } from "react"
 import { useTranslation } from "react-i18next"
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { Plus, Search, Pencil, Trash2, Network, ChevronRight } from "lucide-react"
+import { useQuery } from "@tanstack/react-query"
+import { useNavigate } from "react-router"
+import { Plus, Search, Network, ChevronRight } from "lucide-react"
 import { usePermission } from "@/hooks/use-permission"
 import { api } from "@/lib/api"
-import { toast } from "sonner"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import {
-  DataTableActions,
-  DataTableActionsCell,
-  DataTableActionsHead,
   DataTableCard,
   DataTableEmptyRow,
   DataTableLoadingRow,
 } from "@/components/ui/data-table"
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
+  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table"
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from "@/components/ui/alert-dialog"
+import type { TreeNode } from "../../types"
+import { collectAllIds } from "../../types"
 import { DepartmentSheet, type DepartmentItem } from "../../components/department-sheet"
 
-interface TreeNode extends DepartmentItem {
-  children?: TreeNode[]
-}
-
-interface FlatNode extends DepartmentItem {
+interface FlatNode extends TreeNode {
   depth: number
   hasChildren: boolean
-}
-
-function collectAllIds(nodes: TreeNode[]): number[] {
-  const ids: number[] = []
-  for (const n of nodes) {
-    ids.push(n.id)
-    if (n.children) ids.push(...collectAllIds(n.children))
-  }
-  return ids
 }
 
 function flattenTree(nodes: TreeNode[] | undefined, depth: number): FlatNode[] {
@@ -73,15 +41,13 @@ function flattenTree(nodes: TreeNode[] | undefined, depth: number): FlatNode[] {
 
 export function Component() {
   const { t } = useTranslation(["org", "common"])
-  const queryClient = useQueryClient()
+  const navigate = useNavigate()
   const [formOpen, setFormOpen] = useState(false)
   const [editing, setEditing] = useState<DepartmentItem | null>(null)
   const [keyword, setKeyword] = useState("")
   const [expanded, setExpanded] = useState<Set<number>>(new Set())
 
   const canCreate = usePermission("org:department:create")
-  const canUpdate = usePermission("org:department:update")
-  const canDelete = usePermission("org:department:delete")
 
   const { data, isLoading } = useQuery({
     queryKey: ["departments", "tree"],
@@ -110,22 +76,8 @@ export function Component() {
     )
   }, [flatItems, keyword])
 
-  const deleteMutation = useMutation({
-    mutationFn: (id: number) => api.delete(`/api/v1/org/departments/${id}`),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["departments", "tree"] })
-      toast.success(t("org:departments.deleteSuccess"))
-    },
-    onError: (err) => toast.error(err.message),
-  })
-
   function handleCreate() {
     setEditing(null)
-    setFormOpen(true)
-  }
-
-  function handleEdit(item: DepartmentItem) {
-    setEditing(item)
     setFormOpen(true)
   }
 
@@ -144,8 +96,12 @@ export function Component() {
       const hasChildren = node.children && node.children.length > 0
       const isExpanded = expanded.has(node.id)
       rows.push(
-        <TableRow key={node.id} className="group">
-          <TableCell className="min-w-[180px]">
+        <TableRow
+          key={node.id}
+          className="group cursor-pointer"
+          onClick={() => navigate(`/org/departments/${node.id}`)}
+        >
+          <TableCell className="min-w-[200px]">
             <div className="flex items-center gap-1" style={{ paddingLeft: `${depth * 24}px` }}>
               {hasChildren ? (
                 <button
@@ -154,7 +110,10 @@ export function Component() {
                     "w-5 h-5 flex items-center justify-center rounded-sm text-muted-foreground hover:text-foreground transition-colors duration-200",
                     isExpanded && "bg-accent/40"
                   )}
-                  onClick={() => toggleExpand(node.id)}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    toggleExpand(node.id)
+                  }}
                 >
                   <ChevronRight
                     className={cn(
@@ -169,51 +128,23 @@ export function Component() {
               <span className="font-medium">{node.name}</span>
             </div>
           </TableCell>
-          <TableCell className="w-[120px] text-sm text-muted-foreground">{node.code}</TableCell>
-          <TableCell className="w-[120px] text-sm text-muted-foreground">{node.managerName || "-"}</TableCell>
-          <TableCell className="w-[100px]">
+          <TableCell className="w-[100px] text-sm text-muted-foreground">{node.code}</TableCell>
+          <TableCell className="w-[120px] text-sm text-muted-foreground">{node.managerName || "—"}</TableCell>
+          <TableCell className="w-[80px]">
+            {node.memberCount > 0 && (
+              <span className="rounded-full bg-muted px-2 py-0.5 text-xs font-medium tabular-nums text-muted-foreground">
+                {node.memberCount}
+              </span>
+            )}
+          </TableCell>
+          <TableCell className="w-[80px]">
             <Badge variant={node.isActive ? "default" : "secondary"}>
               {node.isActive ? t("org:departments.active") : t("org:departments.inactive")}
             </Badge>
           </TableCell>
-          <DataTableActionsCell>
-            <DataTableActions>
-              {canUpdate && (
-                <Button variant="ghost" size="sm" className="px-2.5" onClick={() => handleEdit(node)}>
-                  <Pencil className="mr-1 h-3.5 w-3.5" />
-                  {t("common:edit")}
-                </Button>
-              )}
-              {canDelete && (
-                <AlertDialog>
-                  <AlertDialogTrigger asChild>
-                    <Button variant="ghost" size="sm" className="px-2.5 text-destructive hover:text-destructive">
-                      <Trash2 className="mr-1 h-3.5 w-3.5" />
-                      {t("common:delete")}
-                    </Button>
-                  </AlertDialogTrigger>
-                  <AlertDialogContent>
-                    <AlertDialogHeader>
-                      <AlertDialogTitle>{t("org:departments.deleteTitle")}</AlertDialogTitle>
-                      <AlertDialogDescription>
-                        {t("org:departments.deleteDesc", { name: node.name })}
-                      </AlertDialogDescription>
-                    </AlertDialogHeader>
-                    <AlertDialogFooter>
-                      <AlertDialogCancel size="sm">{t("common:cancel")}</AlertDialogCancel>
-                      <AlertDialogAction
-                        size="sm"
-                        onClick={() => deleteMutation.mutate(node.id)}
-                        disabled={deleteMutation.isPending}
-                      >
-                        {t("org:departments.confirmDelete")}
-                      </AlertDialogAction>
-                    </AlertDialogFooter>
-                  </AlertDialogContent>
-                </AlertDialog>
-              )}
-            </DataTableActions>
-          </DataTableActionsCell>
+          <TableCell className="w-[40px]">
+            <ChevronRight className="h-4 w-4 text-muted-foreground/50 transition-colors group-hover:text-foreground" />
+          </TableCell>
         </TableRow>
       )
       if (hasChildren && isExpanded) {
@@ -264,19 +195,20 @@ export function Component() {
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead className="min-w-[180px]">{t("org:departments.name")}</TableHead>
-              <TableHead className="w-[120px]">{t("org:departments.code")}</TableHead>
+              <TableHead className="min-w-[200px]">{t("org:departments.name")}</TableHead>
+              <TableHead className="w-[100px]">{t("org:departments.code")}</TableHead>
               <TableHead className="w-[120px]">{t("org:departments.manager")}</TableHead>
-              <TableHead className="w-[100px]">{t("common:status")}</TableHead>
-              <DataTableActionsHead className="min-w-[140px]">{t("common:actions")}</DataTableActionsHead>
+              <TableHead className="w-[80px]">{t("org:departments.members")}</TableHead>
+              <TableHead className="w-[80px]">{t("common:status")}</TableHead>
+              <TableHead className="w-[40px]" />
             </TableRow>
           </TableHeader>
           <TableBody>
             {isLoading ? (
-              <DataTableLoadingRow colSpan={5} />
+              <DataTableLoadingRow colSpan={6} />
             ) : treeData.length === 0 ? (
               <DataTableEmptyRow
-                colSpan={5}
+                colSpan={6}
                 icon={Network}
                 title={t("org:departments.empty")}
                 description={canCreate ? t("org:departments.emptyHint") : undefined}
@@ -284,68 +216,40 @@ export function Component() {
             ) : filtered ? (
               filtered.length === 0 ? (
                 <DataTableEmptyRow
-                  colSpan={5}
+                  colSpan={6}
                   icon={Network}
                   title={t("org:departments.empty")}
                 />
               ) : (
                 filtered.map((item) => (
-                  <TableRow key={item.id}>
-                    <TableCell className="min-w-[180px]">
+                  <TableRow
+                    key={item.id}
+                    className="group cursor-pointer"
+                    onClick={() => navigate(`/org/departments/${item.id}`)}
+                  >
+                    <TableCell className="min-w-[200px]">
                       <div className="flex items-center gap-1" style={{ paddingLeft: `${item.depth * 24}px` }}>
-                        {item.hasChildren ? (
-                          <span className="w-5" />
-                        ) : (
-                          <span className="w-5" />
-                        )}
+                        <span className="w-5" />
                         <span className="font-medium">{item.name}</span>
                       </div>
                     </TableCell>
-                    <TableCell className="w-[120px] text-sm text-muted-foreground">{item.code}</TableCell>
-                    <TableCell className="w-[120px] text-sm text-muted-foreground">{item.managerName || "-"}</TableCell>
-                    <TableCell className="w-[100px]">
+                    <TableCell className="w-[100px] text-sm text-muted-foreground">{item.code}</TableCell>
+                    <TableCell className="w-[120px] text-sm text-muted-foreground">{item.managerName || "—"}</TableCell>
+                    <TableCell className="w-[80px]">
+                      {item.memberCount > 0 && (
+                        <span className="rounded-full bg-muted px-2 py-0.5 text-xs font-medium tabular-nums text-muted-foreground">
+                          {item.memberCount}
+                        </span>
+                      )}
+                    </TableCell>
+                    <TableCell className="w-[80px]">
                       <Badge variant={item.isActive ? "default" : "secondary"}>
                         {item.isActive ? t("org:departments.active") : t("org:departments.inactive")}
                       </Badge>
                     </TableCell>
-                    <DataTableActionsCell>
-                      <DataTableActions>
-                        {canUpdate && (
-                          <Button variant="ghost" size="sm" className="px-2.5" onClick={() => handleEdit(item)}>
-                            <Pencil className="mr-1 h-3.5 w-3.5" />
-                            {t("common:edit")}
-                          </Button>
-                        )}
-                        {canDelete && (
-                          <AlertDialog>
-                            <AlertDialogTrigger asChild>
-                              <Button variant="ghost" size="sm" className="px-2.5 text-destructive hover:text-destructive">
-                                <Trash2 className="mr-1 h-3.5 w-3.5" />
-                                {t("common:delete")}
-                              </Button>
-                            </AlertDialogTrigger>
-                            <AlertDialogContent>
-                              <AlertDialogHeader>
-                                <AlertDialogTitle>{t("org:departments.deleteTitle")}</AlertDialogTitle>
-                                <AlertDialogDescription>
-                                  {t("org:departments.deleteDesc", { name: item.name })}
-                                </AlertDialogDescription>
-                              </AlertDialogHeader>
-                              <AlertDialogFooter>
-                                <AlertDialogCancel size="sm">{t("common:cancel")}</AlertDialogCancel>
-                                <AlertDialogAction
-                                  size="sm"
-                                  onClick={() => deleteMutation.mutate(item.id)}
-                                  disabled={deleteMutation.isPending}
-                                >
-                                  {t("org:departments.confirmDelete")}
-                                </AlertDialogAction>
-                              </AlertDialogFooter>
-                            </AlertDialogContent>
-                          </AlertDialog>
-                        )}
-                      </DataTableActions>
-                    </DataTableActionsCell>
+                    <TableCell className="w-[40px]">
+                      <ChevronRight className="h-4 w-4 text-muted-foreground/50 transition-colors group-hover:text-foreground" />
+                    </TableCell>
                   </TableRow>
                 ))
               )

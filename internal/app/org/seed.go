@@ -35,12 +35,12 @@ func seedOrg(db *gorm.DB, enforcer *casbin.Enforcer, install bool) error {
 		slog.Info("seed: created menu", "name", orgDir.Name, "permission", orgDir.Permission)
 	}
 
-	// 部门管理 menu
+	// 部门管理 menu (renamed to 组织架构)
 	var deptMenu model.Menu
 	if err := db.Where("permission = ?", "org:department:list").First(&deptMenu).Error; err != nil {
 		deptMenu = model.Menu{
 			ParentID:   &orgDir.ID,
-			Name:       "部门管理",
+			Name:       "组织架构",
 			Type:       model.MenuTypeMenu,
 			Path:       "/org/departments",
 			Icon:       "Network",
@@ -51,6 +51,9 @@ func seedOrg(db *gorm.DB, enforcer *casbin.Enforcer, install bool) error {
 			return err
 		}
 		slog.Info("seed: created menu", "name", deptMenu.Name, "permission", deptMenu.Permission)
+	} else if deptMenu.Name == "部门管理" {
+		db.Model(&deptMenu).Update("name", "组织架构")
+		slog.Info("seed: renamed menu", "old", "部门管理", "new", "组织架构")
 	}
 
 	deptButtons := []model.Menu{
@@ -105,39 +108,14 @@ func seedOrg(db *gorm.DB, enforcer *casbin.Enforcer, install bool) error {
 		}
 	}
 
-	// 人员分配 menu
+	// 人员分配 menu — removed from UI (merged into department detail page)
+	// Soft-delete if it exists from a previous install
 	var assignMenu model.Menu
-	if err := db.Where("permission = ?", "org:assignment:list").First(&assignMenu).Error; err != nil {
-		assignMenu = model.Menu{
-			ParentID:   &orgDir.ID,
-			Name:       "人员分配",
-			Type:       model.MenuTypeMenu,
-			Path:       "/org/assignments",
-			Icon:       "UserCog",
-			Permission: "org:assignment:list",
-			Sort:       2,
-		}
-		if err := db.Create(&assignMenu).Error; err != nil {
-			return err
-		}
-		slog.Info("seed: created menu", "name", assignMenu.Name, "permission", assignMenu.Permission)
-	}
-
-	assignButtons := []model.Menu{
-		{Name: "分配岗位", Type: model.MenuTypeButton, Permission: "org:assignment:create", Sort: 0},
-		{Name: "编辑分配", Type: model.MenuTypeButton, Permission: "org:assignment:update", Sort: 1},
-		{Name: "移除分配", Type: model.MenuTypeButton, Permission: "org:assignment:delete", Sort: 2},
-	}
-	for _, btn := range assignButtons {
-		var existing model.Menu
-		if err := db.Where("permission = ?", btn.Permission).First(&existing).Error; err != nil {
-			btn.ParentID = &assignMenu.ID
-			if err := db.Create(&btn).Error; err != nil {
-				slog.Error("seed: failed to create button menu", "permission", btn.Permission, "error", err)
-				continue
-			}
-			slog.Info("seed: created menu", "name", btn.Name, "permission", btn.Permission)
-		}
+	if err := db.Where("permission = ?", "org:assignment:list").First(&assignMenu).Error; err == nil {
+		db.Delete(&assignMenu)
+		// Also remove child buttons
+		db.Where("parent_id = ?", assignMenu.ID).Delete(&model.Menu{})
+		slog.Info("seed: removed assignment menu (merged into department detail)")
 	}
 
 	// 2. Seed Casbin policies for admin role
@@ -201,6 +179,26 @@ func seedOrg(db *gorm.DB, enforcer *casbin.Enforcer, install bool) error {
 		}
 		if err := seedDepartmentPositions(db); err != nil {
 			return err
+		}
+	}
+
+	// Seed org_context builtin tool into ai_tools (if AI App tables exist)
+	if db.Migrator().HasTable("ai_tools") {
+		var count int64
+		db.Table("ai_tools").Where("name = ?", "organization.org_context").Count(&count)
+		if count == 0 {
+			if err := db.Table("ai_tools").Create(map[string]any{
+				"toolkit":           "organization",
+				"name":              "organization.org_context",
+				"display_name":      "组织架构查询",
+				"description":       "读取人员、部门、岗位关系信息，用于流程决策和参与者解析。支持按用户名、部门代码、岗位代码筛选。",
+				"parameters_schema": `{"type":"object","properties":{"username":{"type":"string","description":"按用户名查询"},"department_code":{"type":"string","description":"按部门代码筛选"},"position_code":{"type":"string","description":"按岗位代码筛选"},"include_inactive":{"type":"boolean","description":"是否包含停用记录，默认 false"}}}`,
+				"is_active":         true,
+			}).Error; err != nil {
+				slog.Warn("seed: failed to create org_context tool", "error", err)
+			} else {
+				slog.Info("seed: created org_context builtin tool")
+			}
 		}
 	}
 

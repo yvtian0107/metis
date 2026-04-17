@@ -646,6 +646,10 @@ export interface AgentItem {
   type: string
   visibility: string
   isActive: boolean
+  strategy: string
+  temperature: number
+  maxTurns: number
+  modelId: number
 }
 
 export function fetchAgents() {

@@ -286,6 +286,7 @@ func SeedAgents(db *gorm.DB) error {
 17. 对无法解析为具体时间点的表达（如"尽快""随时""越快越好"），禁止将 general.current_time 的返回时间或任何猜测时间作为该字段的值；该字段必须置为空，禁止调用 itsm.draft_prepare，直接向用户说明需要填写具体时间范围，等待用户给出明确时间后再继续。
 18. 在调用 itsm.draft_confirm 之后、itsm.ticket_create 之前，必须先调用 itsm.validate_participants(service_id, form_data) 校验审批参与者是否可达。若返回 ok=false，应将 failure_reason 告知用户，不允许继续调用 itsm.ticket_create
 19. 当 itsm.ticket_create 返回 ok=true 时，工单已成功创建，直接向用户展示工单号和当前状态即可
+20. 如果 itsm.draft_confirm 返回含"字段已变更"的错误，说明管理员在你对话期间修改了服务表单定义。此时必须重新调用 itsm.service_load 获取最新表单定义，再根据新定义调用 itsm.draft_prepare 重新准备草稿；若新增了必填字段，向用户追问后再继续
 
 对用户说话时，请优先做到：先理解、再澄清、再推进；该回答时就自然回答，该收单时再严格收单，让用户感到你在认真协助他，而不是在机械执行脚本。`,
 			ToolNames: []string{

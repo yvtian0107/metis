@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"log"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -57,13 +58,21 @@ func (m *memStateStore) SaveState(sessionID uint, state *tools.ServiceDeskState)
 // dialogTestState holds the state for a single dialog validation scenario.
 type dialogTestState struct {
 	toolCalls    []toolCallRecord
+	toolResults  []toolResultRecord
 	finalContent string
 	userMessage  string
+	mutateDraft  bool // flag: mutate form fields after draft_prepare
 }
 
 type toolCallRecord struct {
 	Name string
 	Args json.RawMessage
+}
+
+type toolResultRecord struct {
+	Name    string
+	Output  string
+	IsError bool
 }
 
 // ---------------------------------------------------------------------------
@@ -149,6 +158,7 @@ func setupDialogTest(bc *bddContext) (func(ctx context.Context, userMsg string) 
 
 		// Collect events.
 		bc.dialogState.toolCalls = nil
+		bc.dialogState.toolResults = nil
 		bc.dialogState.finalContent = ""
 		var contentParts []string
 
@@ -166,6 +176,11 @@ func setupDialogTest(bc *bddContext) (func(ctx context.Context, userMsg string) 
 					preview = preview[:500] + "..."
 				}
 				log.Printf("[BDD-DIALOG] tool_result: %s output=%s", evt.ToolName, preview)
+				bc.dialogState.toolResults = append(bc.dialogState.toolResults, toolResultRecord{
+					Name:    evt.ToolName,
+					Output:  evt.ToolOutput,
+					IsError: strings.HasPrefix(evt.ToolOutput, "Error:"),
+				})
 			case ai.EventTypeContentDelta:
 				contentParts = append(contentParts, evt.Text)
 			case ai.EventTypeError:
@@ -201,6 +216,17 @@ func getToolCallArgs(calls []toolCallRecord, name string) json.RawMessage {
 		}
 	}
 	return nil
+}
+
+// toolCallCount returns the number of times a tool was called.
+func toolCallCount(calls []toolCallRecord, name string) int {
+	n := 0
+	for _, c := range calls {
+		if c.Name == name {
+			n++
+		}
+	}
+	return n
 }
 
 // ---------------------------------------------------------------------------
@@ -435,6 +461,27 @@ func (bc *bddContext) thenResponseNotMatches(pattern string) error {
 	return nil
 }
 
+func (bc *bddContext) thenToolCalledAtLeast(toolName string, minCount int) error {
+	actual := toolCallCount(bc.dialogState.toolCalls, toolName)
+	if actual < minCount {
+		names := make([]string, len(bc.dialogState.toolCalls))
+		for i, c := range bc.dialogState.toolCalls {
+			names[i] = c.Name
+		}
+		return fmt.Errorf("expected %q called >= %d times, got %d; calls: %v", toolName, minCount, actual, names)
+	}
+	return nil
+}
+
+// thenToolCalledAtLeastParsed parses the min count from string (for godog step).
+func (bc *bddContext) thenToolCalledAtLeastParsed(toolName string, minCountStr string) error {
+	n, err := strconv.Atoi(minCountStr)
+	if err != nil {
+		return fmt.Errorf("invalid count %q: %w", minCountStr, err)
+	}
+	return bc.thenToolCalledAtLeast(toolName, n)
+}
+
 // ---------------------------------------------------------------------------
 // Registration
 // ---------------------------------------------------------------------------
@@ -448,4 +495,5 @@ func registerDialogValidationSteps(sc *godog.ScenarioContext, bc *bddContext) {
 	sc.Then(`^draft_prepare 的路由字段为单值$`, bc.thenDraftPrepareCalledWithSingleRouteValue)
 	sc.Then(`^回复内容匹配 "([^"]*)"$`, bc.thenResponseMatches)
 	sc.Then(`^回复内容不匹配 "([^"]*)"$`, bc.thenResponseNotMatches)
+	sc.Then(`^"([^"]*)" 被调用至少 (\d+) 次$`, bc.thenToolCalledAtLeastParsed)
 }

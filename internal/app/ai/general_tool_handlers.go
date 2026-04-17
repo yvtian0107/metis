@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"time"
+
+	"metis/internal/app"
 )
 
 // GeneralToolHandler is the function signature for general tool implementations.
@@ -31,75 +33,18 @@ type GeneralUserInfo struct {
 	ManagerUsername string `json:"managerUsername,omitempty"`
 }
 
-// OrgResolver provides organization context. Returns nil if Org App is not installed.
-type OrgResolver interface {
-	GetUserPositions(userID uint) ([]OrgPosition, error)
-	GetUserDepartment(userID uint) (*OrgDepartment, error)
-	QueryContext(username, deptCode, positionCode string, includeInactive bool) (*OrgContextResult, error)
-}
-
-// OrgDepartment represents a department in the organization.
-type OrgDepartment struct {
-	ID   uint   `json:"id"`
-	Code string `json:"code"`
-	Name string `json:"name"`
-}
-
-// OrgPosition represents a position held by a user.
-type OrgPosition struct {
-	ID        uint   `json:"id"`
-	Code      string `json:"code"`
-	Name      string `json:"name"`
-	IsPrimary bool   `json:"is_primary"`
-}
-
-// OrgContextResult is the full result from an org context query.
-type OrgContextResult struct {
-	Users       []OrgContextUser       `json:"users"`
-	Departments []OrgContextDepartment `json:"departments"`
-	Positions   []OrgContextPosition   `json:"positions"`
-	Summary     string                 `json:"summary"`
-}
-
-// OrgContextUser represents a user in the org context result.
-type OrgContextUser struct {
-	ID         uint           `json:"id"`
-	Username   string         `json:"username"`
-	Email      string         `json:"email"`
-	Department *OrgDepartment `json:"department,omitempty"`
-	Positions  []OrgPosition  `json:"positions,omitempty"`
-	IsActive   bool           `json:"is_active"`
-}
-
-// OrgContextDepartment represents a department in the org context result.
-type OrgContextDepartment struct {
-	ID         uint   `json:"id"`
-	Code       string `json:"code"`
-	Name       string `json:"name"`
-	ParentCode string `json:"parent_code,omitempty"`
-	IsActive   bool   `json:"is_active"`
-}
-
-// OrgContextPosition represents a position in the org context result.
-type OrgContextPosition struct {
-	ID       uint   `json:"id"`
-	Code     string `json:"code"`
-	Name     string `json:"name"`
-	IsActive bool   `json:"is_active"`
-}
-
 // --- Registry ---
 
 // GeneralToolRegistry manages and dispatches general tool handlers.
 type GeneralToolRegistry struct {
 	handlers    map[string]GeneralToolHandler
 	userFinder  UserFinder
-	orgResolver OrgResolver
+	orgResolver app.OrgResolver
 }
 
 // NewGeneralToolRegistry creates a new registry with the given dependencies.
 // orgResolver may be nil if the Org App is not installed.
-func NewGeneralToolRegistry(userFinder UserFinder, orgResolver OrgResolver) *GeneralToolRegistry {
+func NewGeneralToolRegistry(userFinder UserFinder, orgResolver app.OrgResolver) *GeneralToolRegistry {
 	r := &GeneralToolRegistry{
 		handlers:    make(map[string]GeneralToolHandler),
 		userFinder:  userFinder,
@@ -108,7 +53,6 @@ func NewGeneralToolRegistry(userFinder UserFinder, orgResolver OrgResolver) *Gen
 
 	r.handlers["general.current_time"] = r.handleCurrentTime
 	r.handlers["system.current_user_profile"] = r.handleCurrentUserProfile
-	r.handlers["organization.org_context"] = r.handleOrgContext
 
 	return r
 }
@@ -178,10 +122,10 @@ func (r *GeneralToolRegistry) handleCurrentTime(_ context.Context, _ uint, args 
 // --- Handler: system.current_user_profile ---
 
 type userProfileResult struct {
-	User          *GeneralUserInfo `json:"user"`
-	Department    *OrgDepartment   `json:"department,omitempty"`
-	Positions     []OrgPosition    `json:"positions,omitempty"`
-	MissingFields []string         `json:"missing_fields,omitempty"`
+	User          *GeneralUserInfo   `json:"user"`
+	Department    *app.OrgDepartment `json:"department,omitempty"`
+	Positions     []app.OrgPosition  `json:"positions,omitempty"`
+	MissingFields []string           `json:"missing_fields,omitempty"`
 }
 
 func (r *GeneralToolRegistry) handleCurrentUserProfile(_ context.Context, userID uint, _ json.RawMessage) (json.RawMessage, error) {
@@ -214,41 +158,6 @@ func (r *GeneralToolRegistry) handleCurrentUserProfile(_ context.Context, userID
 		if len(missingFields) > 0 {
 			result.MissingFields = missingFields
 		}
-	}
-
-	return json.Marshal(result)
-}
-
-// --- Handler: organization.org_context ---
-
-type orgContextArgs struct {
-	Username       string `json:"username"`
-	DepartmentCode string `json:"department_code"`
-	PositionCode   string `json:"position_code"`
-	IncludeInactive bool  `json:"include_inactive"`
-}
-
-func (r *GeneralToolRegistry) handleOrgContext(_ context.Context, _ uint, args json.RawMessage) (json.RawMessage, error) {
-	var params orgContextArgs
-	if len(args) > 0 {
-		if err := json.Unmarshal(args, &params); err != nil {
-			return nil, fmt.Errorf("invalid arguments: %w", err)
-		}
-	}
-
-	if r.orgResolver == nil {
-		fallback := OrgContextResult{
-			Users:       []OrgContextUser{},
-			Departments: []OrgContextDepartment{},
-			Positions:   []OrgContextPosition{},
-			Summary:     "组织管理模块未安装",
-		}
-		return json.Marshal(fallback)
-	}
-
-	result, err := r.orgResolver.QueryContext(params.Username, params.DepartmentCode, params.PositionCode, params.IncludeInactive)
-	if err != nil {
-		return nil, fmt.Errorf("org context query failed: %w", err)
 	}
 
 	return json.Marshal(result)

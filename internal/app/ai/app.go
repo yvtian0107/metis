@@ -98,8 +98,7 @@ func (a *AIApp) Providers(i do.Injector) {
 		userFinder := &userFinderAdapter{userSvc: userSvc}
 
 		// OrgResolver is optional (Org App may not be installed)
-		var orgResolver OrgResolver
-		// TODO: wire OrgResolver adapter when Org App provides the interface
+		orgResolver, _ := do.InvokeAs[app.OrgResolver](i)
 
 		return NewGeneralToolRegistry(userFinder, orgResolver), nil
 	})

@@ -20,7 +20,7 @@ type RoleScopeGetter func(roleCode string) (model.DataScope, []uint, error)
 //
 // The middleware is nil-safe: if resolver is nil (Org App not installed) the
 // middleware always sets deptScope = nil regardless of the role's DataScope field.
-func DataScopeMiddleware(resolver app.OrgScopeResolver, getScopeForRole RoleScopeGetter) gin.HandlerFunc {
+func DataScopeMiddleware(resolver app.OrgResolver, getScopeForRole RoleScopeGetter) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userIDVal, _ := c.Get("userId")
 		userID, _ := userIDVal.(uint)

@@ -545,7 +545,15 @@
     "logOff": "Off",
     "saveSuccess": "Engine configuration saved",
     "noProviders": "No AI Providers configured. Please add one in the AI module first.",
-    "goToProviders": "Go to Providers"
+    "goToProviders": "Go to Providers",
+    "statusConfigured": "Configured",
+    "statusUnconfigured": "Not configured",
+    "statusError": "Error",
+    "previewStrategy": "Strategy",
+    "previewTemperature": "Temp",
+    "previewMaxTurns": "Max turns",
+    "strategyReact": "ReAct",
+    "strategyPlanAndExecute": "Plan & Execute"
   },
   "generate": {
     "button": "Parse Workflow",

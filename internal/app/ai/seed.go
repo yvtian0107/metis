@@ -332,22 +332,6 @@ func seedAI(db *gorm.DB, enforcer *casbin.Enforcer) error {
 			}`),
 			IsActive: true,
 		},
-		{
-			Toolkit:     "general",
-			Name:        "organization.org_context",
-			DisplayName: "组织架构查询",
-			Description: "读取人员、部门、岗位关系信息，用于流程决策和参与者解析。支持按用户名、部门代码、岗位代码筛选。",
-			ParametersSchema: model.JSONText(`{
-				"type": "object",
-				"properties": {
-					"username": {"type": "string", "description": "按用户名查询"},
-					"department_code": {"type": "string", "description": "按部门代码筛选"},
-					"position_code": {"type": "string", "description": "按岗位代码筛选"},
-					"include_inactive": {"type": "boolean", "description": "是否包含停用记录，默认 false"}
-				}
-			}`),
-			IsActive: true,
-		},
 	}
 	for _, tool := range builtinTools {
 		var existing Tool

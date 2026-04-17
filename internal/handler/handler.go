@@ -34,8 +34,8 @@ type Handler struct {
 	identitySource *IdentitySourceHandler
 	sso            *SSOHandler
 	// DataScope dependencies
-	orgScopeResolver app.OrgScopeResolver
-	roleRepo         *repository.RoleRepo
+	orgResolver app.OrgResolver
+	roleRepo    *repository.RoleRepo
 }
 
 func New(i do.Injector) (*Handler, error) {
@@ -61,8 +61,8 @@ func New(i do.Injector) (*Handler, error) {
 	identitySvc := do.MustInvoke[*service.IdentitySourceService](i)
 	jwtSecret := do.MustInvoke[[]byte](i)
 
-	// OrgScopeResolver is optional (nil when Org App not installed)
-	orgResolver, _ := do.InvokeAs[app.OrgScopeResolver](i)
+	// OrgResolver is optional (nil when Org App not installed)
+	orgResolver, _ := do.InvokeAs[app.OrgResolver](i)
 
 	return &Handler{
 		sysCfg:      sysCfg,
@@ -95,8 +95,8 @@ func New(i do.Injector) (*Handler, error) {
 			authSvc:  authSvc,
 			stateMgr: identity.NewSSOStateManager(),
 		},
-		orgScopeResolver: orgResolver,
-		roleRepo:         roleRepo,
+		orgResolver: orgResolver,
+		roleRepo:    roleRepo,
 	}, nil
 }
 
@@ -124,7 +124,7 @@ func (h *Handler) Register(r *gin.Engine, jwtSecret []byte, enforcer *casbin.Enf
 	authed.Use(middleware.JWTAuth(jwtSecret, blacklist))
 	authed.Use(middleware.PasswordExpiry(h.settingsSvc.GetPasswordExpiryDays))
 	authed.Use(middleware.CasbinAuth(enforcer))
-	authed.Use(middleware.DataScopeMiddleware(h.orgScopeResolver, h.roleRepo.GetScopeByCode))
+	authed.Use(middleware.DataScopeMiddleware(h.orgResolver, h.roleRepo.GetScopeByCode))
 	authed.Use(middleware.Audit(h.auditSvc))
 	{
 		// Auth routes (whitelisted in CasbinAuth)

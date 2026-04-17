@@ -87,8 +87,8 @@ func (a *ITSMApp) Providers(i do.Injector) {
 	do.Provide(i, func(i do.Injector) (*engine.ParticipantResolver, error) {
 		// Try to resolve OrgService (optional — nil if Org App not installed)
 		var orgSvc engine.OrgService
-		// Org App provides OrgScopeResolver; we don't have a direct OrgService interface yet,
-		// so for now the resolver starts with nil (user type and requester_manager basic support)
+		// Org App provides OrgResolver; for ParticipantResolver we need engine.OrgService
+		// which is not yet wired (user type and requester_manager basic support)
 		return engine.NewParticipantResolver(orgSvc), nil
 	})
 

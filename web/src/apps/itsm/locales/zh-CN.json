@@ -545,7 +545,15 @@
     "logOff": "关闭",
     "saveSuccess": "引擎配置已保存",
     "noProviders": "尚未配置 AI Provider，请先前往 AI 模块添加",
-    "goToProviders": "前往配置"
+    "goToProviders": "前往配置",
+    "statusConfigured": "已配置",
+    "statusUnconfigured": "未配置",
+    "statusError": "异常",
+    "previewStrategy": "策略",
+    "previewTemperature": "温度",
+    "previewMaxTurns": "上限",
+    "strategyReact": "ReAct",
+    "strategyPlanAndExecute": "计划执行"
   },
   "generate": {
     "button": "解析工作流",

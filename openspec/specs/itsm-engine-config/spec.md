@@ -74,7 +74,11 @@
 
 #### Scenario: 页面加载
 - **WHEN** 管理员进入 `/itsm/engine-config` 页面
-- **THEN** 系统 SHALL 调用 `GET /api/v1/itsm/engine/config` 加载配置，调用 `GET /api/v1/ai/providers` 加载 Provider 列表（用于 generator），调用 `GET /api/v1/ai/agents` 加载 Agent 列表（用于 servicedesk/decision）
+- **THEN** 系统 SHALL 调用 `GET /api/v1/itsm/engine/config` 加载配置，调用 `GET /api/v1/ai/providers` 加载 Provider 列表（用于 generator），调用 `GET /api/v1/ai/agents` 加载 Agent 列表（用于 servicedesk/decision 的下拉选择及预览信息）
+
+#### Scenario: 两列布局 — 智能体卡片
+- **WHEN** 页面加载完成且视口宽度 >= md 断点
+- **THEN** 系统 SHALL 将服务台智能体和决策智能体两个配置卡片在同一行以 `grid grid-cols-1 md:grid-cols-2` 两列布局展示，解析引擎和通用设置保持全宽单列
 
 #### Scenario: 服务台智能体配置卡片
 - **WHEN** 页面加载完成
@@ -83,6 +87,26 @@
 #### Scenario: 决策智能体配置卡片
 - **WHEN** 页面加载完成
 - **THEN** 系统 SHALL 展示"决策智能体"配置卡片，包含 Agent 下拉选择器（同上筛选条件）、决策模式选择，描述为"工单运行时流程决策所使用的智能体"
+
+#### Scenario: 智能体预览信息
+- **WHEN** 服务台或决策卡片中已选择一个智能体
+- **THEN** 系统 SHALL 在下拉选择器下方展示该智能体的摘要信息，包含策略（strategy）、温度（temperature）、最大轮次（maxTurns），以 `text-xs text-muted-foreground` 样式单行展示，字段间以 `·` 分隔
+
+#### Scenario: 智能体预览 — 未选择时
+- **WHEN** 服务台或决策卡片中未选择智能体（agentId 为 0）
+- **THEN** 系统 SHALL 不展示预览信息
+
+#### Scenario: 配置状态指示器 — 已配置
+- **WHEN** 卡片对应的配置已正确设置（智能体 agentId > 0 且该智能体存在于 agent 列表且 isActive=true；生成引擎 modelId > 0）
+- **THEN** 系统 SHALL 在卡片标题右侧展示 `bg-green-500` 圆点（h-2 w-2 rounded-full）及"已配置"文字标签
+
+#### Scenario: 配置状态指示器 — 未配置
+- **WHEN** 卡片对应的配置未设置（agentId 或 modelId 为 0）
+- **THEN** 系统 SHALL 在卡片标题右侧展示 `bg-gray-400` 圆点及"未配置"文字标签
+
+#### Scenario: 配置状态指示器 — 异常
+- **WHEN** 卡片已配置的智能体在 agent 列表中不存在或 isActive=false
+- **THEN** 系统 SHALL 在卡片标题右侧展示 `bg-red-500` 圆点及"异常"文字标签
 
 #### Scenario: Provider-Model 联动（仅 Generator）
 - **WHEN** 管理员在解析引擎区块选择 AI 服务商（Provider）

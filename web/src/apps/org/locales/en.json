@@ -1,6 +1,6 @@
 {
   "departments": {
-    "title": "Departments",
+    "title": "Organization",
     "create": "New Department",
     "edit": "Edit Department",
     "name": "Name",
@@ -28,7 +28,15 @@
     "noManager": "No Manager",
     "allowedPositions": "Allowed Positions",
     "selectPositions": "Select allowed positions",
-    "positionsSelected": "{{count}} positions selected"
+    "positionsSelected": "{{count}} positions selected",
+    "members": "Members",
+    "memberCount_label": "{{count}} members",
+    "subDepartments": "Sub-departments",
+    "managePositions": "Manage",
+    "noPositions": "No positions configured",
+    "createdAt": "Created At",
+    "parentDept": "Parent Department",
+    "topLevel": "Top Level"
   },
   "positions": {
     "title": "Positions",

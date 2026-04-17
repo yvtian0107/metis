@@ -4,10 +4,11 @@ import (
 	"testing"
 )
 
-func TestOrgScopeResolverImpl_GetUserDeptScope(t *testing.T) {
+func TestOrgResolverImpl_GetUserDeptScope(t *testing.T) {
 	db := newOrgTestDB(t)
 	svc := newAssignmentService(db)
-	resolver := &OrgScopeResolverImpl{svc: svc}
+	repo := &AssignmentRepo{db: db}
+	resolver := &OrgResolverImpl{svc: svc, repo: repo, db: db.DB}
 
 	role := seedRole(t, db, "user")
 	parent := seedDepartment(t, db, "Parent", "parent", nil, nil, true)
@@ -36,10 +37,11 @@ func TestOrgScopeResolverImpl_GetUserDeptScope(t *testing.T) {
 	}
 }
 
-func TestOrgUserResolverImpl_GetUserPositionIDs(t *testing.T) {
+func TestOrgResolverImpl_GetUserPositionIDs(t *testing.T) {
 	db := newOrgTestDB(t)
 	repo := &AssignmentRepo{db: db}
-	resolver := &OrgUserResolverImpl{repo: repo}
+	svc := newAssignmentService(db)
+	resolver := &OrgResolverImpl{svc: svc, repo: repo, db: db.DB}
 
 	role := seedRole(t, db, "user")
 	dept1 := seedDepartment(t, db, "Engineering", "eng", nil, nil, true)
@@ -59,10 +61,11 @@ func TestOrgUserResolverImpl_GetUserPositionIDs(t *testing.T) {
 	}
 }
 
-func TestOrgUserResolverImpl_GetUserDepartmentIDs(t *testing.T) {
+func TestOrgResolverImpl_GetUserDepartmentIDs(t *testing.T) {
 	db := newOrgTestDB(t)
 	repo := &AssignmentRepo{db: db}
-	resolver := &OrgUserResolverImpl{repo: repo}
+	svc := newAssignmentService(db)
+	resolver := &OrgResolverImpl{svc: svc, repo: repo, db: db.DB}
 
 	role := seedRole(t, db, "user")
 	dept1 := seedDepartment(t, db, "Engineering", "eng", nil, nil, true)

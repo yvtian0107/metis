@@ -1,17 +1,14 @@
-import { useEffect, useState } from "react"
+import { useEffect } from "react"
 import { useForm } from "react-hook-form"
 import { useTranslation } from "react-i18next"
 import { z } from "zod"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { Check, ChevronsUpDown, X } from "lucide-react"
 import { api } from "@/lib/api"
 import { toast } from "sonner"
-import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
-import { Badge } from "@/components/ui/badge"
 import {
   Sheet,
   SheetContent,
@@ -35,19 +32,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover"
-import {
-  Command,
-  CommandEmpty,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-  CommandList,
-} from "@/components/ui/command"
 
 const ROOT_VALUE = "__root__"
 const NONE_VALUE = "__none__"
@@ -75,12 +59,6 @@ interface UserOption {
   username: string
 }
 
-interface PositionOption {
-  id: number
-  name: string
-  code: string
-}
-
 function useDepartmentSchema() {
   const { t } = useTranslation("org")
   return z.object({
@@ -105,18 +83,6 @@ export function DepartmentSheet({ open, onOpenChange, department }: DepartmentSh
   const queryClient = useQueryClient()
   const isEditing = department !== null
   const schema = useDepartmentSchema()
-  const [posPopoverOpen, setPosPopoverOpen] = useState(false)
-  // Track a "generation" to know when to discard local position overrides.
-  // Incremented on each sheet open, so derived state falls back to query data.
-  const [generation, setGeneration] = useState(0)
-  const [posOverrideGen, setPosOverrideGen] = useState<{ gen: number; ids: number[] } | null>(null)
-
-  function handleOpenChange(nextOpen: boolean) {
-    if (nextOpen) {
-      setGeneration((g) => g + 1)
-    }
-    onOpenChange(nextOpen)
-  }
 
   const form = useForm<FormValues>({
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -142,28 +108,6 @@ export function DepartmentSheet({ open, onOpenChange, department }: DepartmentSh
     enabled: open,
   })
 
-  const { data: allPositions = [] } = useQuery({
-    queryKey: ["positions", "all"],
-    queryFn: async () => {
-      const res = await api.get<{ items: PositionOption[] }>("/api/v1/org/positions", { page: 1, pageSize: 1000 })
-      return res.items ?? []
-    },
-    enabled: open,
-  })
-
-  const { data: currentAllowedPositions } = useQuery({
-    queryKey: ["departments", department?.id, "positions"],
-    queryFn: async () => {
-      const res = await api.get<{ items: PositionOption[] }>(`/api/v1/org/departments/${department!.id}/positions`)
-      return res.items ?? []
-    },
-    enabled: open && isEditing,
-  })
-
-  // Derive selected position IDs from query data; use local override after user interaction
-  const selectedPositionIds = (posOverrideGen?.gen === generation ? posOverrideGen.ids : null)
-    ?? (currentAllowedPositions?.map((p) => p.id) ?? [])
-
   useEffect(() => {
     if (open) {
       if (department) {
@@ -182,16 +126,13 @@ export function DepartmentSheet({ open, onOpenChange, department }: DepartmentSh
 
   const createMutation = useMutation({
     mutationFn: async (values: FormValues) => {
-      const res = await api.post<{ id: number }>("/api/v1/org/departments", {
+      await api.post("/api/v1/org/departments", {
         name: values.name,
         code: values.code,
         parentId: values.parentId && values.parentId !== ROOT_VALUE ? Number(values.parentId) : null,
         managerId: values.managerId && values.managerId !== NONE_VALUE ? Number(values.managerId) : null,
         description: values.description,
       })
-      if (selectedPositionIds.length > 0 && res.id) {
-        await api.put(`/api/v1/org/departments/${res.id}/positions`, { positionIds: selectedPositionIds })
-      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["departments"] })
@@ -210,7 +151,6 @@ export function DepartmentSheet({ open, onOpenChange, department }: DepartmentSh
         managerId: values.managerId && values.managerId !== NONE_VALUE ? Number(values.managerId) : null,
         description: values.description,
       })
-      await api.put(`/api/v1/org/departments/${department!.id}/positions`, { positionIds: selectedPositionIds })
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["departments"] })
@@ -228,13 +168,6 @@ export function DepartmentSheet({ open, onOpenChange, department }: DepartmentSh
     }
   }
 
-  function togglePosition(posId: number) {
-    const current = (posOverrideGen?.gen === generation ? posOverrideGen.ids : null)
-      ?? (currentAllowedPositions?.map((p) => p.id) ?? [])
-    const next = current.includes(posId) ? current.filter((id) => id !== posId) : [...current, posId]
-    setPosOverrideGen({ gen: generation, ids: next })
-  }
-
   // Flatten tree options for Select, excluding current node and its descendants when editing
   const flatOptions: { value: string; label: string; depth: number }[] = []
   function flatten(nodes: TreeNode[] | undefined, depth: number) {
@@ -250,7 +183,7 @@ export function DepartmentSheet({ open, onOpenChange, department }: DepartmentSh
   const isPending = createMutation.isPending || updateMutation.isPending
 
   return (
-    <Sheet open={open} onOpenChange={handleOpenChange}>
+    <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent className="sm:max-w-lg">
         <SheetHeader>
           <SheetTitle>
@@ -338,71 +271,6 @@ export function DepartmentSheet({ open, onOpenChange, department }: DepartmentSh
                 </FormItem>
               )}
             />
-            <FormItem>
-              <FormLabel>{t("org:departments.allowedPositions")}</FormLabel>
-              <Popover open={posPopoverOpen} onOpenChange={setPosPopoverOpen}>
-                <PopoverTrigger asChild>
-                  <Button
-                    variant="outline"
-                    role="combobox"
-                    aria-expanded={posPopoverOpen}
-                    className="w-full justify-between font-normal"
-                  >
-                    <span className="truncate text-muted-foreground">
-                      {selectedPositionIds.length > 0
-                        ? t("org:departments.positionsSelected", { count: selectedPositionIds.length })
-                        : t("org:departments.selectPositions")}
-                    </span>
-                    <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
-                  <Command>
-                    <CommandInput placeholder={t("org:positions.searchPlaceholder")} />
-                    <CommandList>
-                      <CommandEmpty>{t("org:positions.empty")}</CommandEmpty>
-                      <CommandGroup>
-                        {allPositions.map((pos) => (
-                          <CommandItem
-                            key={pos.id}
-                            value={pos.name}
-                            onSelect={() => togglePosition(pos.id)}
-                          >
-                            <Check
-                              className={cn(
-                                "mr-2 h-4 w-4",
-                                selectedPositionIds.includes(pos.id) ? "opacity-100" : "opacity-0"
-                              )}
-                            />
-                            {pos.name}
-                          </CommandItem>
-                        ))}
-                      </CommandGroup>
-                    </CommandList>
-                  </Command>
-                </PopoverContent>
-              </Popover>
-              {selectedPositionIds.length > 0 && (
-                <div className="flex flex-wrap gap-1 pt-1">
-                  {selectedPositionIds.map((posId) => {
-                    const pos = allPositions.find((p) => p.id === posId)
-                    if (!pos) return null
-                    return (
-                      <Badge key={posId} variant="secondary" className="gap-1">
-                        {pos.name}
-                        <button
-                          type="button"
-                          className="ml-0.5 rounded-full hover:bg-muted"
-                          onClick={() => togglePosition(posId)}
-                        >
-                          <X className="h-3 w-3" />
-                        </button>
-                      </Badge>
-                    )
-                  })}
-                </div>
-              )}
-            </FormItem>
             <FormField
               control={form.control}
               name="description"

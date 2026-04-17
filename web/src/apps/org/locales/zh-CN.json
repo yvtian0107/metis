@@ -1,6 +1,6 @@
 {
   "departments": {
-    "title": "部门管理",
+    "title": "组织架构",
     "create": "新增部门",
     "edit": "编辑部门",
     "name": "部门名称",
@@ -28,7 +28,15 @@
     "noManager": "无负责人",
     "allowedPositions": "可用职位",
     "selectPositions": "选择可用职位",
-    "positionsSelected": "已选 {{count}} 个职位"
+    "positionsSelected": "已选 {{count}} 个职位",
+    "members": "部门成员",
+    "memberCount_label": "{{count}} 人",
+    "subDepartments": "子部门",
+    "managePositions": "管理",
+    "noPositions": "暂无可用岗位",
+    "createdAt": "创建时间",
+    "parentDept": "上级部门",
+    "topLevel": "顶级部门"
   },
   "positions": {
     "title": "岗位管理",

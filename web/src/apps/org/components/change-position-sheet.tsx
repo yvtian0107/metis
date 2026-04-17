@@ -28,7 +28,7 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover"
 import { ChevronsUpDown, Check, X, Star } from "lucide-react"
-import type { MemberPositionItem } from "../pages/assignments/types"
+import type { MemberPositionItem } from "../types"
 
 interface PositionOption {
   id: number
