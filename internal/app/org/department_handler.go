@@ -175,3 +175,56 @@ func (h *DepartmentHandler) Delete(c *gin.Context) {
 	c.Set("audit_summary", "deleted department")
 	handler.OK(c, nil)
 }
+
+type SetAllowedPositionsRequest struct {
+	PositionIDs []uint `json:"positionIds"`
+}
+
+func (h *DepartmentHandler) GetAllowedPositions(c *gin.Context) {
+	id, err := parseID(c)
+	if err != nil {
+		handler.Fail(c, http.StatusBadRequest, "invalid id")
+		return
+	}
+
+	positions, err := h.svc.GetAllowedPositions(id)
+	if err != nil {
+		if errors.Is(err, ErrDepartmentNotFound) {
+			handler.Fail(c, http.StatusNotFound, err.Error())
+			return
+		}
+		handler.Fail(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+	handler.OK(c, gin.H{"items": positions})
+}
+
+func (h *DepartmentHandler) SetAllowedPositions(c *gin.Context) {
+	id, err := parseID(c)
+	if err != nil {
+		handler.Fail(c, http.StatusBadRequest, "invalid id")
+		return
+	}
+
+	var req SetAllowedPositionsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		handler.Fail(c, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	c.Set("audit_action", "org.department.setPositions")
+	c.Set("audit_resource", "department")
+	c.Set("audit_resource_id", c.Param("id"))
+
+	if err := h.svc.SetAllowedPositions(id, req.PositionIDs); err != nil {
+		if errors.Is(err, ErrDepartmentNotFound) {
+			handler.Fail(c, http.StatusNotFound, err.Error())
+			return
+		}
+		handler.Fail(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	c.Set("audit_summary", "set allowed positions for department")
+	handler.OK(c, nil)
+}

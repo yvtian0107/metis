@@ -174,11 +174,14 @@ func (a *ITSMApp) Providers(i do.Injector) {
 	do.Provide(i, NewTokenHandler)
 
 	// ITSM tool chain (Operator, StateStore, Registry)
+	// NOTE: TicketService is resolved lazily inside withdrawFunc to break a circular
+	// dependency: TicketService → SmartEngine → AgentGateway → collectToolRegistries
+	// → tools.Registry → tools.Operator → TicketService.
 	do.Provide(i, func(i do.Injector) (*tools.Operator, error) {
 		db := do.MustInvoke[*database.DB](i)
 		resolver := do.MustInvoke[*engine.ParticipantResolver](i)
-		ticketSvc := do.MustInvoke[*TicketService](i)
 		withdrawFunc := func(ticketID uint, reason string, operatorID uint) error {
+			ticketSvc := do.MustInvoke[*TicketService](i)
 			_, err := ticketSvc.Withdraw(ticketID, reason, operatorID)
 			return err
 		}

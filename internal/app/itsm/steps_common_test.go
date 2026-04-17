@@ -43,6 +43,7 @@ type bddContext struct {
 	ticket            *Ticket
 	tickets           map[string]*Ticket // multi-ticket scenarios, key = alias
 	fallbackUserID    uint               // fallback assignee for participant validation scenarios
+	dialogState       dialogTestState    // dialog validation test state
 }
 
 func newBDDContext() *bddContext {
@@ -73,6 +74,7 @@ func (bc *bddContext) reset() {
 	bc.departments = make(map[string]*org.Department)
 	bc.tickets = make(map[string]*Ticket)
 	bc.fallbackUserID = 0
+	bc.dialogState = dialogTestState{}
 
 	// Fresh in-memory database per scenario.
 	db, err := gorm.Open(sqlite.Open(fmt.Sprintf("file:bdd_%p?mode=memory&cache=shared", bc)), &gorm.Config{})

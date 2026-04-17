@@ -23,7 +23,12 @@
     "confirmDelete": "Confirm Delete",
     "namePlaceholder": "e.g. R\u0026D Center",
     "codePlaceholder": "e.g. rd-center",
-    "topDepartment": "Top Department"
+    "topDepartment": "Top Department",
+    "selectManager": "Select Manager",
+    "noManager": "No Manager",
+    "allowedPositions": "Allowed Positions",
+    "selectPositions": "Select allowed positions",
+    "positionsSelected": "{{count}} positions selected"
   },
   "positions": {
     "title": "Positions",

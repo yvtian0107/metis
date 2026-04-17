@@ -66,6 +66,8 @@ func (a *OrgApp) Routes(api *gin.RouterGroup) {
 		org.GET("/departments/:id", deptH.Get)
 		org.PUT("/departments/:id", deptH.Update)
 		org.DELETE("/departments/:id", deptH.Delete)
+		org.GET("/departments/:id/positions", deptH.GetAllowedPositions)
+		org.PUT("/departments/:id/positions", deptH.SetAllowedPositions)
 
 		// Positions
 		org.POST("/positions", posH.Create)

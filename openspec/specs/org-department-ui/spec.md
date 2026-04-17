@@ -9,14 +9,18 @@ The system SHALL provide a page at `/org/departments` that displays departments 
 
 #### Scenario: View department tree
 - **WHEN** an authorized user navigates to `/org/departments`
-- **THEN** the page renders a table showing departments in hierarchical order with indentation
+- **THEN** the page renders a table showing departments in hierarchical order with columns: name (with indentation), code, manager name, status, and actions
 
 ### Requirement: Department form uses a Sheet with parent department selection
-The system SHALL open a Sheet drawer for creating or editing a department, including a TreeSelect for choosing the parent department.
+The system SHALL open a Sheet drawer for creating or editing a department. The form SHALL include: name, code, parent department TreeSelect, manager user selector (from global user list), allowed positions multi-select (from active positions list), and description. The form SHALL NOT include a sort field.
 
-#### Scenario: Create a sub-department
-- **WHEN** an admin clicks "新增部门" and selects a parent department from the TreeSelect
-- **THEN** the form submits successfully and the new department appears in the tree table
+#### Scenario: Create a sub-department with manager and allowed positions
+- **WHEN** an admin clicks "新增部门", selects a parent department, picks a manager user, selects allowed positions, and submits
+- **THEN** the form submits successfully, the new department appears in the tree table with the selected manager displayed
+
+#### Scenario: Edit department allowed positions
+- **WHEN** an admin edits an existing department and changes the allowed positions selection
+- **THEN** the system calls `PUT /api/v1/org/departments/:id/positions` with the updated position IDs
 
 ### Requirement: Delete confirmation for departments
 The system SHALL display a confirmation dialog before deleting a department and show an error toast if deletion is blocked.

@@ -16,7 +16,7 @@ The system SHALL expose REST endpoints for creating, listing, retrieving, updati
 
 #### Scenario: List departments with tree endpoint
 - **WHEN** a client calls `GET /api/v1/org/departments/tree`
-- **THEN** the system returns a hierarchical tree of all active departments
+- **THEN** the system returns a hierarchical tree of all active departments, each node including `managerName` (the username of the manager) resolved via LEFT JOIN on the users table
 
 #### Scenario: Prevent deletion of department with members
 - **WHEN** an admin attempts to delete a department that still has associated user positions

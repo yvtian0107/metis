@@ -31,4 +31,4 @@
 ## 3. 注册与验证
 
 - [x] 3.1 `bdd_test.go`：`initializeScenario` 中调用 `registerDeterministicSteps(sc, bc)`
-- [ ] 3.2 运行 `go test ./internal/app/itsm/ -run TestBDD -v` 验证所有 scenario green
+- [x] 3.2 运行 `go test ./internal/app/itsm/ -run TestBDD -v` 验证所有 scenario green

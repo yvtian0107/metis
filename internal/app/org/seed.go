@@ -140,6 +140,8 @@ func seedOrg(db *gorm.DB, enforcer *casbin.Enforcer, install bool) error {
 		{"admin", "/api/v1/org/departments/:id", "GET"},
 		{"admin", "/api/v1/org/departments/:id", "PUT"},
 		{"admin", "/api/v1/org/departments/:id", "DELETE"},
+		{"admin", "/api/v1/org/departments/:id/positions", "GET"},
+		{"admin", "/api/v1/org/departments/:id/positions", "PUT"},
 		// Positions
 		{"admin", "/api/v1/org/positions", "POST"},
 		{"admin", "/api/v1/org/positions", "GET"},
@@ -185,6 +187,9 @@ func seedOrg(db *gorm.DB, enforcer *casbin.Enforcer, install bool) error {
 			return err
 		}
 		if err := seedPositions(db); err != nil {
+			return err
+		}
+		if err := seedDepartmentPositions(db); err != nil {
 			return err
 		}
 	}
@@ -257,5 +262,38 @@ func seedPositions(db *gorm.DB) error {
 		}
 	}
 
+	return nil
+}
+
+func seedDepartmentPositions(db *gorm.DB) error {
+	// Map department codes to allowed position codes
+	deptPositions := map[string][]string{
+		"headquarters": {"assistant"},
+		"it":           {"it_admin", "network_admin", "security_admin", "db_admin"},
+		"rd":           {"app_admin"},
+		"ops":          {"ops_admin", "it_admin", "network_admin"},
+	}
+
+	for deptCode, posCodes := range deptPositions {
+		var dept Department
+		if err := db.Where("code = ?", deptCode).First(&dept).Error; err != nil {
+			continue
+		}
+		for _, posCode := range posCodes {
+			var pos Position
+			if err := db.Where("code = ?", posCode).First(&pos).Error; err != nil {
+				continue
+			}
+			var existing DepartmentPosition
+			if err := db.Where("department_id = ? AND position_id = ?", dept.ID, pos.ID).First(&existing).Error; err != nil {
+				dp := DepartmentPosition{DepartmentID: dept.ID, PositionID: pos.ID}
+				if err := db.Create(&dp).Error; err != nil {
+					slog.Error("seed: failed to create dept-position", "dept", deptCode, "pos", posCode, "error", err)
+					continue
+				}
+				slog.Info("seed: created dept-position", "dept", deptCode, "pos", posCode)
+			}
+		}
+	}
 	return nil
 }

@@ -429,10 +429,15 @@ func draftPrepareHandler(op ServiceDeskOperator, store StateStore) ToolHandler {
 		}
 
 		// Validate form_data and collect warnings.
+		type resolvedValue struct {
+			Value string `json:"value"`
+			Route string `json:"route"`
+		}
 		type warning struct {
-			Type    string `json:"type"`
-			Field   string `json:"field"`
-			Message string `json:"message"`
+			Type           string          `json:"type"`
+			Field          string          `json:"field"`
+			Message        string          `json:"message"`
+			ResolvedValues []resolvedValue `json:"resolved_values,omitempty"`
 		}
 		var warnings []warning
 
@@ -465,11 +470,25 @@ func draftPrepareHandler(op ServiceDeskOperator, store StateStore) ToolHandler {
 			if (f.Type == "select" || f.Type == "radio") && len(f.Options) > 0 {
 				// Check for comma-separated values in single-select fields.
 				if strings.Contains(strVal, ",") {
-					warnings = append(warnings, warning{
+					w := warning{
 						Type:    "multivalue_on_single_field",
 						Field:   key,
 						Message: fmt.Sprintf("字段 [%s] 为单选，不支持多个值", f.Label),
-					})
+					}
+					// If this is the routing field, resolve each value to its route branch.
+					if hint := detail.RoutingFieldHint; hint != nil && key == hint.FieldKey {
+						parts := strings.Split(strVal, ",")
+						rv := make([]resolvedValue, 0, len(parts))
+						for _, p := range parts {
+							v := strings.TrimSpace(p)
+							if v == "" {
+								continue
+							}
+							rv = append(rv, resolvedValue{Value: v, Route: hint.OptionRouteMap[v]})
+						}
+						w.ResolvedValues = rv
+					}
+					warnings = append(warnings, w)
 					continue
 				}
 				// Check if value is a valid option.

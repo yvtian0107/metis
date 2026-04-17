@@ -170,6 +170,7 @@ export function Component() {
             </div>
           </TableCell>
           <TableCell className="w-[120px] text-sm text-muted-foreground">{node.code}</TableCell>
+          <TableCell className="w-[120px] text-sm text-muted-foreground">{node.managerName || "-"}</TableCell>
           <TableCell className="w-[100px]">
             <Badge variant={node.isActive ? "default" : "secondary"}>
               {node.isActive ? t("org:departments.active") : t("org:departments.inactive")}
@@ -265,16 +266,17 @@ export function Component() {
             <TableRow>
               <TableHead className="min-w-[180px]">{t("org:departments.name")}</TableHead>
               <TableHead className="w-[120px]">{t("org:departments.code")}</TableHead>
+              <TableHead className="w-[120px]">{t("org:departments.manager")}</TableHead>
               <TableHead className="w-[100px]">{t("common:status")}</TableHead>
               <DataTableActionsHead className="min-w-[140px]">{t("common:actions")}</DataTableActionsHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {isLoading ? (
-              <DataTableLoadingRow colSpan={4} />
+              <DataTableLoadingRow colSpan={5} />
             ) : treeData.length === 0 ? (
               <DataTableEmptyRow
-                colSpan={4}
+                colSpan={5}
                 icon={Network}
                 title={t("org:departments.empty")}
                 description={canCreate ? t("org:departments.emptyHint") : undefined}
@@ -282,7 +284,7 @@ export function Component() {
             ) : filtered ? (
               filtered.length === 0 ? (
                 <DataTableEmptyRow
-                  colSpan={4}
+                  colSpan={5}
                   icon={Network}
                   title={t("org:departments.empty")}
                 />
@@ -300,6 +302,7 @@ export function Component() {
                       </div>
                     </TableCell>
                     <TableCell className="w-[120px] text-sm text-muted-foreground">{item.code}</TableCell>
+                    <TableCell className="w-[120px] text-sm text-muted-foreground">{item.managerName || "-"}</TableCell>
                     <TableCell className="w-[100px]">
                       <Badge variant={item.isActive ? "default" : "secondary"}>
                         {item.isActive ? t("org:departments.active") : t("org:departments.inactive")}

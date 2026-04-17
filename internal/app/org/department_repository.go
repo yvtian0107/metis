@@ -2,6 +2,7 @@ package org
 
 import (
 	"github.com/samber/do/v2"
+	"gorm.io/gorm"
 
 	"metis/internal/database"
 )
@@ -105,8 +106,8 @@ func (r *DepartmentRepo) GetAllowedPositions(deptID uint) ([]Position, error) {
 
 // SetAllowedPositions replaces all allowed positions for a department in a transaction.
 func (r *DepartmentRepo) SetAllowedPositions(deptID uint, positionIDs []uint) error {
-	return r.db.Transaction(func(tx *database.DB) error {
-		if err := tx.Where("department_id = ?", deptID).Delete(&DepartmentPosition{}).Error; err != nil {
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Unscoped().Where("department_id = ?", deptID).Delete(&DepartmentPosition{}).Error; err != nil {
 			return err
 		}
 		for _, posID := range positionIDs {

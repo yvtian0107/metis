@@ -23,7 +23,12 @@
     "confirmDelete": "确定删除",
     "namePlaceholder": "例如：研发中心",
     "codePlaceholder": "例如：rd-center",
-    "topDepartment": "顶级部门"
+    "topDepartment": "顶级部门",
+    "selectManager": "选择负责人",
+    "noManager": "无负责人",
+    "allowedPositions": "可用职位",
+    "selectPositions": "选择可用职位",
+    "positionsSelected": "已选 {{count}} 个职位"
   },
   "positions": {
     "title": "岗位管理",
