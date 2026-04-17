@@ -34,6 +34,11 @@ func (e *ReactExecutor) Execute(ctx context.Context, req ExecuteRequest) (<-chan
 			evt.Sequence = int(seq.Add(1))
 			select {
 			case ch <- evt:
+				return
+			default:
+			}
+			select {
+			case ch <- evt:
 			case <-ctx.Done():
 			}
 		}

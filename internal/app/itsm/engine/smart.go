@@ -16,6 +16,8 @@ import (
 type AgentProvider interface {
 	// GetAgentConfig returns the agent's configuration (system prompt, model info, temperature).
 	GetAgentConfig(agentID uint) (*SmartAgentConfig, error)
+	// GetAgentConfigByCode returns agent configuration by code (e.g. "itsm.decision").
+	GetAgentConfigByCode(code string) (*SmartAgentConfig, error)
 }
 
 // SmartAgentConfig holds the agent configuration needed for LLM calls.
@@ -46,6 +48,14 @@ type KnowledgeResult struct {
 type UserProvider interface {
 	// ListActiveUsers returns all active users (id, name).
 	ListActiveUsers() ([]ParticipantCandidate, error)
+}
+
+// EngineConfigProvider provides engine-level configuration to the SmartEngine.
+type EngineConfigProvider interface {
+	// FallbackAssigneeID returns the user ID of the fallback assignee (0 = not configured).
+	FallbackAssigneeID() uint
+	// DecisionMode returns the decision mode ("direct_first" or "ai_only").
+	DecisionMode() string
 }
 
 // ParticipantCandidate is a user available for assignment.
@@ -118,6 +128,7 @@ type SmartEngine struct {
 	userProvider      UserProvider
 	resolver          *ParticipantResolver
 	scheduler         TaskSubmitter
+	configProvider    EngineConfigProvider
 }
 
 // NewSmartEngine creates a SmartEngine with optional AI dependencies.
@@ -127,6 +138,7 @@ func NewSmartEngine(
 	userProvider UserProvider,
 	resolver *ParticipantResolver,
 	scheduler TaskSubmitter,
+	configProvider EngineConfigProvider,
 ) *SmartEngine {
 	return &SmartEngine{
 		agentProvider:     agentProvider,
@@ -134,6 +146,7 @@ func NewSmartEngine(
 		userProvider:      userProvider,
 		resolver:          resolver,
 		scheduler:         scheduler,
+		configProvider:    configProvider,
 	}
 }
 
@@ -254,11 +267,18 @@ func (e *SmartEngine) Cancel(ctx context.Context, tx *gorm.DB, params CancelPara
 		return err
 	}
 
-	msg := "工单已取消"
-	if params.Reason != "" {
-		msg = "工单已取消: " + params.Reason
+	eventType := params.EventType
+	if eventType == "" {
+		eventType = "ticket_cancelled"
 	}
-	return e.recordTimeline(tx, params.TicketID, nil, params.OperatorID, "ticket_cancelled", msg, "")
+	msg := params.Message
+	if msg == "" {
+		msg = "工单已取消"
+		if params.Reason != "" {
+			msg = "工单已取消: " + params.Reason
+		}
+	}
+	return e.recordTimeline(tx, params.TicketID, nil, params.OperatorID, eventType, msg, "")
 }
 
 // --- Decision cycle ---
@@ -413,6 +433,9 @@ func (e *SmartEngine) executeDecisionPlan(tx *gorm.DB, ticketID uint, plan *Deci
 				return err
 			}
 			tx.Model(&ticketModel{}).Where("id = ?", ticketID).Update("assignee_id", *da.ParticipantID)
+		} else if da.Type == "approve" || da.Type == "process" || da.Type == "form" {
+			// Activity needs a participant but AI didn't specify one — try fallback
+			e.tryFallbackAssignment(tx, ticketID, act.ID)
 		}
 
 		// Submit action task if applicable
@@ -431,6 +454,47 @@ func (e *SmartEngine) executeDecisionPlan(tx *gorm.DB, ticketID uint, plan *Deci
 	}
 
 	return nil
+}
+
+// tryFallbackAssignment checks engine config for a fallback assignee and creates
+// an assignment if the fallback user is valid. Records timeline events.
+func (e *SmartEngine) tryFallbackAssignment(tx *gorm.DB, ticketID uint, activityID uint) {
+	if e.configProvider == nil {
+		return
+	}
+	fallbackID := e.configProvider.FallbackAssigneeID()
+	if fallbackID == 0 {
+		return
+	}
+
+	// Verify the fallback user exists and is active
+	var user struct {
+		Username string
+		IsActive bool
+	}
+	if err := tx.Table("users").Where("id = ? AND deleted_at IS NULL", fallbackID).
+		Select("username, is_active").First(&user).Error; err != nil || !user.IsActive {
+		e.recordTimeline(tx, ticketID, &activityID, 0, "participant_fallback_warning",
+			fmt.Sprintf("兜底处理人无效（ID=%d），请检查引擎配置", fallbackID), "")
+		return
+	}
+
+	assignment := &assignmentModel{
+		TicketID:        ticketID,
+		ActivityID:      activityID,
+		ParticipantType: "user",
+		UserID:          &fallbackID,
+		AssigneeID:      &fallbackID,
+		Status:          "pending",
+		IsCurrent:       true,
+	}
+	if err := tx.Create(assignment).Error; err != nil {
+		slog.Error("failed to create fallback assignment", "error", err, "ticketID", ticketID)
+		return
+	}
+	tx.Model(&ticketModel{}).Where("id = ?", ticketID).Update("assignee_id", fallbackID)
+	e.recordTimeline(tx, ticketID, &activityID, 0, "participant_fallback",
+		fmt.Sprintf("参与者缺失，已转派兜底处理人（%s）", user.Username), "")
 }
 
 // pendApprovalDecisionPlan creates a pending_approval activity for low-confidence decision.

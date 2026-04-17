@@ -194,6 +194,7 @@ func SeedTools(db *gorm.DB) error {
 // presetAgent defines a preset agent to seed.
 type presetAgent struct {
 	Name         string
+	Code         string
 	Description  string
 	Type         string
 	Visibility   string
@@ -229,6 +230,7 @@ func SeedAgents(db *gorm.DB) error {
 	agents := []presetAgent{
 		{
 			Name:        "IT 服务台智能体",
+			Code:        "itsm.servicedesk",
 			Description: "IT 服务台智能体，引导用户完成服务匹配、信息收集、草稿确认与工单创建的全流程",
 			Type:        "assistant",
 			Visibility:  "public",
@@ -304,6 +306,7 @@ func SeedAgents(db *gorm.DB) error {
 		},
 		{
 			Name:        "流程决策智能体",
+			Code:        "itsm.decision",
 			Description: "ITSM 流程决策智能体，基于工单上下文和策略约束，通过多轮工具调用收集信息后给出下一步可执行、可审计的流程决策",
 			Type:        "assistant",
 			Visibility:  "private",
@@ -354,18 +357,23 @@ func SeedAgents(db *gorm.DB) error {
 
 	for _, agent := range agents {
 		// Check if agent already exists
-		var existing int64
-		if err := db.Table("ai_agents").Where("name = ?", agent.Name).Count(&existing).Error; err != nil {
-			continue
+		var existing struct {
+			ID   uint
+			Code string
 		}
-		if existing > 0 {
-			slog.Info("ITSM agent seed: agent already exists, skipping", "name", agent.Name)
+		if err := db.Table("ai_agents").Where("name = ?", agent.Name).Select("id", "code").First(&existing).Error; err == nil {
+			// Agent exists — ensure code is set
+			if existing.Code == "" && agent.Code != "" {
+				db.Table("ai_agents").Where("id = ?", existing.ID).Update("code", agent.Code)
+				slog.Info("ITSM agent seed: updated agent code", "name", agent.Name, "code", agent.Code)
+			}
 			continue
 		}
 
 		// Create agent
 		record := map[string]any{
 			"name":          agent.Name,
+			"code":          agent.Code,
 			"description":   agent.Description,
 			"type":          agent.Type,
 			"visibility":    agent.Visibility,

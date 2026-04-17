@@ -66,7 +66,7 @@ func (r *PositionRepo) List(params PositionListParams) ([]Position, int64, error
 	}
 
 	var items []Position
-	query := base.Order("sort ASC, level DESC, id ASC")
+	query := base.Order("sort ASC, id ASC")
 	if params.PageSize > 0 {
 		offset := (params.Page - 1) * params.PageSize
 		query = query.Offset(offset).Limit(params.PageSize)
@@ -80,7 +80,7 @@ func (r *PositionRepo) List(params PositionListParams) ([]Position, int64, error
 
 func (r *PositionRepo) ListActive() ([]Position, error) {
 	var items []Position
-	if err := r.db.Where("is_active = ?", true).Order("sort ASC, level DESC, id ASC").Find(&items).Error; err != nil {
+	if err := r.db.Where("is_active = ?", true).Order("sort ASC, id ASC").Find(&items).Error; err != nil {
 		return nil, err
 	}
 	return items, nil

@@ -14,14 +14,12 @@ import (
 type CreatePositionRequest struct {
 	Name        string `json:"name" binding:"required,max=128"`
 	Code        string `json:"code" binding:"required,max=64"`
-	Level       int    `json:"level"`
 	Description string `json:"description" binding:"max=255"`
 }
 
 type UpdatePositionRequest struct {
 	Name        *string `json:"name" binding:"omitempty,max=128"`
 	Code        *string `json:"code" binding:"omitempty,max=64"`
-	Level       *int    `json:"level"`
 	Description *string `json:"description" binding:"omitempty,max=255"`
 	IsActive    *bool   `json:"isActive"`
 }
@@ -45,7 +43,7 @@ func (h *PositionHandler) Create(c *gin.Context) {
 	c.Set("audit_action", "org.position.create")
 	c.Set("audit_resource", "position")
 
-	pos, err := h.svc.Create(req.Name, req.Code, req.Level, req.Description)
+	pos, err := h.svc.Create(req.Name, req.Code, req.Description)
 	if err != nil {
 		if errors.Is(err, ErrPositionCodeExists) {
 			handler.Fail(c, http.StatusBadRequest, err.Error())
@@ -123,7 +121,7 @@ func (h *PositionHandler) Update(c *gin.Context) {
 	c.Set("audit_resource", "position")
 	c.Set("audit_resource_id", c.Param("id"))
 
-	pos, err := h.svc.Update(id, req.Name, req.Code, req.Level, req.Description, req.IsActive)
+	pos, err := h.svc.Update(id, req.Name, req.Code, req.Description, req.IsActive)
 	if err != nil {
 		if errors.Is(err, ErrPositionNotFound) {
 			handler.Fail(c, http.StatusNotFound, err.Error())

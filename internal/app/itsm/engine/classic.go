@@ -232,11 +232,18 @@ func (e *ClassicEngine) Cancel(ctx context.Context, tx *gorm.DB, params CancelPa
 		return err
 	}
 
-	msg := "工单已取消"
-	if params.Reason != "" {
-		msg = "工单已取消: " + params.Reason
+	eventType := params.EventType
+	if eventType == "" {
+		eventType = "ticket_cancelled"
 	}
-	return e.recordTimeline(tx, params.TicketID, nil, params.OperatorID, "ticket_cancelled", msg)
+	msg := params.Message
+	if msg == "" {
+		msg = "工单已取消"
+		if params.Reason != "" {
+			msg = "工单已取消: " + params.Reason
+		}
+	}
+	return e.recordTimeline(tx, params.TicketID, nil, params.OperatorID, eventType, msg)
 }
 
 // processNode handles a node based on its type, driven by an execution token.
@@ -353,6 +360,22 @@ func (e *ClassicEngine) progressApproval(tx *gorm.DB, activity *activityModel, p
 		})
 	if result.RowsAffected == 0 {
 		return false, fmt.Errorf("no pending assignment found for user %d on activity %d", params.OperatorID, activity.ID)
+	}
+
+	// Delegation auto-return: if the completed assignment was delegated,
+	// restore the original assignment back to pending
+	var completedAssignment assignmentModel
+	if err := tx.Where("activity_id = ? AND assignee_id = ? AND status = ?",
+		activity.ID, params.OperatorID, "completed").
+		Order("id DESC").First(&completedAssignment).Error; err == nil {
+		if completedAssignment.DelegatedFrom != nil {
+			tx.Model(&assignmentModel{}).
+				Where("id = ? AND status = ?", *completedAssignment.DelegatedFrom, "delegated").
+				Updates(map[string]any{"status": "pending", "is_current": true})
+			e.recordTimeline(tx, params.TicketID, &params.ActivityID, 0, "delegate_return",
+				"委派任务已完成，工单已回归原处理人")
+			return false, nil // don't advance workflow — original assignee still needs to act
+		}
 	}
 
 	switch activity.ExecutionMode {
@@ -1467,6 +1490,7 @@ func parseDuration(s string) time.Duration {
 
 type ticketModel struct {
 	ID                    uint       `gorm:"primaryKey"`
+	Code                  string     `gorm:"column:code"`
 	Status                string     `gorm:"column:status"`
 	EngineType            string     `gorm:"column:engine_type"`
 	WorkflowJSON          string     `gorm:"column:workflow_json;type:text"`
@@ -1475,6 +1499,10 @@ type ticketModel struct {
 	RequesterID           uint       `gorm:"column:requester_id"`
 	PriorityID            uint       `gorm:"column:priority_id"`
 	FormData              string     `gorm:"column:form_data;type:text"`
+	SLAResponseDeadline   *time.Time `gorm:"column:sla_response_deadline"`
+	SLAResolutionDeadline *time.Time `gorm:"column:sla_resolution_deadline"`
+	SLAStatus             string     `gorm:"column:sla_status"`
+	SLAPausedAt           *time.Time `gorm:"column:sla_paused_at"`
 	AIFailureCount        int        `gorm:"column:ai_failure_count;default:0"`
 	CollaborationSpec     string     `gorm:"column:collaboration_spec;type:text"`  // via service join
 	AgentID               *uint      `gorm:"column:agent_id"`                      // via service join
@@ -1519,6 +1547,8 @@ type assignmentModel struct {
 	Status          string `gorm:"column:status;size:16;default:pending"`
 	Sequence        int    `gorm:"column:sequence;default:0"`
 	IsCurrent       bool   `gorm:"column:is_current;default:false"`
+	DelegatedFrom   *uint  `gorm:"column:delegated_from"`
+	TransferFrom    *uint  `gorm:"column:transfer_from"`
 	CreatedAt       time.Time `gorm:"column:created_at;autoCreateTime"`
 }
 

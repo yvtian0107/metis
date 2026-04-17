@@ -328,7 +328,7 @@ func (h *InstallHandler) hotSwitch(cfg *config.MetisConfig, db *database.DB, enf
 	// Boot apps
 	for _, a := range app.All() {
 		a.Providers(injector)
-		if err := a.Seed(db.DB, enforcer); err != nil {
+		if err := a.Seed(db.DB, enforcer, true); err != nil {
 			slog.Error("install: app seed failed", "app", a.Name(), "error", err)
 		}
 	}

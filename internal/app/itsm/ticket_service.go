@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"time"
 
@@ -22,6 +23,13 @@ var (
 	ErrActivityNotWait  = errors.New("signal is only allowed on wait nodes")
 	ErrNotApprover      = errors.New("you are not an assigned approver for this activity")
 	ErrActivityAlready  = errors.New("activity already completed")
+	ErrSLAAlreadyPaused     = errors.New("SLA is already paused")
+	ErrSLANotPaused         = errors.New("SLA is not paused")
+	ErrAssignmentNotFound   = errors.New("assignment not found")
+	ErrAssignmentNotPending = errors.New("assignment is not in pending status")
+	ErrNoActiveAssignment   = errors.New("no active pending assignment for this activity")
+	ErrNotRequester         = errors.New("only the ticket requester can withdraw")
+	ErrTicketClaimed        = errors.New("ticket has been claimed and cannot be withdrawn")
 )
 
 type TicketService struct {
@@ -377,6 +385,23 @@ type CancelTicketInput struct {
 	Reason string `json:"reason"`
 }
 
+// TransferInput is the request body for task transfer.
+type TransferInput struct {
+	ActivityID   uint `json:"activityId" binding:"required"`
+	TargetUserID uint `json:"targetUserId" binding:"required"`
+}
+
+// DelegateInput is the request body for task delegation.
+type DelegateInput struct {
+	ActivityID   uint `json:"activityId" binding:"required"`
+	TargetUserID uint `json:"targetUserId" binding:"required"`
+}
+
+// ClaimInput is the request body for task claim.
+type ClaimInput struct {
+	ActivityID uint `json:"activityId" binding:"required"`
+}
+
 func (s *TicketService) Cancel(id uint, reason string, operatorID uint) (*Ticket, error) {
 	t, err := s.ticketRepo.FindByID(id)
 	if err != nil {
@@ -425,6 +450,51 @@ func (s *TicketService) Cancel(id uint, reason string, operatorID uint) (*Ticket
 		return nil, err
 	}
 
+	return s.ticketRepo.FindByID(id)
+}
+
+// Withdraw allows the ticket requester to withdraw their ticket before it has been claimed.
+func (s *TicketService) Withdraw(id uint, reason string, operatorID uint) (*Ticket, error) {
+	t, err := s.ticketRepo.FindByID(id)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrTicketNotFound
+		}
+		return nil, err
+	}
+	if t.IsTerminal() {
+		return nil, ErrTicketTerminal
+	}
+	if t.RequesterID != operatorID {
+		return nil, ErrNotRequester
+	}
+
+	// Check if any assignment has been claimed.
+	var claimedCount int64
+	s.ticketRepo.DB().Model(&TicketAssignment{}).
+		Where("ticket_id = ? AND claimed_at IS NOT NULL", id).
+		Count(&claimedCount)
+	if claimedCount > 0 {
+		return nil, ErrTicketClaimed
+	}
+
+	// Delegate to engine for proper cleanup.
+	msg := "工单已撤回"
+	if reason != "" {
+		msg = "工单已撤回: " + reason
+	}
+	eng := s.engineFor(t.EngineType)
+	if err := s.ticketRepo.DB().Transaction(func(tx *gorm.DB) error {
+		return eng.Cancel(context.Background(), tx, engine.CancelParams{
+			TicketID:   id,
+			Reason:     reason,
+			OperatorID: operatorID,
+			EventType:  "withdrawn",
+			Message:    msg,
+		})
+	}); err != nil {
+		return nil, err
+	}
 	return s.ticketRepo.FindByID(id)
 }
 
@@ -861,4 +931,238 @@ func (s *TicketService) verifyApprover(activityID uint, operatorID uint) error {
 		return ErrNotApprover
 	}
 	return nil
+}
+
+// SLAPause pauses the SLA clock for a ticket.
+func (s *TicketService) SLAPause(ticketID uint, operatorID uint) (*Ticket, error) {
+	ticket, err := s.ticketRepo.FindByID(ticketID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrTicketNotFound
+		}
+		return nil, err
+	}
+	if ticket.IsTerminal() {
+		return nil, ErrTicketTerminal
+	}
+	if ticket.SLAPausedAt != nil {
+		return nil, ErrSLAAlreadyPaused
+	}
+
+	now := time.Now()
+	ticket.SLAPausedAt = &now
+	if err := s.ticketRepo.DB().Save(ticket).Error; err != nil {
+		return nil, err
+	}
+
+	s.timelineRepo.Create(&TicketTimeline{
+		TicketID:   ticketID,
+		OperatorID: operatorID,
+		EventType:  "sla_paused",
+		Message:    "SLA 计时已暂停",
+	})
+
+	return ticket, nil
+}
+
+// SLAResume resumes the SLA clock for a ticket, extending deadlines by the paused duration.
+func (s *TicketService) SLAResume(ticketID uint, operatorID uint) (*Ticket, error) {
+	ticket, err := s.ticketRepo.FindByID(ticketID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrTicketNotFound
+		}
+		return nil, err
+	}
+	if ticket.IsTerminal() {
+		return nil, ErrTicketTerminal
+	}
+	if ticket.SLAPausedAt == nil {
+		return nil, ErrSLANotPaused
+	}
+
+	pausedDuration := time.Since(*ticket.SLAPausedAt)
+
+	// Extend deadlines by the paused duration
+	if ticket.SLAResponseDeadline != nil {
+		extended := ticket.SLAResponseDeadline.Add(pausedDuration)
+		ticket.SLAResponseDeadline = &extended
+	}
+	if ticket.SLAResolutionDeadline != nil {
+		extended := ticket.SLAResolutionDeadline.Add(pausedDuration)
+		ticket.SLAResolutionDeadline = &extended
+	}
+	ticket.SLAPausedAt = nil
+
+	if err := s.ticketRepo.DB().Save(ticket).Error; err != nil {
+		return nil, err
+	}
+
+	s.timelineRepo.Create(&TicketTimeline{
+		TicketID:   ticketID,
+		OperatorID: operatorID,
+		EventType:  "sla_resumed",
+		Message:    fmt.Sprintf("SLA 计时已恢复，暂停时长 %s，截止时间已顺延", pausedDuration.Round(time.Second)),
+	})
+
+	return ticket, nil
+}
+
+// Transfer transfers an assignment from the current assignee to a new user.
+func (s *TicketService) Transfer(ticketID, activityID, targetUserID, operatorID uint) (*Ticket, error) {
+	ticket, err := s.ticketRepo.FindByID(ticketID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrTicketNotFound
+		}
+		return nil, err
+	}
+	if ticket.IsTerminal() {
+		return nil, ErrTicketTerminal
+	}
+
+	db := s.ticketRepo.DB()
+
+	// Find the operator's pending assignment for this activity
+	var original TicketAssignment
+	if err := db.Where("activity_id = ? AND (user_id = ? OR assignee_id = ?) AND status = ?",
+		activityID, operatorID, operatorID, AssignmentPending).First(&original).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrNoActiveAssignment
+		}
+		return nil, err
+	}
+
+	// Mark original as transferred
+	db.Model(&original).Update("status", AssignmentTransferred)
+
+	// Create new assignment for target user
+	db.Create(&TicketAssignment{
+		TicketID:        ticketID,
+		ActivityID:      activityID,
+		ParticipantType: "user",
+		UserID:          &targetUserID,
+		AssigneeID:      &targetUserID,
+		Status:          AssignmentPending,
+		IsCurrent:       original.IsCurrent,
+		TransferFrom:    &original.ID,
+	})
+
+	// Update ticket assignee
+	db.Model(&Ticket{}).Where("id = ?", ticketID).Update("assignee_id", targetUserID)
+
+	s.timelineRepo.Create(&TicketTimeline{
+		TicketID:   ticketID,
+		ActivityID: &activityID,
+		OperatorID: operatorID,
+		EventType:  "transfer",
+		Message:    fmt.Sprintf("工单已转办给用户 %d", targetUserID),
+	})
+
+	return s.ticketRepo.FindByID(ticketID)
+}
+
+// Delegate delegates an assignment to another user. After the delegate completes,
+// the assignment returns to the original assignee.
+func (s *TicketService) Delegate(ticketID, activityID, targetUserID, operatorID uint) (*Ticket, error) {
+	ticket, err := s.ticketRepo.FindByID(ticketID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrTicketNotFound
+		}
+		return nil, err
+	}
+	if ticket.IsTerminal() {
+		return nil, ErrTicketTerminal
+	}
+
+	db := s.ticketRepo.DB()
+
+	// Find the operator's pending assignment for this activity
+	var original TicketAssignment
+	if err := db.Where("activity_id = ? AND (user_id = ? OR assignee_id = ?) AND status = ?",
+		activityID, operatorID, operatorID, AssignmentPending).First(&original).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrNoActiveAssignment
+		}
+		return nil, err
+	}
+
+	// Mark original as delegated (not completed — it will be restored after delegate finishes)
+	db.Model(&original).Update("status", AssignmentDelegated)
+
+	// Create delegated assignment
+	db.Create(&TicketAssignment{
+		TicketID:        ticketID,
+		ActivityID:      activityID,
+		ParticipantType: "user",
+		UserID:          &targetUserID,
+		AssigneeID:      &targetUserID,
+		Status:          AssignmentPending,
+		IsCurrent:       true,
+		DelegatedFrom:   &original.ID,
+	})
+
+	s.timelineRepo.Create(&TicketTimeline{
+		TicketID:   ticketID,
+		ActivityID: &activityID,
+		OperatorID: operatorID,
+		EventType:  "delegate",
+		Message:    fmt.Sprintf("工单已委派给用户 %d", targetUserID),
+	})
+
+	return s.ticketRepo.FindByID(ticketID)
+}
+
+// Claim allows a user to claim a ticket assignment, marking other pending assignments
+// for the same activity as claimed_by_other.
+func (s *TicketService) Claim(ticketID, activityID, operatorID uint) (*Ticket, error) {
+	ticket, err := s.ticketRepo.FindByID(ticketID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrTicketNotFound
+		}
+		return nil, err
+	}
+	if ticket.IsTerminal() {
+		return nil, ErrTicketTerminal
+	}
+
+	db := s.ticketRepo.DB()
+
+	// Find the operator's pending assignment for this activity
+	var assignment TicketAssignment
+	if err := db.Where("activity_id = ? AND (user_id = ? OR assignee_id = ?) AND status = ?",
+		activityID, operatorID, operatorID, AssignmentPending).First(&assignment).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrNoActiveAssignment
+		}
+		return nil, err
+	}
+
+	now := time.Now()
+
+	// Mark the claimer's assignment as claimed
+	db.Model(&assignment).Updates(map[string]any{
+		"assignee_id": operatorID,
+		"claimed_at":  now,
+	})
+
+	// Mark other pending assignments for the same activity as claimed_by_other
+	db.Model(&TicketAssignment{}).
+		Where("activity_id = ? AND status = ? AND id != ?", activityID, AssignmentPending, assignment.ID).
+		Update("status", AssignmentClaimedByOther)
+
+	// Update ticket assignee
+	db.Model(&Ticket{}).Where("id = ?", ticketID).Update("assignee_id", operatorID)
+
+	s.timelineRepo.Create(&TicketTimeline{
+		TicketID:   ticketID,
+		ActivityID: &activityID,
+		OperatorID: operatorID,
+		EventType:  "claim",
+		Message:    "用户已抢单",
+	})
+
+	return s.ticketRepo.FindByID(ticketID)
 }

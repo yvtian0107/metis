@@ -24,7 +24,7 @@ func (a *NodeApp) Models() []any {
 	return []any{&Node{}, &ProcessDef{}, &NodeProcess{}, &NodeCommand{}, &NodeProcessLog{}}
 }
 
-func (a *NodeApp) Seed(db *gorm.DB, enforcer *casbin.Enforcer) error {
+func (a *NodeApp) Seed(db *gorm.DB, enforcer *casbin.Enforcer, _ bool) error {
 	return seedNode(db, enforcer)
 }
 

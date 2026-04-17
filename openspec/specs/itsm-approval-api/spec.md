@@ -1,74 +1,69 @@
-# Capability: itsm-approval-api
+# Delta Spec: itsm-approval-api
 
-## Purpose
-Provides REST API endpoints for ITSM ticket approval workflows, including listing pending approvals, approving/denying activities, approval count for badge display, and associated Casbin policies.
+> Capability: itsm-approval-api
+> Change: classic-engine-enterprise
+> Type: MODIFIED + ADDED
 
-## Requirements
+## MODIFIED Requirements
 
-### Requirement: Approval list endpoint
-The system SHALL provide `GET /api/v1/itsm/tickets/approvals` returning pending approval items assigned to the current user. The query SHALL return two kinds of items:
+### Requirement: Approve endpoint respects multi-person mode
 
-1. **Workflow approvals**: JOIN `TicketAssignment`（`user_id = currentUser` 或通过 Org App 解析 position/department 到用户）with `TicketActivity`（`activity_type = "approve"` 且 `status IN ("pending", "in_progress")`）。
-2. **AI decision confirmations**: `TicketActivity` where `status = "pending_approval"`（不限 activity_type，不依赖 Assignment — AI 确认面向所有有 ITSM 权限的用户）。
+POST /api/v1/itsm/tickets/:id/activities/:aid/approve SHALL check the activity's execution_mode before calling engine.Progress(). For parallel mode, it SHALL complete the caller's assignment and check if all assignments are resolved. For sequential mode, it SHALL verify the caller owns the is_current assignment. The endpoint SHALL return the activity's current state (still pending if not all approvals done, or completed).
 
-每条结果 SHALL 包含：Ticket 摘要（id, code, title, status, priority, service, sla_status, sla_response_deadline, sla_resolution_deadline）、Activity 详情（id, name, activityType, status, aiConfidence, aiReasoning, form_schema, execution_mode, started_at）、Assignment 信息（id, participant_type, sequence, is_current — workflow approvals only）、`approvalKind` 字段值为 `"workflow"` 或 `"ai_confirm"`。支持分页（page, pageSize）和按 priority 排序。
+#### Scenario: approve in parallel mode completes own assignment
 
-#### Scenario: User has pending workflow approvals
-- **WHEN** user calls `GET /api/v1/itsm/tickets/approvals` and has 3 pending approve activities assigned via `TicketAssignment.UserID`
-- **THEN** system returns 3 items with `approvalKind: "workflow"`, including ticket summary, activity details, and SLA info, sorted by priority
+- WHEN POST /api/v1/itsm/tickets/:id/activities/:aid/approve is called
+- AND the activity has execution_mode "parallel"
+- THEN the system SHALL locate the caller's pending assignment
+- AND mark it as completed with the caller's action (approve/reject)
+- AND return the activity state reflecting remaining pending assignments
 
-#### Scenario: User has AI decision confirmations
-- **WHEN** user calls `GET /api/v1/itsm/tickets/approvals` and there exist 2 activities with `status = "pending_approval"`
-- **THEN** system returns those 2 items with `approvalKind: "ai_confirm"`, including aiConfidence and aiReasoning fields
+#### Scenario: approve in parallel mode all-done triggers progress
 
-#### Scenario: Mixed approvals and AI confirmations
-- **WHEN** user has 2 workflow approvals and 1 AI confirmation
-- **THEN** system returns 3 items sorted by priority, each with correct `approvalKind`
+- WHEN POST /api/v1/itsm/tickets/:id/activities/:aid/approve is called
+- AND the activity has execution_mode "parallel"
+- AND the caller's assignment is the last unresolved assignment
+- THEN the system SHALL complete the caller's assignment
+- AND the system SHALL call engine.Progress() to advance the workflow
+- AND return the activity state as completed
 
-#### Scenario: User has no pending approvals
-- **WHEN** user calls `GET /api/v1/itsm/tickets/approvals` and has no assigned approve activities nor pending_approval activities
-- **THEN** system returns empty list with total=0
+#### Scenario: approve in sequential mode wrong sequence rejected
 
-#### Scenario: Org App installed with position-based assignment
-- **WHEN** user calls `GET /api/v1/itsm/tickets/approvals` and an approval activity is assigned via `PositionID` matching user's position
-- **THEN** system includes that activity in the approval list with `approvalKind: "workflow"`
+- WHEN POST /api/v1/itsm/tickets/:id/activities/:aid/approve is called
+- AND the activity has execution_mode "sequential"
+- AND the caller does NOT own the assignment with is_current=true
+- THEN the system SHALL return 403 Forbidden
+- AND the response SHALL indicate it is not the caller's turn to act
 
-### Requirement: Approve activity endpoint
-The system SHALL provide `POST /api/v1/itsm/tickets/:id/activities/:aid/approve` to approve an activity. The endpoint SHALL verify the current user is an assigned approver for the activity, set `TransitionOutcome = "approve"`，then call `WorkflowEngine.Progress()` to advance the workflow. A timeline entry SHALL be created recording the approval action.
+#### Scenario: deny in parallel mode short-circuits
 
-#### Scenario: Successful approval
-- **WHEN** assigned approver calls approve on a pending approve activity
-- **THEN** activity status transitions to completed, TransitionOutcome is "approve", workflow engine advances to next node, and timeline records the approval
+- WHEN POST /api/v1/itsm/tickets/:id/activities/:aid/approve is called with action "reject"
+- AND the activity has execution_mode "parallel"
+- THEN the system SHALL mark the caller's assignment as rejected
+- AND the system SHALL immediately complete the activity with "reject" outcome
+- AND remaining unresolved assignments SHALL be cancelled
+- AND engine.Progress() SHALL be called to advance the workflow
 
-#### Scenario: Non-approver attempts approval
-- **WHEN** user who is NOT assigned to the activity calls approve
-- **THEN** system returns 403 Forbidden
+## ADDED Requirements
 
-#### Scenario: Activity already completed
-- **WHEN** approver calls approve on an already-completed activity
-- **THEN** system returns 409 Conflict with "activity already completed" message
+### Requirement: Approval count reflects multi-person pending state
 
-### Requirement: Deny activity endpoint
-The system SHALL provide `POST /api/v1/itsm/tickets/:id/activities/:aid/deny` to deny/reject an activity. The endpoint SHALL verify the current user is an assigned approver, set `TransitionOutcome = "reject"`，then call `WorkflowEngine.Progress()`. Request body MAY include `reason` string. A timeline entry SHALL record the denial with reason.
+GET /api/v1/itsm/tickets/approvals/count SHALL count activities where the requesting user has a pending assignment with is_current=true (for sequential) or status=pending (for parallel/single). An activity in parallel mode with some assignments completed but not all SHALL still appear in the user's pending list if their assignment is unresolved.
 
-#### Scenario: Successful denial with reason
-- **WHEN** assigned approver calls deny with `{"reason": "信息不完整"}` on a pending approve activity
-- **THEN** activity status transitions based on workflow definition（reject edge target or cancellation）, timeline records denial with reason
+#### Scenario: parallel partially-approved still counts for remaining users
 
-#### Scenario: Denial without reason
-- **WHEN** assigned approver calls deny without reason
-- **THEN** system processes the denial normally, timeline records denial without reason text
+- WHEN GET /api/v1/itsm/tickets/approvals/count is called by a user
+- AND there exists a parallel-mode activity where some assignments are completed but the user's assignment is still pending
+- THEN the activity SHALL be included in the user's pending approval count
 
-### Requirement: Approval Casbin policies
-The system SHALL seed Casbin policies granting all authenticated roles access to `GET /itsm/tickets/approvals`（审批列表为个人视图，所有登录用户均可访问）。`approve` 和 `deny` 端点的权限 SHALL 通过业务逻辑（Assignment 检查）控制而非 Casbin 角色。
+#### Scenario: sequential only counts for current user
 
-#### Scenario: Casbin policy exists after seed
-- **WHEN** system starts and runs seed
-- **THEN** Casbin policies for `/api/v1/itsm/tickets/approvals GET` exist for standard roles
+- WHEN GET /api/v1/itsm/tickets/approvals/count is called by a user
+- AND there exists a sequential-mode activity where the user has an assignment but is_current=false
+- THEN the activity SHALL NOT be included in the user's pending approval count
 
-### Requirement: Approval count badge
-The system SHALL provide `GET /api/v1/itsm/tickets/approvals/count` returning the combined count of pending workflow approvals AND pending AI decision confirmations for the current user.
+#### Scenario: completed approval not counted
 
-#### Scenario: User has 3 workflow approvals and 2 AI confirmations
-- **WHEN** user calls `GET /api/v1/itsm/tickets/approvals/count`
-- **THEN** system returns `{"count": 5}`
+- WHEN GET /api/v1/itsm/tickets/approvals/count is called by a user
+- AND the user's assignment on an activity is already completed (approved or rejected)
+- THEN the activity SHALL NOT be included in the user's pending approval count

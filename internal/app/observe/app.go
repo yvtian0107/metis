@@ -24,7 +24,7 @@ func (a *ObserveApp) Models() []any {
 	return []any{&IntegrationToken{}}
 }
 
-func (a *ObserveApp) Seed(db *gorm.DB, enforcer *casbin.Enforcer) error {
+func (a *ObserveApp) Seed(db *gorm.DB, enforcer *casbin.Enforcer, _ bool) error {
 	return seedObserve(db, enforcer)
 }
 

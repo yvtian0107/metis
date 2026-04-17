@@ -1,8 +1,3 @@
-⏺ 全部就位。总览：
-
-    3   │ vpn-bdd-main-flow                 │
-  主链路：建单→路由→审批→完成
-    4   │ vpn-bdd-ticket-withdraw           │ 工单撤回 4 场景
     5   │ vpn-bdd-participant-validation    │ 参与者缺失兜底 /
   完整路由
     6   │ vpn-bdd-dialog-coverage           │ 服务台 tool chain

@@ -44,6 +44,8 @@ type CancelParams struct {
 	TicketID   uint
 	Reason     string
 	OperatorID uint
+	EventType  string // override timeline event_type (default "ticket_cancelled")
+	Message    string // override timeline message (default "工单已取消[: reason]")
 }
 
 // Errors

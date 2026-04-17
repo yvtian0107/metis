@@ -253,6 +253,51 @@ func (h *TicketHandler) Cancel(c *gin.Context) {
 	handler.OK(c, ticket.ToResponse())
 }
 
+type WithdrawTicketInput struct {
+	Reason string `json:"reason"`
+}
+
+func (h *TicketHandler) Withdraw(c *gin.Context) {
+	id, err := parseID(c)
+	if err != nil {
+		handler.Fail(c, http.StatusBadRequest, "invalid id")
+		return
+	}
+
+	var req WithdrawTicketInput
+	if err := c.ShouldBindJSON(&req); err != nil {
+		handler.Fail(c, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	userID, _ := c.Get("userId")
+	operatorID := userID.(uint)
+
+	c.Set("audit_action", "itsm.ticket.withdraw")
+	c.Set("audit_resource", "ticket")
+	c.Set("audit_resource_id", c.Param("id"))
+
+	ticket, err := h.svc.Withdraw(id, req.Reason, operatorID)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrTicketNotFound):
+			handler.Fail(c, http.StatusNotFound, err.Error())
+		case errors.Is(err, ErrTicketTerminal):
+			handler.Fail(c, http.StatusBadRequest, err.Error())
+		case errors.Is(err, ErrNotRequester):
+			handler.Fail(c, http.StatusForbidden, err.Error())
+		case errors.Is(err, ErrTicketClaimed):
+			handler.Fail(c, http.StatusConflict, err.Error())
+		default:
+			handler.Fail(c, http.StatusInternalServerError, err.Error())
+		}
+		return
+	}
+
+	c.Set("audit_summary", "withdrew ticket: "+ticket.Code)
+	handler.OK(c, ticket.ToResponse())
+}
+
 func (h *TicketHandler) Mine(c *gin.Context) {
 	userID, _ := c.Get("userId")
 	requesterID := userID.(uint)
@@ -793,5 +838,193 @@ func (h *TicketHandler) DenyActivity(c *gin.Context) {
 	}
 
 	c.Set("audit_summary", "denied activity for ticket: "+ticket.Code)
+	handler.OK(c, ticket.ToResponse())
+}
+
+// SLAPause handles PUT /api/v1/itsm/tickets/:id/sla/pause
+func (h *TicketHandler) SLAPause(c *gin.Context) {
+	id, err := parseID(c)
+	if err != nil {
+		handler.Fail(c, http.StatusBadRequest, "invalid id")
+		return
+	}
+
+	userID, _ := c.Get("userId")
+	operatorID := userID.(uint)
+
+	c.Set("audit_action", "itsm.ticket.sla_pause")
+	c.Set("audit_resource", "ticket")
+	c.Set("audit_resource_id", c.Param("id"))
+
+	ticket, err := h.svc.SLAPause(id, operatorID)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrTicketNotFound):
+			handler.Fail(c, http.StatusNotFound, err.Error())
+		case errors.Is(err, ErrTicketTerminal):
+			handler.Fail(c, http.StatusConflict, err.Error())
+		case errors.Is(err, ErrSLAAlreadyPaused):
+			handler.Fail(c, http.StatusConflict, err.Error())
+		default:
+			handler.Fail(c, http.StatusInternalServerError, err.Error())
+		}
+		return
+	}
+
+	c.Set("audit_summary", "paused SLA for ticket: "+ticket.Code)
+	handler.OK(c, ticket.ToResponse())
+}
+
+// SLAResume handles PUT /api/v1/itsm/tickets/:id/sla/resume
+func (h *TicketHandler) SLAResume(c *gin.Context) {
+	id, err := parseID(c)
+	if err != nil {
+		handler.Fail(c, http.StatusBadRequest, "invalid id")
+		return
+	}
+
+	userID, _ := c.Get("userId")
+	operatorID := userID.(uint)
+
+	c.Set("audit_action", "itsm.ticket.sla_resume")
+	c.Set("audit_resource", "ticket")
+	c.Set("audit_resource_id", c.Param("id"))
+
+	ticket, err := h.svc.SLAResume(id, operatorID)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrTicketNotFound):
+			handler.Fail(c, http.StatusNotFound, err.Error())
+		case errors.Is(err, ErrTicketTerminal):
+			handler.Fail(c, http.StatusConflict, err.Error())
+		case errors.Is(err, ErrSLANotPaused):
+			handler.Fail(c, http.StatusConflict, err.Error())
+		default:
+			handler.Fail(c, http.StatusInternalServerError, err.Error())
+		}
+		return
+	}
+
+	c.Set("audit_summary", "resumed SLA for ticket: "+ticket.Code)
+	handler.OK(c, ticket.ToResponse())
+}
+
+// Transfer handles POST /api/v1/itsm/tickets/:id/transfer
+func (h *TicketHandler) Transfer(c *gin.Context) {
+	id, err := parseID(c)
+	if err != nil {
+		handler.Fail(c, http.StatusBadRequest, "invalid id")
+		return
+	}
+
+	var req TransferInput
+	if err := c.ShouldBindJSON(&req); err != nil {
+		handler.Fail(c, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	userID, _ := c.Get("userId")
+	operatorID := userID.(uint)
+
+	c.Set("audit_action", "itsm.ticket.transfer")
+	c.Set("audit_resource", "ticket")
+	c.Set("audit_resource_id", c.Param("id"))
+
+	ticket, err := h.svc.Transfer(id, req.ActivityID, req.TargetUserID, operatorID)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrTicketNotFound):
+			handler.Fail(c, http.StatusNotFound, err.Error())
+		case errors.Is(err, ErrTicketTerminal):
+			handler.Fail(c, http.StatusConflict, err.Error())
+		case errors.Is(err, ErrNoActiveAssignment):
+			handler.Fail(c, http.StatusForbidden, err.Error())
+		default:
+			handler.Fail(c, http.StatusInternalServerError, err.Error())
+		}
+		return
+	}
+
+	c.Set("audit_summary", "transferred task for ticket: "+ticket.Code)
+	handler.OK(c, ticket.ToResponse())
+}
+
+// Delegate handles POST /api/v1/itsm/tickets/:id/delegate
+func (h *TicketHandler) Delegate(c *gin.Context) {
+	id, err := parseID(c)
+	if err != nil {
+		handler.Fail(c, http.StatusBadRequest, "invalid id")
+		return
+	}
+
+	var req DelegateInput
+	if err := c.ShouldBindJSON(&req); err != nil {
+		handler.Fail(c, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	userID, _ := c.Get("userId")
+	operatorID := userID.(uint)
+
+	c.Set("audit_action", "itsm.ticket.delegate")
+	c.Set("audit_resource", "ticket")
+	c.Set("audit_resource_id", c.Param("id"))
+
+	ticket, err := h.svc.Delegate(id, req.ActivityID, req.TargetUserID, operatorID)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrTicketNotFound):
+			handler.Fail(c, http.StatusNotFound, err.Error())
+		case errors.Is(err, ErrTicketTerminal):
+			handler.Fail(c, http.StatusConflict, err.Error())
+		case errors.Is(err, ErrNoActiveAssignment):
+			handler.Fail(c, http.StatusForbidden, err.Error())
+		default:
+			handler.Fail(c, http.StatusInternalServerError, err.Error())
+		}
+		return
+	}
+
+	c.Set("audit_summary", "delegated task for ticket: "+ticket.Code)
+	handler.OK(c, ticket.ToResponse())
+}
+
+// Claim handles POST /api/v1/itsm/tickets/:id/claim
+func (h *TicketHandler) Claim(c *gin.Context) {
+	id, err := parseID(c)
+	if err != nil {
+		handler.Fail(c, http.StatusBadRequest, "invalid id")
+		return
+	}
+
+	var req ClaimInput
+	if err := c.ShouldBindJSON(&req); err != nil {
+		handler.Fail(c, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	userID, _ := c.Get("userId")
+	operatorID := userID.(uint)
+
+	c.Set("audit_action", "itsm.ticket.claim")
+	c.Set("audit_resource", "ticket")
+	c.Set("audit_resource_id", c.Param("id"))
+
+	ticket, err := h.svc.Claim(id, req.ActivityID, operatorID)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrTicketNotFound):
+			handler.Fail(c, http.StatusNotFound, err.Error())
+		case errors.Is(err, ErrTicketTerminal):
+			handler.Fail(c, http.StatusConflict, err.Error())
+		case errors.Is(err, ErrNoActiveAssignment):
+			handler.Fail(c, http.StatusForbidden, err.Error())
+		default:
+			handler.Fail(c, http.StatusInternalServerError, err.Error())
+		}
+		return
+	}
+
+	c.Set("audit_summary", "claimed task for ticket: "+ticket.Code)
 	handler.OK(c, ticket.ToResponse())
 }

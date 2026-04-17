@@ -9,7 +9,7 @@ import (
 	"metis/internal/model"
 )
 
-func seedOrg(db *gorm.DB, enforcer *casbin.Enforcer) error {
+func seedOrg(db *gorm.DB, enforcer *casbin.Enforcer, install bool) error {
 	// 1. Seed menus: 组织管理 directory
 	var orgDir model.Menu
 	if err := db.Where("permission = ?", "org").First(&orgDir).Error; err != nil {
@@ -177,6 +177,83 @@ func seedOrg(db *gorm.DB, enforcer *casbin.Enforcer) error {
 			if _, err := enforcer.AddPolicy(p); err != nil {
 				slog.Error("seed: failed to add policy", "policy", p, "error", err)
 			}
+		}
+	}
+
+	if install {
+		if err := seedDepartments(db); err != nil {
+			return err
+		}
+		if err := seedPositions(db); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func seedDepartments(db *gorm.DB) error {
+	// Root department
+	var hq Department
+	if err := db.Where("code = ?", "headquarters").First(&hq).Error; err != nil {
+		hq = Department{
+			Name:        "总部",
+			Code:        "headquarters",
+			Description: "公司总部",
+			Sort:        0,
+			IsActive:    true,
+		}
+		if err := db.Create(&hq).Error; err != nil {
+			return err
+		}
+		slog.Info("seed: created department", "name", hq.Name, "code", hq.Code)
+	}
+
+	children := []Department{
+		{Name: "研发部", Code: "rd", Description: "负责产品研发", Sort: 1},
+		{Name: "运维部", Code: "ops", Description: "负责系统运维", Sort: 2},
+		{Name: "测试部", Code: "qa", Description: "负责质量测试", Sort: 3},
+		{Name: "市场部", Code: "marketing", Description: "负责市场推广", Sort: 4},
+		{Name: "销售部", Code: "sales", Description: "负责销售业务", Sort: 5},
+		{Name: "信息部", Code: "it", Description: "负责信息技术支持", Sort: 6},
+	}
+
+	for _, dept := range children {
+		var existing Department
+		if err := db.Where("code = ?", dept.Code).First(&existing).Error; err != nil {
+			dept.ParentID = &hq.ID
+			dept.IsActive = true
+			if err := db.Create(&dept).Error; err != nil {
+				slog.Error("seed: failed to create department", "code", dept.Code, "error", err)
+				continue
+			}
+			slog.Info("seed: created department", "name", dept.Name, "code", dept.Code)
+		}
+	}
+
+	return nil
+}
+
+func seedPositions(db *gorm.DB) error {
+	positions := []Position{
+		{Name: "IT管理员", Code: "it_admin", Description: "负责IT基础设施的日常管理和维护", Sort: 1},
+		{Name: "数据库管理员", Code: "db_admin", Description: "负责数据库系统的管理、维护和优化", Sort: 2},
+		{Name: "网络管理员", Code: "network_admin", Description: "负责网络设备和网络安全的管理维护", Sort: 3},
+		{Name: "安全管理员", Code: "security_admin", Description: "负责信息安全策略制定和安全事件响应", Sort: 4},
+		{Name: "应用管理员", Code: "app_admin", Description: "负责业务应用系统的部署和运维管理", Sort: 5},
+		{Name: "运维管理员", Code: "ops_admin", Description: "负责整体运维工作的协调和管理", Sort: 6},
+		{Name: "总部助理", Code: "assistant", Description: "负责总部审批与流程协作", Sort: 7},
+	}
+
+	for _, pos := range positions {
+		var existing Position
+		if err := db.Where("code = ?", pos.Code).First(&existing).Error; err != nil {
+			pos.IsActive = true
+			if err := db.Create(&pos).Error; err != nil {
+				slog.Error("seed: failed to create position", "code", pos.Code, "error", err)
+				continue
+			}
+			slog.Info("seed: created position", "name", pos.Name, "code", pos.Code)
 		}
 	}
 

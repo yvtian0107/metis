@@ -683,12 +683,6 @@ func seedEngineConfig(db *gorm.DB) error {
 			Temperature:  0.3,
 			SystemPrompt: itsmGeneratorSystemPrompt,
 		},
-		{
-			Name:         "ITSM 运行时决策",
-			Code:         "itsm.runtime",
-			Temperature:  0.1,
-			SystemPrompt: itsmRuntimeSystemPrompt,
-		},
 	}
 
 	for _, a := range agents {
@@ -713,7 +707,7 @@ func seedEngineConfig(db *gorm.DB) error {
 	}
 
 	defaults := map[string]string{
-		"itsm.engine.runtime.decision_mode":   "direct_first",
+		"itsm.engine.decision.decision_mode":  "direct_first",
 		"itsm.engine.general.max_retries":     "3",
 		"itsm.engine.general.timeout_seconds": "120",
 		"itsm.engine.general.reasoning_log":   "full",
@@ -857,11 +851,3 @@ condition 字段说明：
 3. 开始节点有且仅有一条出边，无入边
 4. 结束节点无出边
 5. 仅输出 JSON，不要包含任何解释文字或 markdown 标记`
-
-const itsmRuntimeSystemPrompt = `你是一个 ITSM 运行时决策引擎。根据工单当前状态（TicketCase 快照）和策略约束（TicketPolicySnapshot），决定工单的下一步操作。
-
-决策输出格式：
-- next_step_type: "activity" 或 "complete"
-- 如果是 activity，必须指定 work_items（包含 work_type、参与人、表单等）
-- 协作规范是主规则源，workflow_json 仅作参考
-- 优先走确定路径（workflow_hints），无法确定时使用 AI 推理`

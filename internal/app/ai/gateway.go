@@ -31,6 +31,9 @@ type AgentGateway struct {
 	// Active execution contexts, keyed by session ID
 	mu         sync.Mutex
 	executions map[uint]context.CancelFunc
+
+	// testLLMClientOverride is used in tests to inject a mock LLM client.
+	testLLMClientOverride llm.Client
 }
 
 func NewAgentGateway(i do.Injector) (*AgentGateway, error) {
@@ -70,17 +73,9 @@ func (gw *AgentGateway) Run(ctx context.Context, sessionID uint) (io.ReadCloser,
 	}
 
 	// Build system prompt with memory injection
-	systemPrompt := agent.SystemPrompt
-	if agent.Instructions != "" {
-		systemPrompt += "\n\n" + agent.Instructions
-	}
-
-	// Inject memories
 	userID := session.UserID
 	memoryBlock, _ := gw.memorySvc.FormatForPrompt(agent.ID, userID)
-	if memoryBlock != "" {
-		systemPrompt += "\n\n" + memoryBlock
-	}
+	systemPrompt := buildSystemPrompt(agent, memoryBlock)
 
 	// Convert messages to ExecuteMessage format
 	execMessages := make([]ExecuteMessage, 0, len(messages))
@@ -244,6 +239,10 @@ func (gw *AgentGateway) Run(ctx context.Context, sessionID uint) (io.ReadCloser,
 				}
 
 			case <-execCtx.Done():
+				if assistantContent != "" {
+					_, _ = gw.sessionSvc.StoreMessage(sessionID, MessageRoleAssistant, assistantContent, nil, 0)
+				}
+				_ = gw.sessionSvc.UpdateStatus(sessionID, SessionStatusCancelled)
 				pw.CloseWithError(context.Canceled)
 				return
 			}
@@ -291,7 +290,21 @@ func (gw *AgentGateway) selectExecutor(agent *Agent, sessionID, userID uint) (Ex
 	}
 }
 
+func buildSystemPrompt(agent *Agent, memoryBlock string) string {
+	prompt := agent.SystemPrompt
+	if agent.Instructions != "" {
+		prompt += "\n\n" + agent.Instructions
+	}
+	if memoryBlock != "" {
+		prompt += "\n\n" + memoryBlock
+	}
+	return prompt
+}
+
 func (gw *AgentGateway) buildLLMClient(agent *Agent) (llm.Client, error) {
+	if gw.testLLMClientOverride != nil {
+		return gw.testLLMClientOverride, nil
+	}
 	if agent.ModelID == nil {
 		return nil, errors.New("agent has no model configured")
 	}

@@ -217,7 +217,7 @@ func (r *AgentRepo) GetKnowledgeBaseIDs(agentID uint) ([]uint, error) {
 
 func (r *AgentRepo) ListTemplates() ([]AgentTemplate, error) {
 	var items []AgentTemplate
-	if err := r.db.Order("sort ASC, id ASC").Find(&items).Error; err != nil {
+	if err := r.db.Order("id ASC").Find(&items).Error; err != nil {
 		return nil, err
 	}
 	return items, nil

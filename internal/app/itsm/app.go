@@ -64,7 +64,7 @@ func (a *ITSMApp) Models() []any {
 	}
 }
 
-func (a *ITSMApp) Seed(db *gorm.DB, enforcer *casbin.Enforcer) error {
+func (a *ITSMApp) Seed(db *gorm.DB, enforcer *casbin.Enforcer, _ bool) error {
 	return seedITSM(db, enforcer)
 }
 
@@ -135,7 +135,10 @@ func (a *ITSMApp) Providers(i do.Injector) {
 		// Participant resolver for tool-based participant resolution
 		resolver := do.MustInvoke[*engine.ParticipantResolver](i)
 
-		return engine.NewSmartEngine(agentProvider, knowledgeSearcher, userProvider, resolver, submitter), nil
+		// Engine config provider for fallback assignee
+		configProvider := do.MustInvoke[*EngineConfigService](i)
+
+		return engine.NewSmartEngine(agentProvider, knowledgeSearcher, userProvider, resolver, submitter, configProvider), nil
 	})
 
 	// Services
@@ -174,7 +177,12 @@ func (a *ITSMApp) Providers(i do.Injector) {
 	do.Provide(i, func(i do.Injector) (*tools.Operator, error) {
 		db := do.MustInvoke[*database.DB](i)
 		resolver := do.MustInvoke[*engine.ParticipantResolver](i)
-		return tools.NewOperator(db.DB, resolver), nil
+		ticketSvc := do.MustInvoke[*TicketService](i)
+		withdrawFunc := func(ticketID uint, reason string, operatorID uint) error {
+			_, err := ticketSvc.Withdraw(ticketID, reason, operatorID)
+			return err
+		}
+		return tools.NewOperator(db.DB, resolver, withdrawFunc), nil
 	})
 	do.Provide(i, func(i do.Injector) (*tools.SessionStateStore, error) {
 		db := do.MustInvoke[*database.DB](i)
@@ -272,6 +280,7 @@ func (a *ITSMApp) Routes(api *gin.RouterGroup) {
 		g.PUT("/tickets/:id/assign", ticketH.Assign)
 		g.PUT("/tickets/:id/complete", ticketH.Complete)
 		g.PUT("/tickets/:id/cancel", ticketH.Cancel)
+		g.PUT("/tickets/:id/withdraw", ticketH.Withdraw)
 		g.GET("/tickets/:id/timeline", ticketH.Timeline)
 		// Phase 2: Classic engine routes
 		g.POST("/tickets/:id/progress", ticketH.Progress)
@@ -291,6 +300,13 @@ func (a *ITSMApp) Routes(api *gin.RouterGroup) {
 		// Phase 4: Approval routes
 		g.POST("/tickets/:id/activities/:aid/approve", ticketH.ApproveActivity)
 		g.POST("/tickets/:id/activities/:aid/deny", ticketH.DenyActivity)
+		// SLA pause/resume
+		g.PUT("/tickets/:id/sla/pause", ticketH.SLAPause)
+		g.PUT("/tickets/:id/sla/resume", ticketH.SLAResume)
+		// Task dispatch: transfer, delegate, claim
+		g.POST("/tickets/:id/transfer", ticketH.Transfer)
+		g.POST("/tickets/:id/delegate", ticketH.Delegate)
+		g.POST("/tickets/:id/claim", ticketH.Claim)
 	}
 }
 
@@ -330,6 +346,13 @@ func (a *ITSMApp) Tasks() []scheduler.TaskDef {
 			Type:        scheduler.TypeAsync,
 			Description: "Parse uploaded knowledge documents for ITSM services",
 			Handler:     handleDocParse(knowledgeDocSvc),
+		},
+		{
+			Name:        "itsm-sla-check",
+			Type:        scheduler.TypeScheduled,
+			CronExpr:    "*/1 * * * *",
+			Description: "Check SLA breaches and trigger escalation rules",
+			Handler:     engine.HandleSLACheck(db.DB),
 		},
 	}
 }
@@ -392,6 +415,23 @@ type aiAgentAdapter struct {
 
 func (a *aiAgentAdapter) GetAgentConfig(agentID uint) (*engine.SmartAgentConfig, error) {
 	cfg, err := a.provider.GetAgentConfig(agentID)
+	if err != nil {
+		return nil, err
+	}
+	return &engine.SmartAgentConfig{
+		Name:         cfg.Name,
+		SystemPrompt: cfg.SystemPrompt,
+		Temperature:  cfg.Temperature,
+		MaxTokens:    cfg.MaxTokens,
+		Model:        cfg.Model,
+		Protocol:     cfg.Protocol,
+		BaseURL:      cfg.BaseURL,
+		APIKey:       cfg.APIKey,
+	}, nil
+}
+
+func (a *aiAgentAdapter) GetAgentConfigByCode(code string) (*engine.SmartAgentConfig, error) {
+	cfg, err := a.provider.GetAgentConfigByCode(code)
 	if err != nil {
 		return nil, err
 	}

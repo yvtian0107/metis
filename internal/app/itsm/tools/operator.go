@@ -15,13 +15,14 @@ import (
 // Operator is the concrete ServiceDeskOperator implementation.
 // It bridges the ITSM tool handlers to the actual ITSM business services.
 type Operator struct {
-	db       *gorm.DB
-	resolver *engine.ParticipantResolver
+	db           *gorm.DB
+	resolver     *engine.ParticipantResolver
+	withdrawFunc func(ticketID uint, reason string, operatorID uint) error
 }
 
 // NewOperator creates a new ServiceDeskOperator.
-func NewOperator(db *gorm.DB, resolver *engine.ParticipantResolver) *Operator {
-	return &Operator{db: db, resolver: resolver}
+func NewOperator(db *gorm.DB, resolver *engine.ParticipantResolver, withdrawFunc func(uint, string, uint) error) *Operator {
+	return &Operator{db: db, resolver: resolver, withdrawFunc: withdrawFunc}
 }
 
 // MatchServices searches active ServiceDefinitions by keyword scoring.
@@ -235,14 +236,14 @@ func (o *Operator) ListMyTickets(userID uint, status string) ([]TicketSummary, e
 
 	var summaries []TicketSummary
 	for _, r := range rows {
-		// can_withdraw: pending + no completed activities
+		// can_withdraw: non-terminal + no claimed assignments
 		canWithdraw := false
-		if r.Status == "pending" {
-			var completedCount int64
-			o.db.Table("itsm_ticket_activities").
-				Where("ticket_id = ? AND status = ?", r.ID, "completed").
-				Count(&completedCount)
-			canWithdraw = completedCount == 0
+		if r.Status != "completed" && r.Status != "cancelled" && r.Status != "failed" {
+			var claimedCount int64
+			o.db.Table("itsm_ticket_assignments").
+				Where("ticket_id = ? AND claimed_at IS NOT NULL", r.ID).
+				Count(&claimedCount)
+			canWithdraw = claimedCount == 0
 		}
 
 		summaries = append(summaries, TicketSummary{
@@ -259,54 +260,20 @@ func (o *Operator) ListMyTickets(userID uint, status string) ([]TicketSummary, e
 	return summaries, nil
 }
 
-// WithdrawTicket cancels a ticket if the requester owns it and it hasn't been processed.
+// WithdrawTicket cancels a ticket if the requester owns it and it hasn't been claimed.
 func (o *Operator) WithdrawTicket(userID uint, ticketCode string, reason string) error {
+	// Resolve ticket_code → ticket_id.
 	type ticketRow struct {
-		ID          uint
-		RequesterID uint
-		Status      string
+		ID uint
 	}
 	var t ticketRow
 	if err := o.db.Table("itsm_tickets").
 		Where("code = ? AND deleted_at IS NULL", ticketCode).
-		Select("id, requester_id, status").First(&t).Error; err != nil {
+		Select("id").First(&t).Error; err != nil {
 		return fmt.Errorf("工单不存在: %s", ticketCode)
 	}
 
-	if t.RequesterID != userID {
-		return fmt.Errorf("仅工单提交人可撤回")
-	}
-
-	if t.Status == "completed" || t.Status == "cancelled" || t.Status == "failed" {
-		return fmt.Errorf("工单已终结，无法撤回")
-	}
-
-	// Check if any activity has been completed.
-	var completedCount int64
-	o.db.Table("itsm_ticket_activities").
-		Where("ticket_id = ? AND status = ?", t.ID, "completed").
-		Count(&completedCount)
-	if completedCount > 0 {
-		return fmt.Errorf("工单已进入处理流程，无法撤回")
-	}
-
-	// Cancel the ticket.
-	updates := map[string]any{
-		"status": "cancelled",
-	}
-	if err := o.db.Table("itsm_tickets").Where("id = ?", t.ID).Updates(updates).Error; err != nil {
-		return fmt.Errorf("撤回失败: %w", err)
-	}
-
-	// Add timeline entry.
-	o.db.Table("itsm_ticket_timelines").Create(map[string]any{
-		"ticket_id":  t.ID,
-		"operator_id": userID,
-		"event_type": "cancelled",
-		"message":    fmt.Sprintf("工单已撤回：%s", reason),
-	})
-
-	return nil
+	return o.withdrawFunc(t.ID, reason, userID)
 }
 
 // ValidateParticipants checks if workflow participants can be resolved.

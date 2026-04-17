@@ -318,7 +318,7 @@ func (bc *bddContext) whenClaimAndApprove(username string) error {
 	err = bc.engine.Progress(ctx, bc.db, engine.ProgressParams{
 		TicketID:   bc.ticket.ID,
 		ActivityID: activity.ID,
-		Outcome:    "approved",
+		Outcome:    "",
 		OperatorID: user.ID,
 	})
 	if err != nil {

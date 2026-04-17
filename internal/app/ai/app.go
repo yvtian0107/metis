@@ -37,7 +37,7 @@ func (a *AIApp) Models() []any {
 	}
 }
 
-func (a *AIApp) Seed(db *gorm.DB, enforcer *casbin.Enforcer) error {
+func (a *AIApp) Seed(db *gorm.DB, enforcer *casbin.Enforcer, _ bool) error {
 	return seedAI(db, enforcer)
 }
 

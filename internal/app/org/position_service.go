@@ -22,7 +22,7 @@ func NewPositionService(i do.Injector) (*PositionService, error) {
 	return &PositionService{repo: repo}, nil
 }
 
-func (s *PositionService) Create(name, code string, level int, description string) (*Position, error) {
+func (s *PositionService) Create(name, code string, description string) (*Position, error) {
 	if _, err := s.repo.FindByCode(code); err == nil {
 		return nil, ErrPositionCodeExists
 	}
@@ -30,7 +30,6 @@ func (s *PositionService) Create(name, code string, level int, description strin
 	pos := &Position{
 		Name:        name,
 		Code:        code,
-		Level:       level,
 		Description: description,
 		IsActive:    true,
 	}
@@ -59,7 +58,7 @@ func (s *PositionService) ListActive() ([]Position, error) {
 	return s.repo.ListActive()
 }
 
-func (s *PositionService) Update(id uint, name, code *string, level *int, description *string, isActive *bool) (*Position, error) {
+func (s *PositionService) Update(id uint, name, code *string, description *string, isActive *bool) (*Position, error) {
 	pos, err := s.repo.FindByID(id)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -77,9 +76,6 @@ func (s *PositionService) Update(id uint, name, code *string, level *int, descri
 			return nil, ErrPositionCodeExists
 		}
 		updates["code"] = *code
-	}
-	if level != nil {
-		updates["level"] = *level
 	}
 	if description != nil {
 		updates["description"] = *description

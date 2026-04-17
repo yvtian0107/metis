@@ -12,10 +12,14 @@ var (
 	ErrKnowledgeBaseNotFound = errors.New("knowledge base not found")
 )
 
+type knowledgeGraphDeleter interface {
+	DeleteGraph(kbID uint) error
+}
+
 type KnowledgeBaseService struct {
 	repo       *KnowledgeBaseRepo
 	sourceRepo *KnowledgeSourceRepo
-	graphRepo  *KnowledgeGraphRepo
+	graphRepo  knowledgeGraphDeleter
 }
 
 func NewKnowledgeBaseService(i do.Injector) (*KnowledgeBaseService, error) {

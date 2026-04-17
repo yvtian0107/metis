@@ -92,7 +92,6 @@ type Position struct {
 	model.BaseModel
 	Name        string `json:"name" gorm:"size:128;not null"`
 	Code        string `json:"code" gorm:"size:64;uniqueIndex;not null"`
-	Level       int    `json:"level" gorm:"default:0"`
 	Sort        int    `json:"sort" gorm:"default:0"`
 	Description string `json:"description" gorm:"size:255"`
 	IsActive    bool   `json:"isActive" gorm:"not null;default:true"`
@@ -104,7 +103,6 @@ type PositionResponse struct {
 	ID          uint      `json:"id"`
 	Name        string    `json:"name"`
 	Code        string    `json:"code"`
-	Level       int       `json:"level"`
 	Description string    `json:"description"`
 	IsActive    bool      `json:"isActive"`
 	CreatedAt   time.Time `json:"createdAt"`
@@ -116,7 +114,6 @@ func (p *Position) ToResponse() PositionResponse {
 		ID:          p.ID,
 		Name:        p.Name,
 		Code:        p.Code,
-		Level:       p.Level,
 		Description: p.Description,
 		IsActive:    p.IsActive,
 		CreatedAt:   p.CreatedAt,

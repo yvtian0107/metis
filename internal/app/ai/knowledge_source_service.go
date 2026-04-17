@@ -12,10 +12,14 @@ var (
 	ErrSourceNotFound = errors.New("knowledge source not found")
 )
 
+type knowledgeGraphNodeDeleter interface {
+	DeleteNodesBySourceID(kbID uint, sourceID uint) (int64, error)
+}
+
 type KnowledgeSourceService struct {
 	repo      *KnowledgeSourceRepo
 	kbRepo    *KnowledgeBaseRepo
-	graphRepo *KnowledgeGraphRepo
+	graphRepo knowledgeGraphNodeDeleter
 }
 
 func NewKnowledgeSourceService(i do.Injector) (*KnowledgeSourceService, error) {

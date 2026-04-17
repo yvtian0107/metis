@@ -22,7 +22,7 @@ func (a *APMApp) Name() string { return "apm" }
 
 func (a *APMApp) Models() []any { return nil }
 
-func (a *APMApp) Seed(db *gorm.DB, enforcer *casbin.Enforcer) error {
+func (a *APMApp) Seed(db *gorm.DB, enforcer *casbin.Enforcer, _ bool) error {
 	return seedAPM(db, enforcer)
 }
 

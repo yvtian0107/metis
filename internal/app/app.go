@@ -15,7 +15,7 @@ import (
 type App interface {
 	Name() string
 	Models() []any
-	Seed(db *gorm.DB, enforcer *casbin.Enforcer) error
+	Seed(db *gorm.DB, enforcer *casbin.Enforcer, install bool) error
 	Providers(i do.Injector)
 	Routes(api *gin.RouterGroup)
 	Tasks() []scheduler.TaskDef
@@ -57,6 +57,8 @@ func All() []App     { return apps }
 type AIAgentProvider interface {
 	// GetAgentConfig returns agent configuration by ID (system prompt, model info, etc).
 	GetAgentConfig(agentID uint) (*AIAgentConfig, error)
+	// GetAgentConfigByCode returns agent configuration by code (e.g. "itsm.decision").
+	GetAgentConfigByCode(code string) (*AIAgentConfig, error)
 }
 
 // AIAgentConfig holds agent configuration needed for LLM calls.

@@ -8,38 +8,44 @@ import (
 	"gorm.io/gorm"
 
 	"metis/internal/app/ai"
+	"metis/internal/database"
 	"metis/internal/model"
 	"metis/internal/repository"
 )
 
 var (
-	ErrEngineNotConfigured = errors.New("工作流解析引擎未配置，请前往引擎配置页面设置")
-	ErrModelNotFound       = errors.New("模型不存在或已停用")
+	ErrEngineNotConfigured   = errors.New("工作流解析引擎未配置，请前往引擎配置页面设置")
+	ErrModelNotFound         = errors.New("模型不存在或已停用")
+	ErrFallbackUserNotFound  = errors.New("兜底处理人不存在或已停用")
 )
 
 // EngineConfigService manages ITSM engine configuration.
 // It aggregates AI Agent records (for LLM config) and SystemConfig (for ITSM-specific settings).
 type EngineConfigService struct {
-	agentSvc     *ai.AgentService
-	modelRepo    *ai.ModelRepo
-	providerRepo *ai.ProviderRepo
+	agentSvc      *ai.AgentService
+	modelRepo     *ai.ModelRepo
+	providerRepo  *ai.ProviderRepo
 	sysConfigRepo *repository.SysConfigRepo
+	db            *gorm.DB
 }
 
 func NewEngineConfigService(i do.Injector) (*EngineConfigService, error) {
+	db := do.MustInvoke[*database.DB](i)
 	return &EngineConfigService{
 		agentSvc:      do.MustInvoke[*ai.AgentService](i),
 		modelRepo:     do.MustInvoke[*ai.ModelRepo](i),
 		providerRepo:  do.MustInvoke[*ai.ProviderRepo](i),
 		sysConfigRepo: do.MustInvoke[*repository.SysConfigRepo](i),
+		db:            db.DB,
 	}, nil
 }
 
 // EngineConfig is the aggregated engine configuration response.
 type EngineConfig struct {
-	Generator EngineAgentConfig `json:"generator"`
-	Runtime   EngineRuntimeConfig `json:"runtime"`
-	General   EngineGeneralConfig `json:"general"`
+	Generator   EngineAgentConfig    `json:"generator"`
+	Servicedesk EngineAgentConfig    `json:"servicedesk"`
+	Decision    EngineDecisionConfig `json:"decision"`
+	General     EngineGeneralConfig  `json:"general"`
 }
 
 type EngineAgentConfig struct {
@@ -50,15 +56,16 @@ type EngineAgentConfig struct {
 	Temperature  float64 `json:"temperature"`
 }
 
-type EngineRuntimeConfig struct {
+type EngineDecisionConfig struct {
 	EngineAgentConfig
 	DecisionMode string `json:"decisionMode"`
 }
 
 type EngineGeneralConfig struct {
-	MaxRetries     int    `json:"maxRetries"`
-	TimeoutSeconds int    `json:"timeoutSeconds"`
-	ReasoningLog   string `json:"reasoningLog"`
+	MaxRetries        int    `json:"maxRetries"`
+	TimeoutSeconds    int    `json:"timeoutSeconds"`
+	ReasoningLog      string `json:"reasoningLog"`
+	FallbackAssignee  uint   `json:"fallbackAssignee"`
 }
 
 // GetConfig returns the aggregated engine configuration.
@@ -68,18 +75,22 @@ func (s *EngineConfigService) GetConfig() (*EngineConfig, error) {
 	// Read generator agent config
 	cfg.Generator = s.readAgentConfig("itsm.generator")
 
-	// Read runtime agent config
-	runtimeAgent := s.readAgentConfig("itsm.runtime")
-	cfg.Runtime = EngineRuntimeConfig{
-		EngineAgentConfig: runtimeAgent,
-		DecisionMode:      s.getConfigValue("itsm.engine.runtime.decision_mode", "direct_first"),
+	// Read servicedesk agent config
+	cfg.Servicedesk = s.readAgentConfig("itsm.servicedesk")
+
+	// Read decision agent config
+	decisionAgent := s.readAgentConfig("itsm.decision")
+	cfg.Decision = EngineDecisionConfig{
+		EngineAgentConfig: decisionAgent,
+		DecisionMode:      s.getConfigValue("itsm.engine.decision.decision_mode", "direct_first"),
 	}
 
 	// Read general settings
 	cfg.General = EngineGeneralConfig{
-		MaxRetries:     s.getConfigInt("itsm.engine.general.max_retries", 3),
-		TimeoutSeconds: s.getConfigInt("itsm.engine.general.timeout_seconds", 30),
-		ReasoningLog:   s.getConfigValue("itsm.engine.general.reasoning_log", "full"),
+		MaxRetries:       s.getConfigInt("itsm.engine.general.max_retries", 3),
+		TimeoutSeconds:   s.getConfigInt("itsm.engine.general.timeout_seconds", 30),
+		ReasoningLog:     s.getConfigValue("itsm.engine.general.reasoning_log", "full"),
+		FallbackAssignee: uint(s.getConfigInt("itsm.engine.general.fallback_assignee", 0)),
 	}
 
 	return cfg, nil
@@ -91,15 +102,20 @@ type UpdateConfigRequest struct {
 		ModelID     uint    `json:"modelId"`
 		Temperature float64 `json:"temperature"`
 	} `json:"generator"`
-	Runtime struct {
+	Servicedesk struct {
+		ModelID     uint    `json:"modelId"`
+		Temperature float64 `json:"temperature"`
+	} `json:"servicedesk"`
+	Decision struct {
 		ModelID      uint    `json:"modelId"`
 		Temperature  float64 `json:"temperature"`
 		DecisionMode string  `json:"decisionMode"`
-	} `json:"runtime"`
+	} `json:"decision"`
 	General struct {
-		MaxRetries     int    `json:"maxRetries"`
-		TimeoutSeconds int    `json:"timeoutSeconds"`
-		ReasoningLog   string `json:"reasoningLog"`
+		MaxRetries       int    `json:"maxRetries"`
+		TimeoutSeconds   int    `json:"timeoutSeconds"`
+		ReasoningLog     string `json:"reasoningLog"`
+		FallbackAssignee uint   `json:"fallbackAssignee"`
 	} `json:"general"`
 }
 
@@ -111,8 +127,13 @@ func (s *EngineConfigService) UpdateConfig(req *UpdateConfigRequest) error {
 			return ErrModelNotFound
 		}
 	}
-	if req.Runtime.ModelID > 0 {
-		if _, err := s.modelRepo.FindByID(req.Runtime.ModelID); err != nil {
+	if req.Servicedesk.ModelID > 0 {
+		if _, err := s.modelRepo.FindByID(req.Servicedesk.ModelID); err != nil {
+			return ErrModelNotFound
+		}
+	}
+	if req.Decision.ModelID > 0 {
+		if _, err := s.modelRepo.FindByID(req.Decision.ModelID); err != nil {
 			return ErrModelNotFound
 		}
 	}
@@ -122,16 +143,34 @@ func (s *EngineConfigService) UpdateConfig(req *UpdateConfigRequest) error {
 		return err
 	}
 
-	// Update runtime agent
-	if err := s.updateAgentConfig("itsm.runtime", req.Runtime.ModelID, req.Runtime.Temperature); err != nil {
+	// Update servicedesk agent
+	if err := s.updateAgentConfig("itsm.servicedesk", req.Servicedesk.ModelID, req.Servicedesk.Temperature); err != nil {
 		return err
 	}
 
+	// Update decision agent
+	if err := s.updateAgentConfig("itsm.decision", req.Decision.ModelID, req.Decision.Temperature); err != nil {
+		return err
+	}
+
+	// Validate fallback assignee if provided
+	if req.General.FallbackAssignee > 0 {
+		var user struct{ IsActive bool }
+		if err := s.db.Table("users").Where("id = ? AND deleted_at IS NULL", req.General.FallbackAssignee).
+			Select("is_active").First(&user).Error; err != nil {
+			return ErrFallbackUserNotFound
+		}
+		if !user.IsActive {
+			return ErrFallbackUserNotFound
+		}
+	}
+
 	// Update SystemConfig values
-	s.setConfigValue("itsm.engine.runtime.decision_mode", req.Runtime.DecisionMode)
+	s.setConfigValue("itsm.engine.decision.decision_mode", req.Decision.DecisionMode)
 	s.setConfigValue("itsm.engine.general.max_retries", strconv.Itoa(req.General.MaxRetries))
 	s.setConfigValue("itsm.engine.general.timeout_seconds", strconv.Itoa(req.General.TimeoutSeconds))
 	s.setConfigValue("itsm.engine.general.reasoning_log", req.General.ReasoningLog)
+	s.setConfigValue("itsm.engine.general.fallback_assignee", strconv.FormatUint(uint64(req.General.FallbackAssignee), 10))
 
 	return nil
 }
@@ -217,4 +256,10 @@ func (s *EngineConfigService) setConfigValue(key, value string) {
 	}
 	cfg.Value = value
 	_ = s.sysConfigRepo.Set(cfg)
+}
+
+// FallbackAssigneeID returns the configured fallback assignee user ID (0 = not configured).
+// Implements engine.EngineConfigProvider.
+func (s *EngineConfigService) FallbackAssigneeID() uint {
+	return uint(s.getConfigInt("itsm.engine.general.fallback_assignee", 0))
 }

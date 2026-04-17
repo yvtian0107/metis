@@ -45,4 +45,7 @@ func initializeScenario(sc *godog.ScenarioContext) {
 	registerCommonSteps(sc, bc)
 	registerClassicSteps(sc, bc)
 	registerSmartSteps(sc, bc)
+	registerWithdrawSteps(sc, bc)
+	registerParticipantSteps(sc, bc)
+	registerDeterministicSteps(sc, bc)
 }

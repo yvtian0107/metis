@@ -6,7 +6,7 @@ Provides idempotent database seeding of built-in roles, menus, Casbin policies, 
 ## Requirements
 
 ### Requirement: Seed execution context
-The seed logic SHALL be split into two functions: `seed.Install()` for first-time installation and `seed.Sync()` for subsequent startups.
+The seed logic SHALL be split into two functions: `seed.Install()` for first-time installation and `seed.Sync()` for subsequent startups. The `App` interface `Seed` method SHALL accept an `install bool` parameter to distinguish first-time installation from daily sync: `Seed(db *gorm.DB, enforcer *casbin.Enforcer, install bool) error`.
 
 #### Scenario: Install-time full seed
 - **WHEN** `seed.Install(db, enforcer)` is called during installation
@@ -27,6 +27,18 @@ The seed logic SHALL be split into two functions: `seed.Install()` for first-tim
 #### Scenario: Sync output
 - **WHEN** `seed.Sync()` completes
 - **THEN** the function SHALL return a Result with counts of created/skipped items (same format as before)
+
+#### Scenario: App.Seed called with install=true during installation
+- **WHEN** the Install wizard's hotSwitch calls `App.Seed()`
+- **THEN** it SHALL pass `install=true` so Apps can seed install-only data (e.g., built-in departments)
+
+#### Scenario: App.Seed called with install=false on normal startup
+- **WHEN** the server starts normally and calls `App.Seed()` for each registered App
+- **THEN** it SHALL pass `install=false` so Apps only run sync-safe logic (menus, policies)
+
+#### Scenario: All Apps implement updated signature
+- **WHEN** the `App` interface changes to `Seed(db *gorm.DB, enforcer *casbin.Enforcer, install bool) error`
+- **THEN** all existing App implementations (ai, apm, itsm, license, node, observe, org) SHALL update their `Seed` method signature to match
 
 ### Requirement: Built-in roles seed data
 The seed SHALL create two system roles: admin (code="admin", name="管理员", isSystem=true, sort=0) and user (code="user", name="普通用户", isSystem=true, sort=1).

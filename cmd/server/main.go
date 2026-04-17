@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"flag"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -33,6 +34,22 @@ import (
 )
 
 func main() {
+	// Subcommand detection: check before flag.Parse()
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "seed":
+			runSeed(os.Args[2:])
+			return
+		case "-config", "-host", "-port", "--help", "-h", "-test.v":
+			// Known flags — fall through to normal startup
+		default:
+			if os.Args[1][0] != '-' {
+				fmt.Fprintf(os.Stderr, "unknown command: %s\nUsage: server [seed] [-config path] [-host addr] [-port num]\n", os.Args[1])
+				os.Exit(1)
+			}
+		}
+	}
+
 	configPath := flag.String("config", "config.yml", "path to config file")
 	host := flag.String("host", "0.0.0.0", "server host")
 	port := flag.String("port", "8000", "server port")
@@ -140,7 +157,7 @@ func main() {
 				}
 			}
 			a.Providers(injector)
-			if err := a.Seed(db.DB, enforcer); err != nil {
+			if err := a.Seed(db.DB, enforcer, false); err != nil {
 				slog.Error("app seed failed", "app", a.Name(), "error", err)
 				os.Exit(1)
 			}
@@ -237,6 +254,62 @@ func main() {
 
 		startServer(r, *host, serverPort, injector, otelShutdown)
 	}
+}
+
+func runSeed(args []string) {
+	fs := flag.NewFlagSet("seed", flag.ExitOnError)
+	configPath := fs.String("config", "config.yml", "path to config file")
+	fs.Parse(args)
+
+	cfg, err := config.Load(*configPath)
+	if err != nil {
+		slog.Error("seed: failed to load config (is the system installed?)", "error", err)
+		os.Exit(1)
+	}
+
+	injector := do.New()
+	do.ProvideValue(injector, cfg)
+	do.Provide(injector, database.New)
+	do.Provide(injector, repository.NewSysConfig)
+	do.Provide(injector, service.NewSysConfig)
+	db := do.MustInvoke[*database.DB](injector)
+
+	// Encryption key (needed by some providers)
+	do.ProvideValue(injector, crypto.EncryptionKey(crypto.DeriveKey(cfg.SecretKey)))
+
+	// Register kernel providers for Casbin enforcer
+	registerKernelProviders(injector)
+	enforcer := do.MustInvoke[*casbin.Enforcer](injector)
+
+	// Kernel seed sync
+	if result, err := seed.Sync(db.DB, enforcer); err != nil {
+		slog.Error("seed: kernel sync failed", "error", err)
+		os.Exit(1)
+	} else {
+		slog.Info("seed: kernel sync complete",
+			"roles_created", result.RolesCreated,
+			"menus_created", result.MenusCreated,
+			"policies_added", result.PoliciesAdded,
+		)
+	}
+
+	// App seed (install=true for full seed)
+	for _, a := range app.All() {
+		if models := a.Models(); len(models) > 0 {
+			if err := db.DB.AutoMigrate(models...); err != nil {
+				slog.Error("seed: app auto-migrate failed", "app", a.Name(), "error", err)
+				os.Exit(1)
+			}
+		}
+		a.Providers(injector)
+		if err := a.Seed(db.DB, enforcer, true); err != nil {
+			slog.Error("seed: app seed failed", "app", a.Name(), "error", err)
+			os.Exit(1)
+		}
+		slog.Info("seed: app seed complete", "app", a.Name())
+	}
+
+	slog.Info("seed: all done")
 }
 
 func startServer(r *gin.Engine, host, port string, injector do.Injector, otelShutdown func(context.Context)) {

@@ -1,97 +1,80 @@
-# itsm-bpmn-nodes
+# Delta Spec: itsm-bpmn-nodes
 
-## Purpose
+> Capability: itsm-bpmn-nodes
+> Change: classic-engine-enterprise
+> Type: MODIFIED
 
-BPMN 风格节点渲染规范，定义工作流编辑器和查看器中各类节点（Event、Task、Gateway、Subprocess）和边（Edge）的视觉呈现方式。
+## MODIFIED Requirements
 
-## Requirements
+### Requirement: Approve node execution supports multi-person modes
 
-### Requirement: Event 节点圆形渲染
-系统 SHALL 将 Start 节点渲染为细线圆形（绿色 #22c55e），End 节点渲染为粗线圆形（红色 #ef4444），Timer 节点渲染为双线圆形+时钟图标（靛蓝 #6366f1），Signal 节点渲染为双线圆形+闪电图标（靛蓝 #6366f1）。
+The approve node SHALL execute differently based on execution_mode:
+- **single**: First participant action completes the activity (existing behavior).
+- **parallel**: All assigned participants MUST complete their assignment. Activity completes only when all assignments are resolved. Any single reject immediately completes the activity with "reject" outcome.
+- **sequential**: Participants act in sequence order. Only the assignment with is_current=true can act. After each completion, is_current advances to the next assignment. The last assignment completion triggers activity completion.
 
-#### Scenario: Start 节点渲染
-- **WHEN** 画布上存在 nodeType="start" 的节点
-- **THEN** 渲染为细线圆形，填充色为绿色半透明，内部显示 Play 图标，仅有 source handle（底部）
+#### Scenario: approve-single first person completes
 
-#### Scenario: End 节点渲染
-- **WHEN** 画布上存在 nodeType="end" 的节点
-- **THEN** 渲染为粗线（3px）圆形，填充色为红色半透明，内部显示 Square 图标，仅有 target handle（顶部）
+- WHEN an approve node has execution_mode "single" (or empty)
+- AND the first assigned participant submits an approve or reject action
+- THEN the activity SHALL be marked as completed immediately
+- AND the outcome SHALL reflect the participant's action
 
-#### Scenario: Timer 节点渲染
-- **WHEN** 画布上存在 nodeType="timer" 的节点
-- **THEN** 渲染为双线圆形，内部显示时钟图标，同时具有 target handle（顶部）和 source handle（底部）
+#### Scenario: approve-parallel all must act
 
-#### Scenario: Signal 节点渲染
-- **WHEN** 画布上存在 nodeType="signal" 的节点
-- **THEN** 渲染为双线圆形，内部显示闪电图标，同时具有 target handle（顶部）和 source handle（底部）
+- WHEN an approve node has execution_mode "parallel"
+- AND all assigned participants submit an approve action
+- THEN the activity SHALL be marked as completed with "approve" outcome only after the last participant acts
 
-### Requirement: Task 节点卡片式渲染
-系统 SHALL 将 Task 类节点渲染为差异化圆角矩形卡片，顶部显示图标+标题行，下方嵌入摘要信息。各类型颜色：Form(蓝 #3b82f6), Approve(琥珀 #f59e0b), Process(紫 #8b5cf6), Action(青 #06b6d4), Script(灰蓝 #64748b), Notify(粉 #ec4899)。
+#### Scenario: approve-parallel any reject short-circuits
 
-#### Scenario: Form 节点显示表单摘要
-- **WHEN** 画布上存在 nodeType="form" 且绑定了 FormDefinition 的节点
-- **THEN** 卡片下方显示表单名称和字段数量摘要（如 "用户申请表 · 8 字段"）
+- WHEN an approve node has execution_mode "parallel"
+- AND any one assigned participant submits a reject action
+- THEN the activity SHALL be marked as completed immediately with "reject" outcome
+- AND remaining unresolved assignments SHALL be cancelled
 
-#### Scenario: Approve 节点显示参与人
-- **WHEN** 画布上存在 nodeType="approve" 且配置了 participants 的节点
-- **THEN** 卡片下方显示首个参与人名称 + 剩余数量（如 "张三 +2"），并显示审批模式 badge（单签/会签/依次）
+#### Scenario: approve-sequential advances is_current
 
-#### Scenario: Action 节点显示动作摘要
-- **WHEN** 画布上存在 nodeType="action" 且配置了 actionId 的节点
-- **THEN** 卡片下方显示关联的 ServiceAction 名称和 HTTP 方法（如 "创建工单 · POST"）
+- WHEN an approve node has execution_mode "sequential"
+- AND the participant with is_current=true submits an approve action
+- AND there are remaining assignments after the current one
+- THEN is_current SHALL be set to false on the completed assignment
+- AND is_current SHALL be set to true on the next assignment in sequence order
+- AND the activity SHALL remain in progress
 
-#### Scenario: Notify 节点显示通道类型
-- **WHEN** 画布上存在 nodeType="notify" 且配置了 channelType 的节点
-- **THEN** 卡片下方显示通知通道类型（如 "邮件" 或 "站内信"）
+#### Scenario: approve-sequential last completes activity
 
-#### Scenario: 未配置的 Task 节点
-- **WHEN** Task 类节点未配置必要属性（如无 participants、无 formSchema）
-- **THEN** 卡片下方显示灰色提示文字（如 "未配置参与人"）
+- WHEN an approve node has execution_mode "sequential"
+- AND the participant with is_current=true submits an action
+- AND there are no remaining assignments after the current one
+- THEN the activity SHALL be marked as completed
+- AND the outcome SHALL reflect the last participant's action
 
-### Requirement: Gateway 节点符号化渲染
-系统 SHALL 将 Gateway 节点渲染为菱形+内部符号：Exclusive(✕), Parallel(✛), Inclusive(○)。菱形下方显示标签文字。
+### Requirement: Notify node sends actual notifications
 
-#### Scenario: Exclusive 网关渲染
-- **WHEN** 画布上存在 nodeType="exclusive" 的节点
-- **THEN** 渲染为橙色菱形，内部显示 ✕ 符号，下方显示标签
+The notify node SHALL invoke NotificationSender.Send() to deliver notifications via the configured channel_id. If NotificationSender is nil (not configured), the node SHALL skip sending and only record a timeline entry. Notification failure SHALL NOT block workflow advancement.
 
-#### Scenario: Parallel 网关渲染
-- **WHEN** 画布上存在 nodeType="parallel" 的节点
-- **THEN** 渲染为蓝绿菱形，内部显示 ✛ 符号，具有多个 source handle
+#### Scenario: notify sends via channel
 
-#### Scenario: Inclusive 网关渲染
-- **WHEN** 画布上存在 nodeType="inclusive" 的节点
-- **THEN** 渲染为黄色菱形，内部显示 ○ 符号
+- WHEN a notify node is executed
+- AND NotificationSender is configured (non-nil)
+- AND the node configuration includes a valid channel_id
+- THEN the system SHALL invoke NotificationSender.Send() with the channel_id and rendered notification content
+- AND a timeline entry SHALL be recorded
 
-### Requirement: Subprocess 节点渲染
-系统 SHALL 将 Subprocess 节点渲染为粗边框（3px）矩形，底部显示 [+] 折叠展开按钮。
+#### Scenario: notify skips when sender nil
 
-#### Scenario: Subprocess 折叠态
-- **WHEN** subprocess 节点处于折叠状态
-- **THEN** 显示粗边框矩形 + 标题 + 底部 [+] 按钮，点击 [+] 展开显示子流程缩略图
+- WHEN a notify node is executed
+- AND NotificationSender is nil (not configured)
+- THEN the system SHALL skip the send operation
+- AND a timeline entry SHALL be recorded indicating notification was skipped
+- AND workflow advancement SHALL proceed normally
 
-#### Scenario: Subprocess 展开态
-- **WHEN** subprocess 节点处于展开状态
-- **THEN** 矩形尺寸扩大，内部显示子流程节点缩略图（只读），底部 [-] 按钮可收起
+#### Scenario: notify failure non-blocking
 
-### Requirement: 选中节点视觉反馈
-系统 SHALL 在节点被选中时显示 primary 颜色的 ring 高亮。
-
-#### Scenario: 单击选中节点
-- **WHEN** 用户单击任意节点
-- **THEN** 该节点显示 2px primary ring，其余节点取消 ring
-
-### Requirement: 自定义 Edge 渲染
-系统 SHALL 使用自定义 Edge 组件渲染连线，支持在路径上显示条件摘要或 outcome 标签。
-
-#### Scenario: Gateway 出边显示条件
-- **WHEN** exclusive gateway 的出边配置了 condition
-- **THEN** 连线中点显示条件摘要 badge（如 "优先级 = 高"）
-
-#### Scenario: Approve 出边显示 outcome
-- **WHEN** approve 节点的出边配置了 outcome="approved" 或 "rejected"
-- **THEN** 连线中点显示绿色 "approved" 或红色 "rejected" badge
-
-#### Scenario: Default 边标记
-- **WHEN** 出边标记为 isDefault=true
-- **THEN** 连线中点显示斜杠标记（/）表示默认路径
+- WHEN a notify node is executed
+- AND NotificationSender.Send() returns an error
+- THEN the system SHALL log the error
+- AND a timeline entry SHALL be recorded indicating notification failure
+- AND workflow advancement SHALL NOT be blocked
+- AND the activity SHALL be marked as completed

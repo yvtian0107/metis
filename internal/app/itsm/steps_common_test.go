@@ -42,6 +42,7 @@ type bddContext struct {
 	priority          *Priority
 	ticket            *Ticket
 	tickets           map[string]*Ticket // multi-ticket scenarios, key = alias
+	fallbackUserID    uint               // fallback assignee for participant validation scenarios
 }
 
 func newBDDContext() *bddContext {
@@ -71,6 +72,7 @@ func (bc *bddContext) reset() {
 	bc.positions = make(map[string]*org.Position)
 	bc.departments = make(map[string]*org.Department)
 	bc.tickets = make(map[string]*Ticket)
+	bc.fallbackUserID = 0
 
 	// Fresh in-memory database per scenario.
 	db, err := gorm.Open(sqlite.Open(fmt.Sprintf("file:bdd_%p?mode=memory&cache=shared", bc)), &gorm.Config{})
@@ -126,7 +128,7 @@ func (bc *bddContext) reset() {
 	// Build SmartEngine with test dependencies.
 	agentProvider := &testAgentProvider{db: db, llmCfg: bc.llmCfg}
 	userProvider := &testUserProvider{db: db}
-	bc.smartEngine = engine.NewSmartEngine(agentProvider, nil, userProvider, resolver, &noopSubmitter{})
+	bc.smartEngine = engine.NewSmartEngine(agentProvider, nil, userProvider, resolver, &noopSubmitter{}, nil)
 }
 
 // ---------------------------------------------------------------------------

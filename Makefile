@@ -76,6 +76,9 @@ release-sidecar:
 run: build
 	./server
 
+seed:
+	go run -tags dev -ldflags '$(LDFLAGS)' ./cmd/server seed
+
 test:
 	go test ./...
 
@@ -137,7 +140,7 @@ endif
 test-bdd:
 	go test ./internal/app/itsm/ -run TestBDD -v
 
-.PHONY: web-build web-dev refer-clone dev build release release-license build-license build-sidecar release-sidecar run push test test-license test-fuzz test-llm test-pretty test-cover test-report test-llm-report test-bdd
+.PHONY: web-build web-dev refer-clone dev build release release-license build-license build-sidecar release-sidecar run seed push test test-license test-fuzz test-llm test-pretty test-cover test-report test-llm-report test-bdd
 
 # Backward-compat aliases
 license: build-license

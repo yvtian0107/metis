@@ -27,7 +27,7 @@ func (a *LicenseApp) Models() []any {
 	return []any{&Product{}, &Plan{}, &ProductKey{}, &Licensee{}, &License{}, &LicenseRegistration{}}
 }
 
-func (a *LicenseApp) Seed(db *gorm.DB, enforcer *casbin.Enforcer) error {
+func (a *LicenseApp) Seed(db *gorm.DB, enforcer *casbin.Enforcer, _ bool) error {
 	return seedLicense(db, enforcer)
 }
 

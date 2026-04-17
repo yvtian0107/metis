@@ -24,8 +24,8 @@ func (a *OrgApp) Models() []any {
 	return []any{&Department{}, &Position{}, &UserPosition{}}
 }
 
-func (a *OrgApp) Seed(db *gorm.DB, enforcer *casbin.Enforcer) error {
-	return seedOrg(db, enforcer)
+func (a *OrgApp) Seed(db *gorm.DB, enforcer *casbin.Enforcer, install bool) error {
+	return seedOrg(db, enforcer, install)
 }
 
 func (a *OrgApp) Providers(i do.Injector) {
