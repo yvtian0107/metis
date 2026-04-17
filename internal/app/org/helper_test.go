@@ -24,6 +24,7 @@ func newOrgTestDB(t *testing.T) *database.DB {
 		&Department{},
 		&Position{},
 		&UserPosition{},
+		&DepartmentPosition{},
 	); err != nil {
 		t.Fatalf("migrate test db: %v", err)
 	}

@@ -18,6 +18,23 @@ export interface MemberItem {
   createdAt: string
 }
 
+export interface MemberPositionItem {
+  assignmentId: number
+  positionId: number
+  positionName: string
+  isPrimary: boolean
+}
+
+export interface MemberWithPositions {
+  userId: number
+  username: string
+  email: string
+  avatar: string
+  departmentId: number
+  positions: MemberPositionItem[]
+  createdAt: string
+}
+
 export interface PositionItem {
   id: number
   name: string

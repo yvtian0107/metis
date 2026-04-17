@@ -5,12 +5,12 @@ import { api } from "@/lib/api"
 import { toast } from "sonner"
 import { usePermission } from "@/hooks/use-permission"
 import { useListPage } from "@/hooks/use-list-page"
-import type { TreeNode, MemberItem, PositionItem } from "./types"
+import type { TreeNode, MemberWithPositions } from "./types"
 import { collectExpandedIds, findNodeById } from "./types"
 import { DepartmentTree } from "./department-tree"
 import { MemberList } from "./member-list"
 import { AddMemberSheet } from "./add-member-sheet"
-import { ChangePositionSheet } from "../../components/change-position-sheet"
+import { EditPositionsSheet } from "../../components/change-position-sheet"
 import { UserOrgSheet } from "../../components/user-org-sheet"
 
 export function Component() {
@@ -21,9 +21,9 @@ export function Component() {
   const [selectedDeptId, setSelectedDeptId] = useState<number | null>(null)
   const [userExpanded, setUserExpanded] = useState<Set<number> | null>(null)
   const [sheetOpen, setSheetOpen] = useState(false)
-  const [removeTarget, setRemoveTarget] = useState<MemberItem | null>(null)
-  const [changePositionTarget, setChangePositionTarget] = useState<MemberItem | null>(null)
-  const [orgSheetTarget, setOrgSheetTarget] = useState<MemberItem | null>(null)
+  const [removeTarget, setRemoveTarget] = useState<MemberWithPositions | null>(null)
+  const [editPositionsTarget, setEditPositionsTarget] = useState<MemberWithPositions | null>(null)
+  const [orgSheetTarget, setOrgSheetTarget] = useState<MemberWithPositions | null>(null)
 
   // -- Permissions --
   const canCreate = usePermission("org:assignment:create")
@@ -62,27 +62,12 @@ export function Component() {
     totalPages,
     isLoading,
     handleSearch,
-  } = useListPage<MemberItem>({
+  } = useListPage<MemberWithPositions>({
     queryKey: "org-assignments",
     endpoint: "/api/v1/org/users",
     extraParams,
     enabled: !!selectedDeptId,
   })
-
-  // -- Positions for display --
-  const { data: positionsData } = useQuery({
-    queryKey: ["positions", "all"],
-    queryFn: async () => {
-      const res = await api.get<{ items: PositionItem[] }>("/api/v1/org/positions?pageSize=0")
-      return res.items
-    },
-  })
-
-  const positionMap = useMemo(() => {
-    const map = new Map<number, string>()
-    positionsData?.forEach((p) => map.set(p.id, p.name))
-    return map
-  }, [positionsData])
 
   const existingUserIds = useMemo(() => {
     return new Set(items.map((m) => m.userId))
@@ -100,24 +85,16 @@ export function Component() {
   }, [queryClient])
 
   const removeMutation = useMutation({
-    mutationFn: async (member: MemberItem) => {
-      await api.delete(`/api/v1/org/users/${member.userId}/positions/${member.assignmentId}`)
+    mutationFn: async (member: MemberWithPositions) => {
+      // Remove all positions for this user in this department by sending empty array
+      await api.put(`/api/v1/org/users/${member.userId}/departments/${member.departmentId}/positions`, {
+        positionIds: [],
+      })
     },
     onSuccess: () => {
       toast.success(t("org:assignments.removeSuccess"))
       invalidateAll()
       setRemoveTarget(null)
-    },
-    onError: (err: Error) => toast.error(err.message),
-  })
-
-  const setPrimaryMutation = useMutation({
-    mutationFn: async (member: MemberItem) => {
-      await api.put(`/api/v1/org/users/${member.userId}/positions/${member.assignmentId}/primary`, {})
-    },
-    onSuccess: () => {
-      toast.success(t("org:assignments.primarySuccess"))
-      queryClient.invalidateQueries({ queryKey: ["org-assignments"] })
     },
     onError: (err: Error) => toast.error(err.message),
   })
@@ -154,13 +131,11 @@ export function Component() {
           setKeyword={setKeyword}
           handleSearch={handleSearch}
           setPage={setPage}
-          positionMap={positionMap}
           canCreate={canCreate}
           canUpdate={canUpdate}
           canDelete={canDelete}
           onAddMember={() => setSheetOpen(true)}
-          onSetPrimary={(item) => setPrimaryMutation.mutate(item)}
-          onChangePosition={setChangePositionTarget}
+          onEditPositions={setEditPositionsTarget}
           onViewOrgInfo={setOrgSheetTarget}
           onRemoveMember={setRemoveTarget}
           removeTarget={removeTarget}
@@ -178,13 +153,13 @@ export function Component() {
         onSuccess={() => {}}
       />
 
-      {changePositionTarget && (
-        <ChangePositionSheet
-          open={!!changePositionTarget}
-          onOpenChange={(open) => { if (!open) setChangePositionTarget(null) }}
-          userId={changePositionTarget.userId}
-          assignmentId={changePositionTarget.assignmentId}
-          currentPositionId={changePositionTarget.positionId}
+      {editPositionsTarget && selectedDeptId && (
+        <EditPositionsSheet
+          open={!!editPositionsTarget}
+          onOpenChange={(open) => { if (!open) setEditPositionsTarget(null) }}
+          userId={editPositionsTarget.userId}
+          departmentId={selectedDeptId}
+          currentPositions={editPositionsTarget.positions}
           onSuccess={invalidateAll}
         />
       )}

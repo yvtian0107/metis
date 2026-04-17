@@ -1,14 +1,12 @@
 import { useState } from "react"
 import { useTranslation } from "react-i18next"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { useForm, Controller } from "react-hook-form"
-import { z } from "zod"
-import { zodResolver } from "@hookform/resolvers/zod"
 import { api } from "@/lib/api"
 import { toast } from "sonner"
 import { useDebouncedValue } from "@/hooks/use-debounce"
+import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
-import { Checkbox } from "@/components/ui/checkbox"
+import { Badge } from "@/components/ui/badge"
 import {
   Sheet,
   SheetContent,
@@ -17,13 +15,6 @@ import {
   SheetDescription,
   SheetFooter,
 } from "@/components/ui/sheet"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
 import {
   Command,
   CommandEmpty,
@@ -36,16 +27,8 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover"
-import { ChevronsUpDown, Check, Search } from "lucide-react"
+import { ChevronsUpDown, Check, Search, X, Star } from "lucide-react"
 import type { TreeNode, PositionItem, UserItem } from "./types"
-
-const addMemberSchema = z.object({
-  userId: z.number().min(1),
-  positionId: z.number().min(1),
-  isPrimary: z.boolean(),
-})
-
-type AddMemberForm = z.infer<typeof addMemberSchema>
 
 interface AddMemberSheetProps {
   open: boolean
@@ -67,27 +50,44 @@ export function AddMemberSheet({
   const { t } = useTranslation(["org", "common"])
   const queryClient = useQueryClient()
 
-  const form = useForm<AddMemberForm>({
-    resolver: zodResolver(addMemberSchema),
-    defaultValues: { userId: 0, positionId: 0, isPrimary: false },
-  })
-
-  // Track selected user separately to avoid form.watch() (incompatible with React Compiler)
   const [selectedUserObj, setSelectedUserObj] = useState<UserItem | null>(null)
   const [userComboOpen, setUserComboOpen] = useState(false)
   const [userKeyword, setUserKeyword] = useState("")
   const debouncedUserKeyword = useDebouncedValue(userKeyword, 300)
 
+  const [selectedPositionIds, setSelectedPositionIds] = useState<number[]>([])
+  const [primaryPositionId, setPrimaryPositionId] = useState<number | null>(null)
+  const [posPopoverOpen, setPosPopoverOpen] = useState(false)
+
   function resetSheet() {
-    form.reset({ userId: 0, positionId: 0, isPrimary: false })
     setSelectedUserObj(null)
     setUserKeyword("")
     setUserComboOpen(false)
+    setSelectedPositionIds([])
+    setPrimaryPositionId(null)
+    setPosPopoverOpen(false)
   }
 
   function handleOpenChange(nextOpen: boolean) {
     if (nextOpen) resetSheet()
     onOpenChange(nextOpen)
+  }
+
+  function togglePosition(posId: number) {
+    setSelectedPositionIds((prev) => {
+      if (prev.includes(posId)) {
+        const next = prev.filter((id) => id !== posId)
+        if (primaryPositionId === posId) {
+          setPrimaryPositionId(next.length > 0 ? next[0] : null)
+        }
+        return next
+      }
+      const next = [...prev, posId]
+      if (next.length === 1) {
+        setPrimaryPositionId(posId)
+      }
+      return next
+    })
   }
 
   const { data: userSearchData } = useQuery({
@@ -102,19 +102,19 @@ export function AddMemberSheet({
   })
 
   const { data: positionsData } = useQuery({
-    queryKey: ["positions", "all"],
+    queryKey: ["departments", deptId, "positions"],
     queryFn: async () => {
-      const res = await api.get<{ items: PositionItem[] }>("/api/v1/org/positions?pageSize=0")
+      const res = await api.get<{ items: PositionItem[] }>(`/api/v1/org/departments/${deptId}/positions`)
       return res.items
     },
+    enabled: open && !!deptId,
   })
 
   const addMutation = useMutation({
-    mutationFn: async (data: AddMemberForm) => {
-      await api.post(`/api/v1/org/users/${data.userId}/positions`, {
-        departmentId: deptId,
-        positionId: data.positionId,
-        isPrimary: data.isPrimary,
+    mutationFn: async () => {
+      await api.put(`/api/v1/org/users/${selectedUserObj!.id}/departments/${deptId}/positions`, {
+        positionIds: selectedPositionIds,
+        primaryPositionId: primaryPositionId,
       })
     },
     onSuccess: () => {
@@ -127,11 +127,14 @@ export function AddMemberSheet({
     onError: (err: Error) => toast.error(err.message),
   })
 
-  function onSubmit(data: AddMemberForm) {
-    addMutation.mutate(data)
+  function onSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    if (!selectedUserObj || selectedPositionIds.length === 0) return
+    addMutation.mutate()
   }
 
-  const canSubmit = !!selectedUserObj && addMutation.isPending === false
+  const canSubmit = !!selectedUserObj && selectedPositionIds.length > 0 && !addMutation.isPending
+  const hasPositionsConfigured = positionsData && positionsData.length > 0
 
   return (
     <Sheet open={open} onOpenChange={handleOpenChange}>
@@ -142,7 +145,7 @@ export function AddMemberSheet({
             {t("org:assignments.addMember")}
           </SheetDescription>
         </SheetHeader>
-        <form onSubmit={form.handleSubmit(onSubmit)} className="flex min-h-0 flex-1 flex-col overflow-hidden">
+        <form onSubmit={onSubmit} className="flex min-h-0 flex-1 flex-col overflow-hidden">
           <div className="flex-1 space-y-5 overflow-auto px-6 py-6">
             {/* User picker with Command */}
             <div className="space-y-2">
@@ -197,7 +200,6 @@ export function AddMemberSheet({
                               value={String(user.id)}
                               disabled={alreadyAssigned}
                               onSelect={() => {
-                                form.setValue("userId", user.id, { shouldValidate: true })
                                 setSelectedUserObj(user)
                                 setUserComboOpen(false)
                               }}
@@ -224,49 +226,110 @@ export function AddMemberSheet({
               </Popover>
             </div>
 
-            {/* Position select */}
+            {/* Position multi-select */}
             <div className="space-y-2">
-              <label className="text-sm font-medium">{t("org:assignments.selectPosition")}</label>
-              <Controller
-                control={form.control}
-                name="positionId"
-                render={({ field }) => (
-                  <Select
-                    value={field.value ? String(field.value) : ""}
-                    onValueChange={(v) => field.onChange(Number(v))}
-                  >
-                    <SelectTrigger className="w-full">
-                      <SelectValue placeholder={t("org:assignments.selectPosition")} />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {positionsData?.filter((p) => p.isActive).map((pos) => (
-                        <SelectItem key={pos.id} value={String(pos.id)}>
-                          {pos.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+              <label className="text-sm font-medium">
+                {t("org:assignments.selectPositions")}
+                {selectedPositionIds.length > 1 && (
+                  <span className="ml-1 text-xs font-normal text-muted-foreground">
+                    ({t("org:assignments.primaryHint")})
+                  </span>
                 )}
-              />
-            </div>
-
-            {/* Primary checkbox */}
-            <Controller
-              control={form.control}
-              name="isPrimary"
-              render={({ field }) => (
-                <div className="flex items-center gap-2">
-                  <Checkbox
-                    id="isPrimary"
-                    checked={field.value}
-                    onCheckedChange={(v) => field.onChange(v === true)}
-                  />
-                  <label htmlFor="isPrimary" className="cursor-pointer text-sm font-medium">
-                    {t("org:assignments.setPrimary")}
-                  </label>
+              </label>
+              {!hasPositionsConfigured ? (
+                <div className="rounded-md border border-dashed p-4 text-center text-sm text-muted-foreground">
+                  <p>{t("org:assignments.noPositionsConfigured")}</p>
+                  <p className="mt-1 text-xs">{t("org:assignments.configurePositionsHint")}</p>
                 </div>
+              ) : (
+                <>
+                  <Popover open={posPopoverOpen} onOpenChange={setPosPopoverOpen}>
+                    <PopoverTrigger asChild>
+                      <Button
+                        variant="outline"
+                        role="combobox"
+                        aria-expanded={posPopoverOpen}
+                        className="w-full justify-between font-normal"
+                        type="button"
+                      >
+                        <span className="truncate text-muted-foreground">
+                          {selectedPositionIds.length > 0
+                            ? t("org:assignments.positionsSelected", { count: selectedPositionIds.length })
+                            : t("org:assignments.selectPositions")}
+                        </span>
+                        <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
+                      <Command>
+                        <CommandList>
+                          <CommandEmpty>{t("common:noData")}</CommandEmpty>
+                          <CommandGroup>
+                            {positionsData?.map((pos) => {
+                              const isSelected = selectedPositionIds.includes(pos.id)
+                              const isPrimary = primaryPositionId === pos.id
+                              return (
+                                <CommandItem
+                                  key={pos.id}
+                                  value={pos.name}
+                                  onSelect={() => togglePosition(pos.id)}
+                                  className="flex items-center justify-between"
+                                >
+                                  <span className="flex items-center gap-2">
+                                    <Check
+                                      className={cn("h-4 w-4", isSelected ? "opacity-100" : "opacity-0")}
+                                    />
+                                    {pos.name}
+                                  </span>
+                                  {isSelected && (
+                                    isPrimary ? (
+                                      <span className="text-xs font-medium text-primary">{t("org:assignments.primaryBadge")}</span>
+                                    ) : (
+                                      <button
+                                        type="button"
+                                        className="text-xs text-muted-foreground hover:text-primary"
+                                        onClick={(e) => {
+                                          e.stopPropagation()
+                                          setPrimaryPositionId(pos.id)
+                                        }}
+                                      >
+                                        {t("org:assignments.setAsPrimary")}
+                                      </button>
+                                    )
+                                  )}
+                                </CommandItem>
+                              )
+                            })}
+                          </CommandGroup>
+                        </CommandList>
+                      </Command>
+                    </PopoverContent>
+                  </Popover>
+                  {selectedPositionIds.length > 0 && (
+                    <div className="flex flex-wrap gap-1 pt-1">
+                      {selectedPositionIds.map((posId) => {
+                        const pos = positionsData?.find((p) => p.id === posId)
+                        if (!pos) return null
+                        const isPrimary = primaryPositionId === posId
+                        return (
+                          <Badge key={posId} variant={isPrimary ? "default" : "secondary"} className="gap-1">
+                            {isPrimary && <Star className="h-3 w-3" />}
+                            {pos.name}
+                            <button
+                              type="button"
+                              className="ml-0.5 rounded-full hover:bg-muted"
+                              onClick={() => togglePosition(posId)}
+                            >
+                              <X className="h-3 w-3" />
+                            </button>
+                          </Badge>
+                        )
+                      })}
+                    </div>
+                  )}
+                </>
               )}
-            />
+            </div>
           </div>
 
           <SheetFooter className="px-6 py-4">

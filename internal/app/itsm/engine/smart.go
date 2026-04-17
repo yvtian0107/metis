@@ -56,6 +56,8 @@ type EngineConfigProvider interface {
 	FallbackAssigneeID() uint
 	// DecisionMode returns the decision mode ("direct_first" or "ai_only").
 	DecisionMode() string
+	// DecisionAgentID returns the configured decision agent ID (0 = not configured).
+	DecisionAgentID() uint
 }
 
 // ParticipantCandidate is a user available for assignment.

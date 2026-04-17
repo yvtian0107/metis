@@ -2,6 +2,7 @@ package itsm
 
 import (
 	"log/slog"
+	"strconv"
 
 	"github.com/casbin/casbin/v2"
 	"gorm.io/gorm"
@@ -724,6 +725,29 @@ func seedEngineConfig(db *gorm.DB) error {
 			continue
 		}
 		slog.Info("seed: created system config", "key", key, "value", value)
+	}
+
+	// Seed default agent_id for servicedesk and decision from preset agents
+	agentDefaults := map[string]string{
+		"itsm.engine.servicedesk.agent_id": "itsm.servicedesk",
+		"itsm.engine.decision.agent_id":    "itsm.decision",
+	}
+	for configKey, agentCode := range agentDefaults {
+		var existing model.SystemConfig
+		if err := db.Where("\"key\" = ?", configKey).First(&existing).Error; err == nil {
+			continue
+		}
+		value := "0"
+		var agentRow struct{ ID uint }
+		if err := db.Table("ai_agents").Where("code = ?", agentCode).Select("id").First(&agentRow).Error; err == nil {
+			value = strconv.FormatUint(uint64(agentRow.ID), 10)
+		}
+		cfg := model.SystemConfig{Key: configKey, Value: value}
+		if err := db.Create(&cfg).Error; err != nil {
+			slog.Error("seed: failed to create system config", "key", configKey, "error", err)
+			continue
+		}
+		slog.Info("seed: created system config", "key", configKey, "value", value)
 	}
 
 	return nil

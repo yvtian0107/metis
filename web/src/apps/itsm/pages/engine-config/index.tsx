@@ -17,9 +17,10 @@ import {
   updateEngineConfig,
   fetchProviders,
   fetchModels,
+  fetchAgents,
 } from "../../api"
 
-// Provider → Model → Temperature fields (no Card wrapper)
+// Provider → Model → Temperature fields (no Card wrapper) — used only by Generator
 function LLMFields({
   providerId,
   modelId,
@@ -124,6 +125,59 @@ function LLMFields({
   )
 }
 
+// Agent selector field — used by Servicedesk & Decision
+function AgentField({
+  agentId,
+  onAgentChange,
+}: {
+  agentId: number
+  onAgentChange: (id: number) => void
+}) {
+  const { t } = useTranslation("itsm")
+  const navigate = useNavigate()
+
+  const { data: agents = [] } = useQuery({
+    queryKey: ["ai-agents-for-engine"],
+    queryFn: fetchAgents,
+    select: (list) => list.filter((a) => a.type === "assistant" && a.isActive),
+  })
+
+  if (agents.length === 0) {
+    return (
+      <Alert>
+        <AlertDescription className="flex items-center justify-between">
+          <span>{t("engineConfig.noAgents")}</span>
+          <Button variant="link" size="sm" className="h-auto p-0" onClick={() => navigate("/ai/agents")}>
+            {t("engineConfig.goToAgents")}
+            <ExternalLink className="ml-1 h-3 w-3" />
+          </Button>
+        </AlertDescription>
+      </Alert>
+    )
+  }
+
+  return (
+    <div className="space-y-1.5">
+      <Label>{t("engineConfig.agent")}</Label>
+      <Select
+        value={agentId ? String(agentId) : ""}
+        onValueChange={(v) => onAgentChange(Number(v))}
+      >
+        <SelectTrigger>
+          <SelectValue placeholder={t("engineConfig.agentPlaceholder")} />
+        </SelectTrigger>
+        <SelectContent>
+          {agents.map((a) => (
+            <SelectItem key={a.id} value={String(a.id)}>
+              {a.name}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </div>
+  )
+}
+
 export function Component() {
   const { t } = useTranslation(["itsm", "common"])
   const queryClient = useQueryClient()
@@ -138,13 +192,9 @@ export function Component() {
   const [genModelId, setGenModelId] = useState(0)
   const [genTemp, setGenTemp] = useState(0.3)
   // servicedesk agent
-  const [sdProviderId, setSdProviderId] = useState(0)
-  const [sdModelId, setSdModelId] = useState(0)
-  const [sdTemp, setSdTemp] = useState(0.7)
+  const [sdAgentId, setSdAgentId] = useState(0)
   // decision agent
-  const [decProviderId, setDecProviderId] = useState(0)
-  const [decModelId, setDecModelId] = useState(0)
-  const [decTemp, setDecTemp] = useState(0.1)
+  const [decAgentId, setDecAgentId] = useState(0)
   const [decisionMode, setDecisionMode] = useState("direct_first")
   // general
   const [maxRetries, setMaxRetries] = useState(3)
@@ -157,12 +207,8 @@ export function Component() {
     setGenProviderId(config.generator.providerId)
     setGenModelId(config.generator.modelId)
     setGenTemp(config.generator.temperature)
-    setSdProviderId(config.servicedesk.providerId)
-    setSdModelId(config.servicedesk.modelId)
-    setSdTemp(config.servicedesk.temperature)
-    setDecProviderId(config.decision.providerId)
-    setDecModelId(config.decision.modelId)
-    setDecTemp(config.decision.temperature)
+    setSdAgentId(config.servicedesk.agentId)
+    setDecAgentId(config.decision.agentId)
     setDecisionMode(config.decision.decisionMode || "direct_first")
     setMaxRetries(config.general.maxRetries)
     setTimeoutSeconds(config.general.timeoutSeconds)
@@ -182,8 +228,8 @@ export function Component() {
   function handleSave() {
     saveMut.mutate({
       generator: { modelId: genModelId, temperature: genTemp },
-      servicedesk: { modelId: sdModelId, temperature: sdTemp },
-      decision: { modelId: decModelId, temperature: decTemp, decisionMode },
+      servicedesk: { agentId: sdAgentId },
+      decision: { agentId: decAgentId, decisionMode },
       general: { maxRetries, timeoutSeconds, reasoningLog, fallbackAssignee },
     })
   }
@@ -234,14 +280,7 @@ export function Component() {
           <CardDescription>{t("itsm:engineConfig.servicedeskDesc")}</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <LLMFields
-            providerId={sdProviderId}
-            modelId={sdModelId}
-            temperature={sdTemp}
-            onProviderChange={setSdProviderId}
-            onModelChange={setSdModelId}
-            onTemperatureChange={setSdTemp}
-          />
+          <AgentField agentId={sdAgentId} onAgentChange={setSdAgentId} />
         </CardContent>
       </Card>
 
@@ -252,14 +291,7 @@ export function Component() {
           <CardDescription>{t("itsm:engineConfig.decisionDesc")}</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <LLMFields
-            providerId={decProviderId}
-            modelId={decModelId}
-            temperature={decTemp}
-            onProviderChange={setDecProviderId}
-            onModelChange={setDecModelId}
-            onTemperatureChange={setDecTemp}
-          />
+          <AgentField agentId={decAgentId} onAgentChange={setDecAgentId} />
           <div className="space-y-1.5">
             <Label>{t("itsm:engineConfig.decisionMode")}</Label>
             <Select value={decisionMode} onValueChange={setDecisionMode}>

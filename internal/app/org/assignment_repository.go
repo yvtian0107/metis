@@ -90,6 +90,91 @@ func (r *AssignmentRepo) ExistsByUserAndDept(userID, deptID uint) (bool, error) 
 	return count > 0, nil
 }
 
+func (r *AssignmentRepo) ExistsByUserDeptAndPosition(userID, deptID, posID uint) (bool, error) {
+	var count int64
+	if err := r.db.Model(&UserPosition{}).
+		Where("user_id = ? AND department_id = ? AND position_id = ?", userID, deptID, posID).
+		Count(&count).Error; err != nil {
+		return false, err
+	}
+	return count > 0, nil
+}
+
+func (r *AssignmentRepo) FindByUserAndDept(userID, deptID uint) ([]UserPosition, error) {
+	var items []UserPosition
+	if err := r.db.Where("user_id = ? AND department_id = ?", userID, deptID).
+		Preload("Position").
+		Order("is_primary DESC, sort ASC, id ASC").
+		Find(&items).Error; err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+// SetUserDeptPositions atomically replaces all positions for a user in a department.
+func (r *AssignmentRepo) SetUserDeptPositions(userID, deptID uint, positionIDs []uint, primaryPositionID *uint) error {
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		// 1. Get current assignments for this user+dept
+		var current []UserPosition
+		if err := tx.Where("user_id = ? AND department_id = ?", userID, deptID).
+			Find(&current).Error; err != nil {
+			return err
+		}
+
+		// 2. Build sets for diff
+		currentSet := make(map[uint]UserPosition)
+		for _, c := range current {
+			currentSet[c.PositionID] = c
+		}
+		newSet := make(map[uint]bool)
+		for _, pid := range positionIDs {
+			newSet[pid] = true
+		}
+
+		// 3. Delete removed positions
+		for pid, assignment := range currentSet {
+			if !newSet[pid] {
+				if err := tx.Delete(&assignment).Error; err != nil {
+					return err
+				}
+			}
+		}
+
+		// 4. Add new positions
+		for _, pid := range positionIDs {
+			if _, exists := currentSet[pid]; !exists {
+				up := &UserPosition{
+					UserID:       userID,
+					DepartmentID: deptID,
+					PositionID:   pid,
+				}
+				if err := tx.Create(up).Error; err != nil {
+					return err
+				}
+			}
+		}
+
+		// 5. Handle primary if specified
+		if primaryPositionID != nil {
+			// Clear all primary for this user
+			if err := tx.Model(&UserPosition{}).
+				Where("user_id = ?", userID).
+				Update("is_primary", false).Error; err != nil {
+				return err
+			}
+			// Set the target as primary
+			if err := tx.Model(&UserPosition{}).
+				Where("user_id = ? AND department_id = ? AND position_id = ?",
+					userID, deptID, *primaryPositionID).
+				Update("is_primary", true).Error; err != nil {
+				return err
+			}
+		}
+
+		return nil
+	})
+}
+
 func (r *AssignmentRepo) RemovePosition(assignmentID, userID uint) error {
 	return r.db.Transaction(func(tx *gorm.DB) error {
 		var up UserPosition
@@ -170,8 +255,9 @@ func (r *AssignmentRepo) ListUsersByDepartment(deptID uint, keyword string, page
 	}
 
 	base := r.db.Table("user_positions").
-		Select("user_positions.id as assignment_id, user_positions.user_id, users.username, users.email, users.avatar, user_positions.department_id, user_positions.position_id, user_positions.is_primary, user_positions.created_at").
+		Select("user_positions.id as assignment_id, user_positions.user_id, users.username, users.email, users.avatar, user_positions.department_id, user_positions.position_id, positions.name as position_name, user_positions.is_primary, user_positions.created_at").
 		Joins("LEFT JOIN users ON users.id = user_positions.user_id").
+		Joins("LEFT JOIN positions ON positions.id = user_positions.position_id").
 		Where("user_positions.department_id = ? AND user_positions.deleted_at IS NULL", deptID)
 
 	if keyword != "" {
@@ -179,17 +265,82 @@ func (r *AssignmentRepo) ListUsersByDepartment(deptID uint, keyword string, page
 		base = base.Where("(users.username LIKE ? OR users.email LIKE ?)", like, like)
 	}
 
+	// Count distinct users for pagination
+	countQuery := r.db.Table("user_positions").
+		Joins("LEFT JOIN users ON users.id = user_positions.user_id").
+		Where("user_positions.department_id = ? AND user_positions.deleted_at IS NULL", deptID)
+	if keyword != "" {
+		like := "%" + keyword + "%"
+		countQuery = countQuery.Where("(users.username LIKE ? OR users.email LIKE ?)", like, like)
+	}
 	var total int64
-	if err := base.Count(&total).Error; err != nil {
+	if err := countQuery.Distinct("user_positions.user_id").Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
 
-	var items []AssignmentItem
+	// Get distinct user IDs for this page
 	offset := (page - 1) * pageSize
-	if err := base.Offset(offset).Limit(pageSize).Order("user_positions.is_primary DESC, users.username ASC").Find(&items).Error; err != nil {
+	var userIDs []uint
+	uidQuery := r.db.Table("user_positions").
+		Select("DISTINCT user_positions.user_id").
+		Joins("LEFT JOIN users ON users.id = user_positions.user_id").
+		Where("user_positions.department_id = ? AND user_positions.deleted_at IS NULL", deptID)
+	if keyword != "" {
+		like := "%" + keyword + "%"
+		uidQuery = uidQuery.Where("(users.username LIKE ? OR users.email LIKE ?)", like, like)
+	}
+	if err := uidQuery.Order("user_positions.user_id ASC").Offset(offset).Limit(pageSize).Pluck("user_positions.user_id", &userIDs).Error; err != nil {
+		return nil, 0, err
+	}
+	if len(userIDs) == 0 {
+		return nil, total, nil
+	}
+
+	// Fetch all assignment items for these users in this department
+	var items []AssignmentItem
+	if err := base.Where("user_positions.user_id IN ?", userIDs).
+		Order("user_positions.user_id ASC, user_positions.is_primary DESC, user_positions.sort ASC, user_positions.id ASC").
+		Find(&items).Error; err != nil {
 		return nil, 0, err
 	}
 	return items, total, nil
+}
+
+// GroupAssignmentsByUser groups flat AssignmentItem rows into MemberWithPositions.
+func GroupAssignmentsByUser(items []AssignmentItem) []MemberWithPositions {
+	if len(items) == 0 {
+		return nil
+	}
+	orderMap := make(map[uint]int)     // userId → first seen index
+	memberMap := make(map[uint]*MemberWithPositions)
+	for _, item := range items {
+		if _, exists := memberMap[item.UserID]; !exists {
+			orderMap[item.UserID] = len(orderMap)
+			memberMap[item.UserID] = &MemberWithPositions{
+				UserID:       item.UserID,
+				Username:     item.Username,
+				Email:        item.Email,
+				Avatar:       item.Avatar,
+				DepartmentID: item.DepartmentID,
+				CreatedAt:    item.CreatedAt,
+			}
+		}
+		m := memberMap[item.UserID]
+		m.Positions = append(m.Positions, MemberPositionItem{
+			AssignmentID: item.AssignmentID,
+			PositionID:   item.PositionID,
+			PositionName: item.PositionName,
+			IsPrimary:    item.IsPrimary,
+		})
+		if item.CreatedAt.Before(m.CreatedAt) {
+			m.CreatedAt = item.CreatedAt
+		}
+	}
+	result := make([]MemberWithPositions, len(memberMap))
+	for uid, m := range memberMap {
+		result[orderMap[uid]] = *m
+	}
+	return result
 }
 
 func (r *AssignmentRepo) CountByDepartments() (map[uint]int, error) {

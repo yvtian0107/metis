@@ -15,7 +15,16 @@ import (
 // The agent queries context on-demand via decision tools instead of receiving
 // all information upfront, enabling scalable multi-step reasoning.
 func (e *SmartEngine) agenticDecision(ctx context.Context, tx *gorm.DB, ticketID uint, svc *serviceModel) (*DecisionPlan, error) {
-	agentCfg, err := e.agentProvider.GetAgentConfigByCode("itsm.decision")
+	// Get decision agent ID from engine config
+	var agentID uint
+	if e.configProvider != nil {
+		agentID = e.configProvider.DecisionAgentID()
+	}
+	if agentID == 0 {
+		return nil, fmt.Errorf("决策智能体未配置")
+	}
+
+	agentCfg, err := e.agentProvider.GetAgentConfig(agentID)
 	if err != nil {
 		return nil, fmt.Errorf("get decision agent config: %w", err)
 	}

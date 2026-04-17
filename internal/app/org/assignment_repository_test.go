@@ -549,3 +549,159 @@ func TestAssignmentRepo_DeleteByID(t *testing.T) {
 		t.Fatal("expected not found after delete")
 	}
 }
+
+func TestAssignmentRepo_ExistsByUserDeptAndPosition(t *testing.T) {
+	db := newOrgTestDB(t)
+	repo := &AssignmentRepo{db: db}
+
+	role := seedRole(t, db, "user")
+	dept := seedDepartment(t, db, "Engineering", "eng", nil, nil, true)
+	pos1 := seedPosition(t, db, "SE", "se", true)
+	pos2 := seedPosition(t, db, "Manager", "mgr", true)
+	user := seedUser(t, db, "u1", role.ID)
+	seedAssignment(t, db, user.ID, dept.ID, pos1.ID, true)
+
+	exists, err := repo.ExistsByUserDeptAndPosition(user.ID, dept.ID, pos1.ID)
+	if err != nil {
+		t.Fatalf("exists failed: %v", err)
+	}
+	if !exists {
+		t.Fatal("expected exists true for assigned position")
+	}
+
+	exists, _ = repo.ExistsByUserDeptAndPosition(user.ID, dept.ID, pos2.ID)
+	if exists {
+		t.Fatal("expected exists false for unassigned position")
+	}
+}
+
+func TestAssignmentRepo_FindByUserAndDept(t *testing.T) {
+	db := newOrgTestDB(t)
+	repo := &AssignmentRepo{db: db}
+
+	role := seedRole(t, db, "user")
+	dept := seedDepartment(t, db, "Engineering", "eng", nil, nil, true)
+	pos1 := seedPosition(t, db, "SE", "se", true)
+	pos2 := seedPosition(t, db, "Manager", "mgr", true)
+	user := seedUser(t, db, "u1", role.ID)
+	seedAssignment(t, db, user.ID, dept.ID, pos1.ID, true)
+	seedAssignment(t, db, user.ID, dept.ID, pos2.ID, false)
+
+	items, err := repo.FindByUserAndDept(user.ID, dept.ID)
+	if err != nil {
+		t.Fatalf("find failed: %v", err)
+	}
+	if len(items) != 2 {
+		t.Fatalf("expected 2 items, got %d", len(items))
+	}
+	// Primary should be first
+	if !items[0].IsPrimary {
+		t.Fatal("expected primary first")
+	}
+}
+
+func TestAssignmentRepo_SetUserDeptPositions(t *testing.T) {
+	db := newOrgTestDB(t)
+	repo := &AssignmentRepo{db: db}
+
+	role := seedRole(t, db, "user")
+	dept := seedDepartment(t, db, "Engineering", "eng", nil, nil, true)
+	pos1 := seedPosition(t, db, "SE", "se", true)
+	pos2 := seedPosition(t, db, "Manager", "mgr", true)
+	pos3 := seedPosition(t, db, "Architect", "arch", true)
+	user := seedUser(t, db, "u1", role.ID)
+
+	// Initial set
+	primaryID := pos1.ID
+	if err := repo.SetUserDeptPositions(user.ID, dept.ID, []uint{pos1.ID, pos2.ID}, &primaryID); err != nil {
+		t.Fatalf("set positions failed: %v", err)
+	}
+
+	items, _ := repo.FindByUserAndDept(user.ID, dept.ID)
+	if len(items) != 2 {
+		t.Fatalf("expected 2, got %d", len(items))
+	}
+
+	// Update: keep pos1, remove pos2, add pos3
+	primaryID = pos3.ID
+	if err := repo.SetUserDeptPositions(user.ID, dept.ID, []uint{pos1.ID, pos3.ID}, &primaryID); err != nil {
+		t.Fatalf("update positions failed: %v", err)
+	}
+
+	items, _ = repo.FindByUserAndDept(user.ID, dept.ID)
+	if len(items) != 2 {
+		t.Fatalf("expected 2 after update, got %d", len(items))
+	}
+
+	posIDs := map[uint]bool{}
+	for _, item := range items {
+		posIDs[item.PositionID] = true
+	}
+	if posIDs[pos2.ID] {
+		t.Fatal("pos2 should have been removed")
+	}
+	if !posIDs[pos3.ID] {
+		t.Fatal("pos3 should have been added")
+	}
+}
+
+func TestAssignmentRepo_MultiPositionPerDept(t *testing.T) {
+	db := newOrgTestDB(t)
+	repo := &AssignmentRepo{db: db}
+
+	role := seedRole(t, db, "user")
+	dept := seedDepartment(t, db, "Engineering", "eng", nil, nil, true)
+	pos1 := seedPosition(t, db, "SE", "se", true)
+	pos2 := seedPosition(t, db, "Manager", "mgr", true)
+	user := seedUser(t, db, "u1", role.ID)
+
+	// Can add two different positions in same dept
+	up1 := &UserPosition{UserID: user.ID, DepartmentID: dept.ID, PositionID: pos1.ID, IsPrimary: true}
+	if err := repo.AddPosition(up1); err != nil {
+		t.Fatalf("add pos1 failed: %v", err)
+	}
+	up2 := &UserPosition{UserID: user.ID, DepartmentID: dept.ID, PositionID: pos2.ID}
+	if err := repo.AddPosition(up2); err != nil {
+		t.Fatalf("add pos2 in same dept failed: %v", err)
+	}
+
+	items, _ := repo.FindByUserAndDept(user.ID, dept.ID)
+	if len(items) != 2 {
+		t.Fatalf("expected 2 items, got %d", len(items))
+	}
+
+	// Cannot add same position twice
+	up3 := &UserPosition{UserID: user.ID, DepartmentID: dept.ID, PositionID: pos1.ID}
+	err := repo.AddPosition(up3)
+	if err == nil {
+		t.Fatal("expected unique constraint error for duplicate user+dept+position")
+	}
+}
+
+func TestGroupAssignmentsByUser(t *testing.T) {
+	items := []AssignmentItem{
+		{UserID: 1, Username: "alice", Email: "alice@test.com", DepartmentID: 10, PositionID: 100, PositionName: "SE", IsPrimary: true, AssignmentID: 1},
+		{UserID: 1, Username: "alice", Email: "alice@test.com", DepartmentID: 10, PositionID: 200, PositionName: "Manager", IsPrimary: false, AssignmentID: 2},
+		{UserID: 2, Username: "bob", Email: "bob@test.com", DepartmentID: 10, PositionID: 100, PositionName: "SE", IsPrimary: false, AssignmentID: 3},
+	}
+
+	grouped := GroupAssignmentsByUser(items)
+	if len(grouped) != 2 {
+		t.Fatalf("expected 2 members, got %d", len(grouped))
+	}
+	if grouped[0].Username != "alice" {
+		t.Fatal("expected alice first (order preserved)")
+	}
+	if len(grouped[0].Positions) != 2 {
+		t.Fatalf("expected 2 positions for alice, got %d", len(grouped[0].Positions))
+	}
+	if len(grouped[1].Positions) != 1 {
+		t.Fatalf("expected 1 position for bob, got %d", len(grouped[1].Positions))
+	}
+
+	// Empty input
+	empty := GroupAssignmentsByUser(nil)
+	if empty != nil {
+		t.Fatal("expected nil for empty input")
+	}
+}

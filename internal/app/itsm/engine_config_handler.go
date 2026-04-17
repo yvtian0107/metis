@@ -37,7 +37,7 @@ func (h *EngineConfigHandler) Update(c *gin.Context) {
 	}
 
 	if err := h.svc.UpdateConfig(&req); err != nil {
-		if errors.Is(err, ErrModelNotFound) || errors.Is(err, ErrFallbackUserNotFound) {
+		if errors.Is(err, ErrModelNotFound) || errors.Is(err, ErrAgentNotFound) || errors.Is(err, ErrFallbackUserNotFound) {
 			handler.Fail(c, http.StatusBadRequest, err.Error())
 			return
 		}

@@ -124,9 +124,17 @@ func TestAssignmentService_AddUserPosition_AlreadyAssigned(t *testing.T) {
 	user := seedUser(t, db, "u1", role.ID)
 	seedAssignment(t, db, user.ID, dept.ID, pos.ID, true)
 
+	// Same user + dept + position → ErrPositionAlreadyAssigned
 	_, err := svc.AddUserPosition(user.ID, dept.ID, pos.ID, false)
-	if err != ErrAlreadyAssigned {
-		t.Fatalf("expected ErrAlreadyAssigned, got %v", err)
+	if err != ErrPositionAlreadyAssigned {
+		t.Fatalf("expected ErrPositionAlreadyAssigned, got %v", err)
+	}
+
+	// Same user + dept + different position → OK (multi-position per dept)
+	pos2 := seedPosition(t, db, "Manager", "mgr", true)
+	_, err = svc.AddUserPosition(user.ID, dept.ID, pos2.ID, false)
+	if err != nil {
+		t.Fatalf("expected success for different position in same dept, got %v", err)
 	}
 }
 
@@ -293,5 +301,92 @@ func TestAssignmentService_GetUserDepartmentScope(t *testing.T) {
 	}
 	if scope2 != nil {
 		t.Fatalf("expected nil scope for user without assignments, got %v", scope2)
+	}
+}
+
+func TestAssignmentService_SetUserDeptPositions(t *testing.T) {
+	db := newOrgTestDB(t)
+	svc := newAssignmentService(db)
+
+	role := seedRole(t, db, "user")
+	dept := seedDepartment(t, db, "Engineering", "eng", nil, nil, true)
+	pos1 := seedPosition(t, db, "SE", "se", true)
+	pos2 := seedPosition(t, db, "Manager", "mgr", true)
+	pos3 := seedPosition(t, db, "Architect", "arch", true)
+	user := seedUser(t, db, "u1", role.ID)
+
+	// Set initial positions
+	err := svc.SetUserDeptPositions(user.ID, dept.ID, []uint{pos1.ID, pos2.ID}, &pos1.ID)
+	if err != nil {
+		t.Fatalf("set positions failed: %v", err)
+	}
+
+	items, _ := svc.repo.FindByUserAndDept(user.ID, dept.ID)
+	if len(items) != 2 {
+		t.Fatalf("expected 2 items, got %d", len(items))
+	}
+
+	// Update: remove pos2, add pos3, change primary to pos3
+	err = svc.SetUserDeptPositions(user.ID, dept.ID, []uint{pos1.ID, pos3.ID}, &pos3.ID)
+	if err != nil {
+		t.Fatalf("update positions failed: %v", err)
+	}
+
+	items, _ = svc.repo.FindByUserAndDept(user.ID, dept.ID)
+	if len(items) != 2 {
+		t.Fatalf("expected 2 items after update, got %d", len(items))
+	}
+
+	// verify primary
+	primaryCount := 0
+	for _, item := range items {
+		if item.IsPrimary {
+			primaryCount++
+			if item.PositionID != pos3.ID {
+				t.Fatalf("expected primary on pos3, got pos %d", item.PositionID)
+			}
+		}
+	}
+	if primaryCount != 1 {
+		t.Fatalf("expected 1 primary, got %d", primaryCount)
+	}
+
+	// Empty positions → removes all
+	err = svc.SetUserDeptPositions(user.ID, dept.ID, []uint{}, nil)
+	if err != nil {
+		t.Fatalf("clear positions failed: %v", err)
+	}
+	items, _ = svc.repo.FindByUserAndDept(user.ID, dept.ID)
+	if len(items) != 0 {
+		t.Fatalf("expected 0 items after clear, got %d", len(items))
+	}
+}
+
+func TestAssignmentService_SetUserDeptPositions_ValidationErrors(t *testing.T) {
+	db := newOrgTestDB(t)
+	svc := newAssignmentService(db)
+
+	role := seedRole(t, db, "user")
+	user := seedUser(t, db, "u1", role.ID)
+	pos := seedPosition(t, db, "SE", "se", true)
+
+	// dept not found
+	err := svc.SetUserDeptPositions(user.ID, 9999, []uint{pos.ID}, nil)
+	if err != ErrDepartmentNotFound {
+		t.Fatalf("expected ErrDepartmentNotFound, got %v", err)
+	}
+
+	// dept inactive
+	inactiveDept := seedDepartment(t, db, "Inactive", "inactive", nil, nil, false)
+	err = svc.SetUserDeptPositions(user.ID, inactiveDept.ID, []uint{pos.ID}, nil)
+	if err != ErrDepartmentInactive {
+		t.Fatalf("expected ErrDepartmentInactive, got %v", err)
+	}
+
+	// position not found
+	activeDept := seedDepartment(t, db, "Active", "active", nil, nil, true)
+	err = svc.SetUserDeptPositions(user.ID, activeDept.ID, []uint{9999}, nil)
+	if err != ErrPositionNotFound {
+		t.Fatalf("expected ErrPositionNotFound, got %v", err)
 	}
 }

@@ -23,6 +23,11 @@ type UpdateAssignmentRequest struct {
 	IsPrimary  *bool `json:"isPrimary"`
 }
 
+type SetUserDeptPositionsRequest struct {
+	PositionIDs       []uint `json:"positionIds" binding:"required"`
+	PrimaryPositionID *uint  `json:"primaryPositionId"`
+}
+
 type AssignmentHandler struct {
 	svc     *AssignmentService
 	userSvc *service.UserService
@@ -70,10 +75,12 @@ func (h *AssignmentHandler) AddUserPosition(c *gin.Context) {
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrAlreadyAssigned),
+			errors.Is(err, ErrPositionAlreadyAssigned),
 			errors.Is(err, ErrDepartmentNotFound),
 			errors.Is(err, ErrDepartmentInactive),
 			errors.Is(err, ErrPositionNotFound),
-			errors.Is(err, ErrPositionInactive):
+			errors.Is(err, ErrPositionInactive),
+			errors.Is(err, ErrPositionNotAllowedInDept):
 			handler.Fail(c, http.StatusBadRequest, err.Error())
 		default:
 			handler.Fail(c, http.StatusInternalServerError, err.Error())
@@ -202,8 +209,57 @@ func (h *AssignmentHandler) SetPrimary(c *gin.Context) {
 	handler.OK(c, nil)
 }
 
+func (h *AssignmentHandler) SetUserDeptPositions(c *gin.Context) {
+	userID, err := parseID(c)
+	if err != nil {
+		handler.Fail(c, http.StatusBadRequest, "invalid id")
+		return
+	}
+	deptID, err := parseDeptID(c)
+	if err != nil {
+		handler.Fail(c, http.StatusBadRequest, "invalid deptId")
+		return
+	}
+
+	var req SetUserDeptPositionsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		handler.Fail(c, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	c.Set("audit_action", "org.assignment.batch_update")
+	c.Set("audit_resource", "user_position")
+	c.Set("audit_resource_id", c.Param("id"))
+
+	if err := h.svc.SetUserDeptPositions(userID, deptID, req.PositionIDs, req.PrimaryPositionID); err != nil {
+		switch {
+		case errors.Is(err, ErrDepartmentNotFound),
+			errors.Is(err, ErrDepartmentInactive),
+			errors.Is(err, ErrPositionNotFound),
+			errors.Is(err, ErrPositionInactive),
+			errors.Is(err, ErrPositionNotAllowedInDept):
+			handler.Fail(c, http.StatusBadRequest, err.Error())
+		default:
+			handler.Fail(c, http.StatusInternalServerError, err.Error())
+		}
+		return
+	}
+
+	c.Set("audit_summary", "batch updated user positions in department")
+	handler.OK(c, nil)
+}
+
 func parseAssignID(c *gin.Context) (uint, error) {
 	idStr := c.Param("assignmentId")
+	id, err := strconv.ParseUint(idStr, 10, 64)
+	if err != nil {
+		return 0, err
+	}
+	return uint(id), nil
+}
+
+func parseDeptID(c *gin.Context) (uint, error) {
+	idStr := c.Param("deptId")
 	id, err := strconv.ParseUint(idStr, 10, 64)
 	if err != nil {
 		return 0, err

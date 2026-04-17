@@ -16,6 +16,7 @@ import (
 var (
 	ErrEngineNotConfigured   = errors.New("工作流解析引擎未配置，请前往引擎配置页面设置")
 	ErrModelNotFound         = errors.New("模型不存在或已停用")
+	ErrAgentNotFound         = errors.New("智能体不存在或已停用")
 	ErrFallbackUserNotFound  = errors.New("兜底处理人不存在或已停用")
 )
 
@@ -24,7 +25,6 @@ var (
 type EngineConfigService struct {
 	agentSvc      *ai.AgentService
 	modelRepo     *ai.ModelRepo
-	providerRepo  *ai.ProviderRepo
 	sysConfigRepo *repository.SysConfigRepo
 	db            *gorm.DB
 }
@@ -34,7 +34,6 @@ func NewEngineConfigService(i do.Injector) (*EngineConfigService, error) {
 	return &EngineConfigService{
 		agentSvc:      do.MustInvoke[*ai.AgentService](i),
 		modelRepo:     do.MustInvoke[*ai.ModelRepo](i),
-		providerRepo:  do.MustInvoke[*ai.ProviderRepo](i),
 		sysConfigRepo: do.MustInvoke[*repository.SysConfigRepo](i),
 		db:            db.DB,
 	}, nil
@@ -42,10 +41,10 @@ func NewEngineConfigService(i do.Injector) (*EngineConfigService, error) {
 
 // EngineConfig is the aggregated engine configuration response.
 type EngineConfig struct {
-	Generator   EngineAgentConfig    `json:"generator"`
-	Servicedesk EngineAgentConfig    `json:"servicedesk"`
-	Decision    EngineDecisionConfig `json:"decision"`
-	General     EngineGeneralConfig  `json:"general"`
+	Generator   EngineAgentConfig      `json:"generator"`
+	Servicedesk EngineAgentSelector    `json:"servicedesk"`
+	Decision    EngineDecisionConfig   `json:"decision"`
+	General     EngineGeneralConfig    `json:"general"`
 }
 
 type EngineAgentConfig struct {
@@ -56,8 +55,13 @@ type EngineAgentConfig struct {
 	Temperature  float64 `json:"temperature"`
 }
 
+type EngineAgentSelector struct {
+	AgentID   uint   `json:"agentId"`
+	AgentName string `json:"agentName"`
+}
+
 type EngineDecisionConfig struct {
-	EngineAgentConfig
+	EngineAgentSelector
 	DecisionMode string `json:"decisionMode"`
 }
 
@@ -72,17 +76,16 @@ type EngineGeneralConfig struct {
 func (s *EngineConfigService) GetConfig() (*EngineConfig, error) {
 	cfg := &EngineConfig{}
 
-	// Read generator agent config
+	// Read generator agent config (still Provider → Model)
 	cfg.Generator = s.readAgentConfig("itsm.generator")
 
-	// Read servicedesk agent config
-	cfg.Servicedesk = s.readAgentConfig("itsm.servicedesk")
+	// Read servicedesk agent selector
+	cfg.Servicedesk = s.readAgentSelector("itsm.engine.servicedesk.agent_id")
 
-	// Read decision agent config
-	decisionAgent := s.readAgentConfig("itsm.decision")
+	// Read decision agent selector + decision mode
 	cfg.Decision = EngineDecisionConfig{
-		EngineAgentConfig: decisionAgent,
-		DecisionMode:      s.getConfigValue("itsm.engine.decision.decision_mode", "direct_first"),
+		EngineAgentSelector: s.readAgentSelector("itsm.engine.decision.agent_id"),
+		DecisionMode:        s.getConfigValue("itsm.engine.decision.decision_mode", "direct_first"),
 	}
 
 	// Read general settings
@@ -103,13 +106,11 @@ type UpdateConfigRequest struct {
 		Temperature float64 `json:"temperature"`
 	} `json:"generator"`
 	Servicedesk struct {
-		ModelID     uint    `json:"modelId"`
-		Temperature float64 `json:"temperature"`
+		AgentID uint `json:"agentId"`
 	} `json:"servicedesk"`
 	Decision struct {
-		ModelID      uint    `json:"modelId"`
-		Temperature  float64 `json:"temperature"`
-		DecisionMode string  `json:"decisionMode"`
+		AgentID      uint   `json:"agentId"`
+		DecisionMode string `json:"decisionMode"`
 	} `json:"decision"`
 	General struct {
 		MaxRetries       int    `json:"maxRetries"`
@@ -121,37 +122,35 @@ type UpdateConfigRequest struct {
 
 // UpdateConfig updates the aggregated engine configuration.
 func (s *EngineConfigService) UpdateConfig(req *UpdateConfigRequest) error {
-	// Validate model IDs if provided
+	// Validate generator model ID if provided
 	if req.Generator.ModelID > 0 {
 		if _, err := s.modelRepo.FindByID(req.Generator.ModelID); err != nil {
 			return ErrModelNotFound
 		}
 	}
-	if req.Servicedesk.ModelID > 0 {
-		if _, err := s.modelRepo.FindByID(req.Servicedesk.ModelID); err != nil {
-			return ErrModelNotFound
-		}
-	}
-	if req.Decision.ModelID > 0 {
-		if _, err := s.modelRepo.FindByID(req.Decision.ModelID); err != nil {
-			return ErrModelNotFound
+
+	// Validate servicedesk agent ID
+	if req.Servicedesk.AgentID > 0 {
+		if err := s.validateActiveAgent(req.Servicedesk.AgentID); err != nil {
+			return err
 		}
 	}
 
-	// Update generator agent
+	// Validate decision agent ID
+	if req.Decision.AgentID > 0 {
+		if err := s.validateActiveAgent(req.Decision.AgentID); err != nil {
+			return err
+		}
+	}
+
+	// Update generator agent (still Provider → Model)
 	if err := s.updateAgentConfig("itsm.generator", req.Generator.ModelID, req.Generator.Temperature); err != nil {
 		return err
 	}
 
-	// Update servicedesk agent
-	if err := s.updateAgentConfig("itsm.servicedesk", req.Servicedesk.ModelID, req.Servicedesk.Temperature); err != nil {
-		return err
-	}
-
-	// Update decision agent
-	if err := s.updateAgentConfig("itsm.decision", req.Decision.ModelID, req.Decision.Temperature); err != nil {
-		return err
-	}
+	// Update servicedesk/decision agent_id in SystemConfig
+	s.setConfigValue("itsm.engine.servicedesk.agent_id", strconv.FormatUint(uint64(req.Servicedesk.AgentID), 10))
+	s.setConfigValue("itsm.engine.decision.agent_id", strconv.FormatUint(uint64(req.Decision.AgentID), 10))
 
 	// Validate fallback assignee if provided
 	if req.General.FallbackAssignee > 0 {
@@ -203,6 +202,31 @@ func (s *EngineConfigService) readAgentConfig(code string) EngineAgentConfig {
 	}
 
 	return cfg
+}
+
+// readAgentSelector reads an agent_id from SystemConfig and returns id + name.
+func (s *EngineConfigService) readAgentSelector(configKey string) EngineAgentSelector {
+	agentID := uint(s.getConfigInt(configKey, 0))
+	if agentID == 0 {
+		return EngineAgentSelector{}
+	}
+	agent, err := s.agentSvc.Get(agentID)
+	if err != nil {
+		return EngineAgentSelector{}
+	}
+	return EngineAgentSelector{AgentID: agent.ID, AgentName: agent.Name}
+}
+
+// validateActiveAgent checks that an agent exists and is active.
+func (s *EngineConfigService) validateActiveAgent(agentID uint) error {
+	agent, err := s.agentSvc.Get(agentID)
+	if err != nil {
+		return ErrAgentNotFound
+	}
+	if !agent.IsActive {
+		return ErrAgentNotFound
+	}
+	return nil
 }
 
 // updateAgentConfig updates an internal agent's model_id and temperature.
@@ -268,4 +292,10 @@ func (s *EngineConfigService) FallbackAssigneeID() uint {
 // Implements engine.EngineConfigProvider.
 func (s *EngineConfigService) DecisionMode() string {
 	return s.getConfigValue("itsm.engine.decision.decision_mode", "direct_first")
+}
+
+// DecisionAgentID returns the configured decision agent ID (0 = not configured).
+// Implements engine.EngineConfigProvider.
+func (s *EngineConfigService) DecisionAgentID() uint {
+	return uint(s.getConfigInt("itsm.engine.decision.agent_id", 0))
 }

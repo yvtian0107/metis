@@ -689,10 +689,15 @@ export interface EngineAgentConfig {
   temperature: number
 }
 
+export interface EngineAgentSelector {
+  agentId: number
+  agentName: string
+}
+
 export interface EngineConfig {
   generator: EngineAgentConfig
-  servicedesk: EngineAgentConfig
-  decision: EngineAgentConfig & { decisionMode: string }
+  servicedesk: EngineAgentSelector
+  decision: EngineAgentSelector & { decisionMode: string }
   general: {
     maxRetries: number
     timeoutSeconds: number
@@ -703,8 +708,8 @@ export interface EngineConfig {
 
 export interface EngineConfigUpdate {
   generator: { modelId: number; temperature: number }
-  servicedesk: { modelId: number; temperature: number }
-  decision: { modelId: number; temperature: number; decisionMode: string }
+  servicedesk: { agentId: number }
+  decision: { agentId: number; decisionMode: string }
   general: { maxRetries: number; timeoutSeconds: number; reasoningLog: string; fallbackAssignee: number }
 }
 

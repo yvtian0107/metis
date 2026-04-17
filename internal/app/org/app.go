@@ -82,6 +82,7 @@ func (a *OrgApp) Routes(api *gin.RouterGroup) {
 		org.PUT("/users/:id/positions/:assignmentId", assignH.UpdateUserPosition)
 		org.DELETE("/users/:id/positions/:assignmentId", assignH.RemoveUserPosition)
 		org.PUT("/users/:id/positions/:assignmentId/primary", assignH.SetPrimary)
+		org.PUT("/users/:id/departments/:deptId/positions", assignH.SetUserDeptPositions)
 		org.GET("/users", assignH.ListUsers)
 	}
 }

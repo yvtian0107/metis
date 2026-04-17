@@ -45,11 +45,11 @@ import {
   Trash2,
   FolderOpen,
 } from "lucide-react"
-import type { MemberItem, TreeNode } from "./types"
+import type { MemberWithPositions, TreeNode } from "./types"
 
 interface MemberListProps {
   selectedDept: TreeNode | null
-  items: MemberItem[]
+  items: MemberWithPositions[]
   total: number
   page: number
   totalPages: number
@@ -58,18 +58,16 @@ interface MemberListProps {
   setKeyword: (v: string) => void
   handleSearch: (e: React.FormEvent) => void
   setPage: (p: number) => void
-  positionMap: Map<number, string>
   canCreate: boolean
   canUpdate: boolean
   canDelete: boolean
   onAddMember: () => void
-  onSetPrimary: (item: MemberItem) => void
-  onChangePosition: (item: MemberItem) => void
-  onViewOrgInfo: (item: MemberItem) => void
-  onRemoveMember: (item: MemberItem) => void
-  removeTarget: MemberItem | null
-  onRemoveTargetChange: (item: MemberItem | null) => void
-  onConfirmRemove: (item: MemberItem) => void
+  onEditPositions: (item: MemberWithPositions) => void
+  onViewOrgInfo: (item: MemberWithPositions) => void
+  onRemoveMember: (item: MemberWithPositions) => void
+  removeTarget: MemberWithPositions | null
+  onRemoveTargetChange: (item: MemberWithPositions | null) => void
+  onConfirmRemove: (item: MemberWithPositions) => void
 }
 
 export function MemberList({
@@ -83,13 +81,11 @@ export function MemberList({
   setKeyword,
   handleSearch,
   setPage,
-  positionMap,
   canCreate,
   canUpdate,
   canDelete,
   onAddMember,
-  onSetPrimary,
-  onChangePosition,
+  onEditPositions,
   onViewOrgInfo,
   onRemoveMember,
   removeTarget,
@@ -184,11 +180,8 @@ export function MemberList({
                     <TableHead className="sticky top-0 z-10 min-w-[220px] bg-card">
                       {t("org:assignments.user")}
                     </TableHead>
-                    <TableHead className="sticky top-0 z-10 min-w-[140px] bg-card">
+                    <TableHead className="sticky top-0 z-10 min-w-[200px] bg-card">
                       {t("org:assignments.position")}
-                    </TableHead>
-                    <TableHead className="sticky top-0 z-10 w-[96px] bg-card">
-                      {t("org:assignments.type")}
                     </TableHead>
                     <TableHead className="sticky top-0 z-10 w-[140px] bg-card">
                       {t("org:assignments.assignedAt")}
@@ -198,17 +191,17 @@ export function MemberList({
                 </TableHeader>
                 <TableBody>
                   {isLoading ? (
-                    <DataTableLoadingRow colSpan={5} />
+                    <DataTableLoadingRow colSpan={4} />
                   ) : items.length === 0 ? (
                     <DataTableEmptyRow
-                      colSpan={5}
+                      colSpan={4}
                       icon={Users}
                       title={t("org:assignments.empty")}
                       description={canCreate ? t("org:assignments.emptyHint") : undefined}
                     />
                   ) : (
                     items.map((item) => (
-                      <TableRow key={item.assignmentId}>
+                      <TableRow key={item.userId}>
                         <TableCell className="py-3.5">
                           <div className="flex items-center gap-3">
                             {item.avatar ? (
@@ -234,19 +227,19 @@ export function MemberList({
                             </div>
                           </div>
                         </TableCell>
-                        <TableCell className="text-sm text-foreground/90">
-                          {positionMap.get(item.positionId) ?? "-"}
-                        </TableCell>
                         <TableCell>
-                          {item.isPrimary ? (
-                            <Badge variant="default" className="px-2 text-[10px] font-medium">
-                              {t("org:assignments.primary")}
-                            </Badge>
-                          ) : (
-                            <Badge variant="outline" className="px-2 text-[10px] font-medium">
-                              {t("org:assignments.secondary")}
-                            </Badge>
-                          )}
+                          <div className="flex flex-wrap gap-1">
+                            {item.positions.map((pos) => (
+                              <Badge
+                                key={pos.assignmentId}
+                                variant={pos.isPrimary ? "default" : "secondary"}
+                                className="gap-1 text-[11px]"
+                              >
+                                {pos.isPrimary && <Star className="h-3 w-3" />}
+                                {pos.positionName}
+                              </Badge>
+                            ))}
+                          </div>
                         </TableCell>
                         <TableCell className="text-xs text-muted-foreground tabular-nums">
                           {item.createdAt ? new Date(item.createdAt).toLocaleDateString() : "-"}
@@ -259,16 +252,10 @@ export function MemberList({
                               </Button>
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="end">
-                              {canUpdate && !item.isPrimary && (
-                                <DropdownMenuItem onClick={() => onSetPrimary(item)}>
-                                  <Star className="mr-2 h-4 w-4" />
-                                  {t("org:assignments.setPrimary")}
-                                </DropdownMenuItem>
-                              )}
                               {canUpdate && (
-                                <DropdownMenuItem onClick={() => onChangePosition(item)}>
+                                <DropdownMenuItem onClick={() => onEditPositions(item)}>
                                   <ArrowRightLeft className="mr-2 h-4 w-4" />
-                                  {t("org:assignments.changePosition")}
+                                  {t("org:assignments.editPositions")}
                                 </DropdownMenuItem>
                               )}
                               <DropdownMenuItem onClick={() => onViewOrgInfo(item)}>

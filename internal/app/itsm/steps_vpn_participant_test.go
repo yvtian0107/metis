@@ -27,6 +27,10 @@ func (p *testConfigProvider) DecisionMode() string {
 	return "ai_only"
 }
 
+func (p *testConfigProvider) DecisionAgentID() uint {
+	return 0
+}
+
 var _ engine.EngineConfigProvider = (*testConfigProvider)(nil)
 
 // registerParticipantSteps registers participant validation step definitions.

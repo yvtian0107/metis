@@ -121,15 +121,19 @@ DecisionPlan 校验逻辑 SHALL 适配工具按需查询模式，不再依赖全
 - **WHEN** Agent 指定的 `action_id` 需要校验
 - **THEN** 系统 SHALL 直接查询 `itsm_service_actions` 表确认该动作存在、属于当前服务且 `is_active=true`
 
-### Requirement: Agent 调用机制
-SmartEngine SHALL 通过 ReAct 循环调用 Agent，使用 `itsm.decision`（流程决策智能体）的 LLM 配置发起执行。Agent 在循环中可使用决策域工具按需获取信息，最终输出 DecisionPlan JSON。
+### Requirement: ReAct 决策循环
+SmartEngine SHALL 通过 ReAct 循环调用 Agent，使用引擎配置中指定的决策智能体的 LLM 配置发起执行。Agent 在循环中可使用决策域工具按需获取信息，最终输出 DecisionPlan JSON。
 
 #### Scenario: 构建 Agent 调用上下文
 - **WHEN** 引擎准备启动 ReAct 循环
-- **THEN** 系统 SHALL 通过 AgentProvider 按 code=`itsm.decision` 获取完整 agent 记录，使用其 model_id 和 temperature 作为 LLM 调用参数，构建消息序列：
+- **THEN** 系统 SHALL 通过 EngineConfigProvider 获取 `DecisionAgentID()`，再通过 AgentProvider 按 agent_id 获取完整 agent 记录，使用其 model_id 和 temperature 作为 LLM 调用参数，构建消息序列：
   - system message: `[Collaboration Spec]\n\n---\n\n[Agent system_prompt]\n\n---\n\n[DecisionMode 提示词注入]\n\n---\n\n[工具使用指引]\n\n---\n\n[最终输出格式要求]`
   - user message: `[精简初始 seed JSON]\n\n[策略约束 JSON]\n\n请通过工具获取所需信息，然后输出决策。`
 - **AND** ChatRequest SHALL 携带 `Tools` 字段包含所有决策域工具定义
+
+#### Scenario: 决策 agent 未配置
+- **WHEN** 引擎准备启动 ReAct 循环且 `DecisionAgentID()` 返回 0
+- **THEN** 系统 SHALL 返回错误 "决策智能体未配置"
 
 #### Scenario: DecisionMode 提示词注入
 - **WHEN** 构建 Agent system prompt 且 SystemConfig `itsm.engine.decision.decision_mode` 值为 `direct_first`

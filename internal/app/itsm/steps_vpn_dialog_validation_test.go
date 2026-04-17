@@ -13,6 +13,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"regexp"
 	"strings"
 	"time"
@@ -153,13 +154,21 @@ func setupDialogTest(bc *bddContext) (func(ctx context.Context, userMsg string) 
 		for evt := range ch {
 			switch evt.Type {
 			case ai.EventTypeToolCall:
+				log.Printf("[BDD-DIALOG] tool_call: %s args=%s", evt.ToolName, string(evt.ToolArgs))
 				bc.dialogState.toolCalls = append(bc.dialogState.toolCalls, toolCallRecord{
 					Name: evt.ToolName,
 					Args: evt.ToolArgs,
 				})
+			case ai.EventTypeToolResult:
+				preview := evt.ToolOutput
+				if len(preview) > 500 {
+					preview = preview[:500] + "..."
+				}
+				log.Printf("[BDD-DIALOG] tool_result: %s output=%s", evt.ToolName, preview)
 			case ai.EventTypeContentDelta:
 				contentParts = append(contentParts, evt.Text)
 			case ai.EventTypeError:
+				log.Printf("[BDD-DIALOG] error: %s", evt.Message)
 				return fmt.Errorf("agent error: %s", evt.Message)
 			}
 		}
@@ -340,7 +349,7 @@ func (bc *bddContext) whenAgentProcessesMessage() error {
 		return fmt.Errorf("setup dialog test: %w", err)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
 	defer cancel()
 
 	return run(ctx, bc.dialogState.userMessage)

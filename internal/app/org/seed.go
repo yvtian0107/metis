@@ -10,6 +10,15 @@ import (
 )
 
 func seedOrg(db *gorm.DB, enforcer *casbin.Enforcer, install bool) error {
+	// Migration: drop old unique index on (user_id, department_id) in favor of (user_id, department_id, position_id)
+	if db.Migrator().HasIndex(&UserPosition{}, "idx_user_pos_user_dep") {
+		if err := db.Migrator().DropIndex(&UserPosition{}, "idx_user_pos_user_dep"); err != nil {
+			slog.Warn("seed: failed to drop old index idx_user_pos_user_dep", "error", err)
+		} else {
+			slog.Info("seed: dropped old index idx_user_pos_user_dep")
+		}
+	}
+
 	// 1. Seed menus: 组织管理 directory
 	var orgDir model.Menu
 	if err := db.Where("permission = ?", "org").First(&orgDir).Error; err != nil {
@@ -154,6 +163,7 @@ func seedOrg(db *gorm.DB, enforcer *casbin.Enforcer, install bool) error {
 		{"admin", "/api/v1/org/users/:id/positions/:assignmentId", "PUT"},
 		{"admin", "/api/v1/org/users/:id/positions/:assignmentId", "DELETE"},
 		{"admin", "/api/v1/org/users/:id/positions/:assignmentId/primary", "PUT"},
+		{"admin", "/api/v1/org/users/:id/departments/:deptId/positions", "PUT"},
 		{"admin", "/api/v1/org/users", "GET"},
 	}
 
