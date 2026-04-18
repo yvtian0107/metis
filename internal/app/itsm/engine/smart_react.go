@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
 
 	"gorm.io/gorm"
 
@@ -55,6 +56,14 @@ func (e *SmartEngine) agenticDecision(ctx context.Context, tx *gorm.DB, ticketID
 		actionExecutor:    e.actionExecutor,
 	}
 
+	// Parse knowledge base IDs from service definition
+	if svc.KnowledgeBaseIDs != "" {
+		var kbIDs []uint
+		if err := json.Unmarshal([]byte(svc.KnowledgeBaseIDs), &kbIDs); err == nil {
+			toolCtx.knowledgeBaseIDs = kbIDs
+		}
+	}
+
 	// Build tool definitions and handler map
 	tools := allDecisionTools()
 	toolDefs := make([]llm.ToolDef, len(tools))
@@ -82,13 +91,18 @@ func (e *SmartEngine) agenticDecision(ctx context.Context, tx *gorm.DB, ticketID
 
 	// ReAct loop
 	for turn := 0; turn < DecisionToolMaxTurns; turn++ {
-		resp, err := client.Chat(ctx, llm.ChatRequest{
+		chatReq := llm.ChatRequest{
 			Model:       agentCfg.Model,
 			Messages:    messages,
 			Tools:       toolDefs,
 			MaxTokens:   maxTokens,
 			Temperature: tempPtr,
-		})
+		}
+		// NOTE: Do NOT set ResponseFormat during the ReAct loop.
+		// json_object mode can cause the LLM to skip tool calls and output
+		// JSON directly, breaking the tool-calling flow. The extractJSON
+		// pipeline already handles parsing from free-form LLM output.
+		resp, err := client.Chat(ctx, chatReq)
 		if err != nil {
 			return nil, fmt.Errorf("llm chat (turn %d): %w", turn, err)
 		}
@@ -148,7 +162,7 @@ func executeDecisionTool(
 // The seed is intentionally lightweight — the agent queries detailed context via tools.
 func (e *SmartEngine) buildInitialSeed(tx *gorm.DB, ticketID uint, svc *serviceModel, agentCfg *SmartAgentConfig, decisionMode string) (string, string, error) {
 	// --- System message ---
-	systemMsg := buildAgenticSystemPrompt(svc.CollaborationSpec, agentCfg.SystemPrompt, decisionMode)
+	systemMsg := buildAgenticSystemPrompt(svc.CollaborationSpec, agentCfg.SystemPrompt, decisionMode, svc.WorkflowJSON)
 
 	// --- User message: lightweight ticket snapshot + policy constraints ---
 	var ticket struct {
@@ -206,7 +220,7 @@ func (e *SmartEngine) buildInitialSeed(tx *gorm.DB, ticketID uint, svc *serviceM
 }
 
 // buildAgenticSystemPrompt constructs the system prompt for the agentic decision agent.
-func buildAgenticSystemPrompt(collaborationSpec, agentSystemPrompt, decisionMode string) string {
+func buildAgenticSystemPrompt(collaborationSpec, agentSystemPrompt, decisionMode, workflowJSON string) string {
 	prompt := ""
 	if collaborationSpec != "" {
 		prompt += "## 服务处理规范\n\n" + collaborationSpec + "\n\n---\n\n"
@@ -219,7 +233,15 @@ func buildAgenticSystemPrompt(collaborationSpec, agentSystemPrompt, decisionMode
 	case "ai_only":
 		prompt += "## 决策策略\n\n始终使用 AI 推理决定下一步，不依赖预定义路径。\n\n---\n\n"
 	default: // "direct_first" or empty
-		prompt += "## 决策策略\n\n优先走确定路径（workflow_hints），无法确定时使用 AI 推理。\n\n---\n\n"
+		hints := extractWorkflowHints(workflowJSON)
+		if hints != "" {
+			prompt += "## 决策策略\n\n优先参考以下工作流路径来决定下一步，无法确定时使用 AI 推理。\n\n"
+			prompt += "## 工作流参考路径\n\n" + hints + "\n\n---\n\n"
+		} else {
+			// No workflow hints available — degrade to ai_only behavior
+			slog.Warn("direct_first mode but no workflow hints available, degrading to ai_only")
+			prompt += "## 决策策略\n\n始终使用 AI 推理决定下一步，不依赖预定义路径。\n\n---\n\n"
+		}
 	}
 	prompt += agenticToolGuidance
 	prompt += "\n\n---\n\n"
@@ -285,3 +307,239 @@ const agenticOutputFormat = "## 输出要求\n\n" +
 	"- action_id: 当 type 为 \"action\" 时，填写 decision.list_actions 返回的 action id。\n" +
 	"- reasoning: 你的推理过程（会展示给管理员审核）。\n" +
 	"- confidence: 决策信心（0.0-1.0）。越高表示越确信。"
+
+// extractWorkflowHints extracts a structured step summary from WorkflowJSON
+// for injection into the system prompt in direct_first mode.
+func extractWorkflowHints(workflowJSON string) string {
+	if workflowJSON == "" {
+		return ""
+	}
+
+	var wf struct {
+		Nodes []struct {
+			ID   string `json:"id"`
+			Type string `json:"type"`
+			Data struct {
+				Label        string `json:"label"`
+				Participants []struct {
+					Type           string `json:"type"`
+					Value          string `json:"value"`
+					PositionCode   string `json:"position_code"`
+					DepartmentCode string `json:"department_code"`
+				} `json:"participants"`
+				ApproveMode      string `json:"approve_mode"`
+				GatewayDirection string `json:"gateway_direction"`
+				ActionID         *uint  `json:"action_id"`
+			} `json:"data"`
+		} `json:"nodes"`
+		Edges []struct {
+			ID     string `json:"id"`
+			Source string `json:"source"`
+			Target string `json:"target"`
+			Data   struct {
+				Outcome   string `json:"outcome"`
+				Default   bool   `json:"default"`
+				Condition *struct {
+					Field    string `json:"field"`
+					Operator string `json:"operator"`
+					Value    any    `json:"value"`
+				} `json:"condition"`
+			} `json:"data"`
+		} `json:"edges"`
+	}
+
+	if err := json.Unmarshal([]byte(workflowJSON), &wf); err != nil {
+		return ""
+	}
+
+	if len(wf.Nodes) == 0 {
+		return ""
+	}
+
+	// Build node map and adjacency list
+	nodeMap := make(map[string]int) // id → index
+	for i, n := range wf.Nodes {
+		nodeMap[n.ID] = i
+	}
+
+	outEdges := make(map[string][]int) // source → edge indices
+	for i, e := range wf.Edges {
+		outEdges[e.Source] = append(outEdges[e.Source], i)
+	}
+
+	// Walk from start node to build hints
+	var startID string
+	for _, n := range wf.Nodes {
+		if n.Type == "start" {
+			startID = n.ID
+			break
+		}
+	}
+	if startID == "" {
+		return ""
+	}
+
+	var hints []string
+	step := 1
+	visited := make(map[string]bool)
+	queue := []string{startID}
+
+	for len(queue) > 0 && step <= 20 { // cap at 20 steps
+		nodeID := queue[0]
+		queue = queue[1:]
+
+		if visited[nodeID] {
+			continue
+		}
+		visited[nodeID] = true
+
+		idx, ok := nodeMap[nodeID]
+		if !ok {
+			continue
+		}
+		node := wf.Nodes[idx]
+
+		// Skip start/end nodes in the hints
+		if node.Type == "start" {
+			for _, ei := range outEdges[nodeID] {
+				queue = append(queue, wf.Edges[ei].Target)
+			}
+			continue
+		}
+		if node.Type == "end" {
+			hints = append(hints, fmt.Sprintf("%d. **结束流程**", step))
+			step++
+			continue
+		}
+
+		// Build step description
+		label := node.Data.Label
+		if label == "" {
+			label = node.Type
+		}
+
+		var desc string
+		switch node.Type {
+		case "exclusive":
+			// Gateway: show branches
+			desc = fmt.Sprintf("%d. **条件分支** [%s]", step, label)
+			for _, ei := range outEdges[nodeID] {
+				edge := wf.Edges[ei]
+				if edge.Data.Condition != nil {
+					desc += fmt.Sprintf("\n   - 当 %s %s %v → ", edge.Data.Condition.Field, edge.Data.Condition.Operator, edge.Data.Condition.Value)
+					if ti, ok := nodeMap[edge.Target]; ok {
+						tl := wf.Nodes[ti].Data.Label
+						if tl == "" {
+							tl = wf.Nodes[ti].Type
+						}
+						desc += tl
+					}
+				} else if edge.Data.Default {
+					desc += "\n   - 默认 → "
+					if ti, ok := nodeMap[edge.Target]; ok {
+						tl := wf.Nodes[ti].Data.Label
+						if tl == "" {
+							tl = wf.Nodes[ti].Type
+						}
+						desc += tl
+					}
+				}
+				queue = append(queue, edge.Target)
+			}
+		case "parallel", "inclusive":
+			if node.Data.GatewayDirection == "fork" {
+				desc = fmt.Sprintf("%d. **并行处理** [%s]（以下步骤同时进行）", step, label)
+			} else {
+				desc = fmt.Sprintf("%d. **汇聚等待** [%s]（等待所有并行分支完成）", step, label)
+			}
+			for _, ei := range outEdges[nodeID] {
+				queue = append(queue, wf.Edges[ei].Target)
+			}
+		case "approve":
+			participant := describeParticipants(node.Data.Participants)
+			mode := ""
+			if node.Data.ApproveMode == "parallel" {
+				mode = "（并签）"
+			}
+			desc = fmt.Sprintf("%d. **审批** [%s] — %s%s", step, label, participant, mode)
+			for _, ei := range outEdges[nodeID] {
+				queue = append(queue, wf.Edges[ei].Target)
+			}
+		case "process":
+			participant := describeParticipants(node.Data.Participants)
+			desc = fmt.Sprintf("%d. **处理** [%s] — %s", step, label, participant)
+			for _, ei := range outEdges[nodeID] {
+				queue = append(queue, wf.Edges[ei].Target)
+			}
+		case "action":
+			desc = fmt.Sprintf("%d. **自动动作** [%s]", step, label)
+			if node.Data.ActionID != nil {
+				desc += fmt.Sprintf("（action_id: %d）", *node.Data.ActionID)
+			}
+			for _, ei := range outEdges[nodeID] {
+				queue = append(queue, wf.Edges[ei].Target)
+			}
+		case "form":
+			participant := describeParticipants(node.Data.Participants)
+			desc = fmt.Sprintf("%d. **表单采集** [%s] — %s", step, label, participant)
+			for _, ei := range outEdges[nodeID] {
+				queue = append(queue, wf.Edges[ei].Target)
+			}
+		case "notify":
+			desc = fmt.Sprintf("%d. **通知** [%s]", step, label)
+			for _, ei := range outEdges[nodeID] {
+				queue = append(queue, wf.Edges[ei].Target)
+			}
+		case "wait":
+			desc = fmt.Sprintf("%d. **等待** [%s]", step, label)
+			for _, ei := range outEdges[nodeID] {
+				queue = append(queue, wf.Edges[ei].Target)
+			}
+		default:
+			desc = fmt.Sprintf("%d. **%s** [%s]", step, node.Type, label)
+			for _, ei := range outEdges[nodeID] {
+				queue = append(queue, wf.Edges[ei].Target)
+			}
+		}
+
+		hints = append(hints, desc)
+		step++
+	}
+
+	if len(hints) == 0 {
+		return ""
+	}
+
+	return strings.Join(hints, "\n")
+}
+
+// describeParticipants returns a human-readable description of participant assignments.
+func describeParticipants(participants []struct {
+	Type           string `json:"type"`
+	Value          string `json:"value"`
+	PositionCode   string `json:"position_code"`
+	DepartmentCode string `json:"department_code"`
+}) string {
+	if len(participants) == 0 {
+		return "待指定"
+	}
+
+	var parts []string
+	for _, p := range participants {
+		switch p.Type {
+		case "user":
+			parts = append(parts, fmt.Sprintf("用户(%s)", p.Value))
+		case "position":
+			parts = append(parts, fmt.Sprintf("岗位(%s)", p.Value))
+		case "department":
+			parts = append(parts, fmt.Sprintf("部门(%s)", p.Value))
+		case "position_department":
+			parts = append(parts, fmt.Sprintf("岗位(%s)@部门(%s)", p.PositionCode, p.DepartmentCode))
+		case "requester_manager":
+			parts = append(parts, "申请人主管")
+		default:
+			parts = append(parts, p.Type)
+		}
+	}
+	return strings.Join(parts, ", ")
+}

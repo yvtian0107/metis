@@ -2,6 +2,7 @@ package llm
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"time"
@@ -212,6 +213,26 @@ func (c *openaiClient) buildRequest(req ChatRequest) openai.ChatCompletionReques
 	}
 	if req.Temperature != nil {
 		oaiReq.Temperature = *req.Temperature
+	}
+
+	if req.ResponseFormat != nil {
+		switch req.ResponseFormat.Type {
+		case "json_object":
+			oaiReq.ResponseFormat = &openai.ChatCompletionResponseFormat{
+				Type: openai.ChatCompletionResponseFormatTypeJSONObject,
+			}
+		case "json_schema":
+			// Convert schema to json.RawMessage (implements json.Marshaler)
+			schemaRaw, _ := json.Marshal(req.ResponseFormat.Schema)
+			oaiReq.ResponseFormat = &openai.ChatCompletionResponseFormat{
+				Type: openai.ChatCompletionResponseFormatTypeJSONSchema,
+				JSONSchema: &openai.ChatCompletionResponseFormatJSONSchema{
+					Name:   "response",
+					Schema: json.RawMessage(schemaRaw),
+					Strict: true,
+				},
+			}
+		}
 	}
 
 	for _, tool := range req.Tools {

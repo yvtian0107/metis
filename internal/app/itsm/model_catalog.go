@@ -102,6 +102,7 @@ type ServiceDefinition struct {
 	CollaborationSpec string    `json:"collaborationSpec" gorm:"type:text"`    // smart mode
 	AgentID           *uint     `json:"agentId" gorm:"index"`                 // smart mode
 	AgentConfig       JSONField `json:"agentConfig" gorm:"type:text"`         // smart mode
+	KnowledgeBaseIDs  JSONField `json:"knowledgeBaseIds" gorm:"type:text"`    // smart mode: [1,2,3]
 	IsActive          bool      `json:"isActive" gorm:"not null;default:true"`
 	SortOrder         int       `json:"sortOrder" gorm:"default:0"`
 }
@@ -121,6 +122,7 @@ type ServiceDefinitionResponse struct {
 	CollaborationSpec string    `json:"collaborationSpec"`
 	AgentID           *uint     `json:"agentId"`
 	AgentConfig       JSONField `json:"agentConfig"`
+	KnowledgeBaseIDs  JSONField `json:"knowledgeBaseIds"`
 	IsActive          bool      `json:"isActive"`
 	SortOrder         int       `json:"sortOrder"`
 	CreatedAt         time.Time `json:"createdAt"`
@@ -141,6 +143,7 @@ func (s *ServiceDefinition) ToResponse() ServiceDefinitionResponse {
 		CollaborationSpec: s.CollaborationSpec,
 		AgentID:           s.AgentID,
 		AgentConfig:       s.AgentConfig,
+		KnowledgeBaseIDs:  s.KnowledgeBaseIDs,
 		IsActive:          s.IsActive,
 		SortOrder:         s.SortOrder,
 		CreatedAt:         s.CreatedAt,

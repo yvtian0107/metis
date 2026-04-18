@@ -53,13 +53,20 @@ type ToolDef struct {
 	Parameters  any    `json:"parameters"`
 }
 
+// ResponseFormat controls structured output from the model.
+type ResponseFormat struct {
+	Type   string `json:"type"`             // "json_object" or "json_schema"
+	Schema any    `json:"schema,omitempty"` // JSON Schema object, only for "json_schema"
+}
+
 // ChatRequest represents a chat completion request.
 type ChatRequest struct {
-	Model       string    `json:"model"`
-	Messages    []Message `json:"messages"`
-	Tools       []ToolDef `json:"tools,omitempty"`
-	MaxTokens   int       `json:"max_tokens,omitempty"`
-	Temperature *float32  `json:"temperature,omitempty"`
+	Model          string          `json:"model"`
+	Messages       []Message       `json:"messages"`
+	Tools          []ToolDef       `json:"tools,omitempty"`
+	MaxTokens      int             `json:"max_tokens,omitempty"`
+	Temperature    *float32        `json:"temperature,omitempty"`
+	ResponseFormat *ResponseFormat `json:"response_format,omitempty"`
 }
 
 // ChatResponse represents a non-streaming chat completion response.

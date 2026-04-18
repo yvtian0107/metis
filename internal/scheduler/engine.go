@@ -169,6 +169,21 @@ func (e *Engine) Start() error {
 	// Mark stale executions
 	e.recoverStale(ctx)
 
+	// Run startup tasks (fire-and-forget in background)
+	for _, def := range e.registry {
+		if def.Type != TypeStartup {
+			continue
+		}
+		go func(d *TaskDef) {
+			slog.Info("scheduler: running startup task", "name", d.Name)
+			if err := d.Handler(context.Background(), nil); err != nil {
+				slog.Error("scheduler: startup task failed", "name", d.Name, "error", err)
+			} else {
+				slog.Info("scheduler: startup task completed", "name", d.Name)
+			}
+		}(def)
+	}
+
 	// Start cron
 	e.cron.Start()
 

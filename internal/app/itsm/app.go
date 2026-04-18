@@ -346,6 +346,12 @@ func (a *ITSMApp) Tasks() []scheduler.TaskDef {
 			Description: "Check SLA breaches and trigger escalation rules",
 			Handler:     engine.HandleSLACheck(db.DB),
 		},
+		{
+			Name:        "itsm-smart-recovery",
+			Type:        scheduler.TypeStartup,
+			Description: "Recover in_progress smart tickets that lost their decision cycle",
+			Handler:     engine.HandleSmartRecovery(db.DB, smartEngine),
+		},
 	}
 }
 

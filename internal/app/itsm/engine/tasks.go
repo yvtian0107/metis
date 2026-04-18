@@ -297,6 +297,65 @@ func HandleBoundaryTimer(db *gorm.DB, classicEngine *ClassicEngine) func(ctx con
 	}
 }
 
+// HandleSmartRecovery scans in_progress smart tickets and resubmits decision cycles
+// for any that have no active activities and haven't been circuit-broken.
+// This runs once at startup to recover from server restarts.
+func HandleSmartRecovery(db *gorm.DB, smartEngine *SmartEngine) func(ctx context.Context, payload json.RawMessage) error {
+	return func(ctx context.Context, _ json.RawMessage) error {
+		// Find all in_progress smart tickets
+		type ticketRow struct {
+			ID               uint
+			Code             string
+			AIFailureCount   int
+			AIDisabledReason string
+		}
+		var tickets []ticketRow
+		if err := db.Table("itsm_tickets").
+			Where("engine_type = ? AND status = ? AND deleted_at IS NULL", "smart", "in_progress").
+			Select("id, code, ai_failure_count, ai_disabled_reason").
+			Find(&tickets).Error; err != nil {
+			return fmt.Errorf("smart recovery: query tickets: %w", err)
+		}
+
+		if len(tickets) == 0 {
+			slog.Info("smart recovery: no in_progress smart tickets found")
+			return nil
+		}
+
+		recovered := 0
+		for _, t := range tickets {
+			// Skip circuit-broken tickets
+			if t.AIDisabledReason != "" {
+				slog.Debug("smart recovery: skipping circuit-broken ticket", "ticketID", t.ID, "code", t.Code)
+				continue
+			}
+
+			// Check if there are active (pending/in_progress) activities
+			var activeCount int64
+			db.Table("itsm_ticket_activities").
+				Where("ticket_id = ? AND status IN ?", t.ID, []string{ActivityPending, ActivityInProgress}).
+				Count(&activeCount)
+
+			if activeCount > 0 {
+				slog.Debug("smart recovery: skipping ticket with active activities", "ticketID", t.ID, "code", t.Code, "activeCount", activeCount)
+				continue
+			}
+
+			// Submit recovery task
+			payload, _ := json.Marshal(SmartProgressPayload{TicketID: t.ID})
+			if err := smartEngine.SubmitProgressTask(payload); err != nil {
+				slog.Error("smart recovery: failed to submit progress task", "ticketID", t.ID, "error", err)
+				continue
+			}
+			recovered++
+			slog.Info("smart recovery: submitted progress task for orphaned ticket", "ticketID", t.ID, "code", t.Code)
+		}
+
+		slog.Info("smart recovery: completed", "scanned", len(tickets), "recovered", recovered)
+		return nil
+	}
+}
+
 // HandleSmartProgress is the scheduler task handler for itsm-smart-progress.
 // It runs the AI decision cycle for smart engine tickets.
 func HandleSmartProgress(db *gorm.DB, smartEngine *SmartEngine) func(ctx context.Context, payload json.RawMessage) error {

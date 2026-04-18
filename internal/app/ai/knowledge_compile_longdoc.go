@@ -8,8 +8,6 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/kaptinlin/jsonrepair"
-
 	"metis/internal/llm"
 )
 
@@ -198,7 +196,7 @@ func (s *KnowledgeCompileService) scanChunks(ctx context.Context, llmClient llm.
 			continue
 		}
 
-		jsonStr := extractJSON(resp.Content)
+		jsonStr := llm.ExtractJSON(resp.Content)
 		var sr scanResult
 		if err := json.Unmarshal([]byte(jsonStr), &sr); err != nil {
 			errors[i] = fmt.Errorf("parse scan result: %w", err)
@@ -397,7 +395,7 @@ func (s *KnowledgeCompileService) writeConceptArticles(ctx context.Context, llmC
 			continue
 		}
 
-		jsonStr := extractJSON(resp.Content)
+		jsonStr := llm.ExtractJSON(resp.Content)
 		var mr mapResult
 		if err := json.Unmarshal([]byte(jsonStr), &mr); err != nil {
 			slog.Warn("parse write result failed", "concept", concept.Title, "error", err)
@@ -455,49 +453,3 @@ func (s *KnowledgeCompileService) mapSourceLongDoc(ctx context.Context, llmClien
 	}
 }
 
-// extractJSON strips markdown code fences and repairs malformed JSON from LLM output.
-// Uses jsonrepair to handle common LLM issues: trailing commas, single quotes,
-// comments, truncated JSON, missing closing brackets, etc.
-func extractJSON(content string) string {
-	jsonStr := content
-
-	// Strip markdown code fences
-	if idx := strings.Index(content, "```json"); idx != -1 {
-		start := idx + 7
-		end := strings.Index(content[start:], "```")
-		if end != -1 {
-			jsonStr = content[start : start+end]
-		}
-	} else if idx := strings.Index(content, "```"); idx != -1 {
-		start := idx + 3
-		if nl := strings.Index(content[start:], "\n"); nl != -1 {
-			start = start + nl + 1
-		}
-		end := strings.Index(content[start:], "```")
-		if end != -1 {
-			jsonStr = content[start : start+end]
-		}
-	}
-
-	jsonStr = strings.TrimSpace(jsonStr)
-
-	// Try standard parse first — skip repair if JSON is already valid
-	if json.Valid([]byte(jsonStr)) {
-		return jsonStr
-	}
-
-	// Repair malformed JSON
-	repaired, err := jsonrepair.Repair(jsonStr)
-	if err != nil {
-		slog.Debug("json repair failed, returning original", "error", err, "preview", truncate(jsonStr, 200))
-		return jsonStr
-	}
-	return repaired
-}
-
-func truncate(s string, maxLen int) string {
-	if len(s) <= maxLen {
-		return s
-	}
-	return s[:maxLen] + "..."
-}

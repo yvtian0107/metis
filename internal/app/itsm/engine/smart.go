@@ -9,6 +9,8 @@ import (
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
+
+	"metis/internal/llm"
 )
 
 // --- Interfaces for AI App dependency injection ---
@@ -611,8 +613,8 @@ func (e *SmartEngine) createPositionAssignment(tx *gorm.DB, ticketID, activityID
 
 	// Look up position and department IDs (best-effort, tables may not exist in tests)
 	var positionID, departmentID uint
-	tx.Table("org_positions").Where("code = ?", positionCode).Select("id").Scan(&positionID)
-	tx.Table("org_departments").Where("code = ?", departmentCode).Select("id").Scan(&departmentID)
+	tx.Table("positions").Where("code = ?", positionCode).Select("id").Scan(&positionID)
+	tx.Table("departments").Where("code = ?", departmentCode).Select("id").Scan(&departmentID)
 
 	assignment := &assignmentModel{
 		TicketID:        ticketID,
@@ -755,7 +757,7 @@ func (e *SmartEngine) recordTimeline(tx *gorm.DB, ticketID uint, activityID *uin
 
 func parseDecisionPlan(content string) (*DecisionPlan, error) {
 	// Try to extract JSON from the response (may be wrapped in markdown code blocks)
-	jsonStr := extractJSON(content)
+	jsonStr := llm.ExtractJSON(content)
 	if jsonStr == "" {
 		return nil, fmt.Errorf("无法从 Agent 输出中提取 JSON")
 	}
@@ -765,36 +767,6 @@ func parseDecisionPlan(content string) (*DecisionPlan, error) {
 		return nil, fmt.Errorf("JSON 解析失败: %w", err)
 	}
 	return &plan, nil
-}
-
-// extractJSON extracts a JSON object from text that may contain markdown code blocks.
-func extractJSON(s string) string {
-	// Try to find JSON in code blocks first
-	start := -1
-	for i := 0; i < len(s); i++ {
-		if s[i] == '{' {
-			start = i
-			break
-		}
-	}
-	if start == -1 {
-		return ""
-	}
-
-	// Find matching closing brace
-	depth := 0
-	for i := start; i < len(s); i++ {
-		switch s[i] {
-		case '{':
-			depth++
-		case '}':
-			depth--
-			if depth == 0 {
-				return s[start : i+1]
-			}
-		}
-	}
-	return ""
 }
 
 func mustJSON(v any) string {
@@ -832,6 +804,8 @@ type serviceModel struct {
 	CollaborationSpec string `gorm:"column:collaboration_spec"`
 	AgentID           *uint  `gorm:"column:agent_id"`
 	AgentConfig       string `gorm:"column:agent_config"`
+	KnowledgeBaseIDs  string `gorm:"column:knowledge_base_ids"`
+	WorkflowJSON      string `gorm:"column:workflow_json"`
 }
 
 func (serviceModel) TableName() string { return "itsm_service_definitions" }

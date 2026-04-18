@@ -62,6 +62,12 @@ type dialogTestState struct {
 	finalContent string
 	userMessage  string
 	mutateDraft  bool // flag: mutate form fields after draft_prepare
+	// E2E dialog fields
+	currentUserID   uint
+	currentUsername  string
+	messages        []dialogMessage
+	dialogMode      string
+	previousTickets []*Ticket
 }
 
 type toolCallRecord struct {

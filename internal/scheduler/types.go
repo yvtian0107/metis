@@ -18,6 +18,7 @@ var ErrNotReady = errors.New("task not ready")
 const (
 	TypeScheduled = "scheduled"
 	TypeAsync     = "async"
+	TypeStartup   = "startup" // runs once at engine start
 )
 
 // Task runtime statuses.

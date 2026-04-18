@@ -30,6 +30,7 @@ func newAnthropicClient(baseURL, apiKey string) *anthropicClient {
 }
 
 func (c *anthropicClient) Chat(ctx context.Context, req ChatRequest) (*ChatResponse, error) {
+	jsonMode := req.ResponseFormat != nil && (req.ResponseFormat.Type == "json_object" || req.ResponseFormat.Type == "json_schema")
 	params := c.buildParams(req)
 	msg, err := c.client.Messages.New(ctx, params)
 	if err != nil {
@@ -55,6 +56,11 @@ func (c *anthropicClient) Chat(ctx context.Context, req ChatRequest) (*ChatRespo
 				Arguments: string(args),
 			})
 		}
+	}
+
+	// Prepend "{" for JSON mode since the assistant prefill is not included in the response
+	if jsonMode && len(req.Tools) == 0 && result.Content != "" && !strings.HasPrefix(result.Content, "{") {
+		result.Content = "{" + result.Content
 	}
 
 	return result, nil
@@ -176,6 +182,10 @@ func (c *anthropicClient) buildParams(req ChatRequest) anthropic.MessageNewParam
 		maxTokens = 4096
 	}
 
+	// Handle ResponseFormat for Anthropic (no native response_format support)
+	// json_object: append system prompt constraint + assistant prefill "{"
+	jsonMode := req.ResponseFormat != nil && (req.ResponseFormat.Type == "json_object" || req.ResponseFormat.Type == "json_schema")
+
 	params := anthropic.MessageNewParams{
 		Model:     anthropic.Model(req.Model),
 		MaxTokens: maxTokens,
@@ -184,8 +194,12 @@ func (c *anthropicClient) buildParams(req ChatRequest) anthropic.MessageNewParam
 	for _, msg := range req.Messages {
 		switch msg.Role {
 		case RoleSystem:
+			systemText := msg.Content
+			if jsonMode {
+				systemText += "\n\nIMPORTANT: You must respond with valid JSON only. Do not include any text before or after the JSON object."
+			}
 			params.System = []anthropic.TextBlockParam{
-				{Text: msg.Content},
+				{Text: systemText},
 			}
 		case RoleUser:
 			// Build content blocks for multimodal support
@@ -250,6 +264,13 @@ func (c *anthropicClient) buildParams(req ChatRequest) anthropic.MessageNewParam
 				InputSchema: inputSchema,
 			},
 		})
+	}
+
+	// Assistant prefill for JSON mode (only when no tools — tools use their own structured output)
+	if jsonMode && len(req.Tools) == 0 {
+		params.Messages = append(params.Messages, anthropic.NewAssistantMessage(
+			anthropic.NewTextBlock("{"),
+		))
 	}
 
 	return params

@@ -429,7 +429,7 @@ func (s *KnowledgeCompileService) mapSource(ctx context.Context, llmClient llm.C
 		return mapSourceResult{SourceTitle: src.Title, SourceID: src.ID, Error: fmt.Errorf("LLM call: %w", err)}
 	}
 
-	jsonStr := extractJSON(resp.Content)
+	jsonStr := llm.ExtractJSON(resp.Content)
 	var mr mapResult
 	if err := json.Unmarshal([]byte(jsonStr), &mr); err != nil {
 		return mapSourceResult{SourceTitle: src.Title, SourceID: src.ID, Error: fmt.Errorf("parse JSON: %w (preview: %.200s)", err, jsonStr)}
@@ -811,7 +811,7 @@ func (s *KnowledgeCompileService) runLint(kbID uint) int {
 }
 
 func (s *KnowledgeCompileService) parseLLMOutput(content string) (*compileOutput, error) {
-	jsonStr := extractJSON(content)
+	jsonStr := llm.ExtractJSON(content)
 	var output compileOutput
 	if err := json.Unmarshal([]byte(jsonStr), &output); err != nil {
 		return nil, fmt.Errorf("JSON parse error: %w (content preview: %.200s)", err, jsonStr)
