@@ -8,7 +8,7 @@
 
 ### Requirement: Progress method advances workflow
 
-ClassicEngine.Progress() SHALL acquire a FOR UPDATE lock on the activity row and its associated execution token row before performing status checks. If the activity type is "approve" and execution_mode is "parallel" or "sequential", Progress SHALL delegate to the multi-approval logic (progressApproval) instead of immediately completing the activity. For single mode or non-approve activities, behavior is unchanged.
+ClassicEngine.Progress() SHALL acquire a FOR UPDATE lock on the activity row and its associated execution token row before performing status checks. If the activity type is "approve" and execution_mode is "parallel" or "sequential", Progress SHALL delegate to the multi-approval logic (progressApproval) instead of immediately completing the activity. For single mode or non-approve activities, behavior is unchanged. When creating the next activity, the engine SHALL read form schema from the workflow node's inline `formSchema` field. The engine SHALL NOT query FormDefinition table. When writing form bindings from a completed activity, the engine SHALL parse the schema from `activity.FormSchema` (already snapshotted) as before.
 
 #### Scenario: progress with FOR UPDATE lock acquired
 
@@ -34,6 +34,18 @@ ClassicEngine.Progress() SHALL acquire a FOR UPDATE lock on the activity row and
 - WHEN Progress() is called for an activity with type "approve" and execution_mode "single" (or empty)
 - THEN Progress SHALL complete the activity immediately upon the first participant action
 - AND behavior MUST remain identical to the existing single-approval flow
+
+#### Scenario: Activity creation reads inline formSchema
+
+- WHEN the engine creates an activity for a form/user_task node
+- THEN it SHALL copy `node.FormSchema` directly into `activity.FormSchema`
+- AND it SHALL NOT perform any database query to resolve the form
+
+#### Scenario: Form binding write unchanged
+
+- WHEN a user completes an activity with form data
+- THEN the engine SHALL parse bindings from `activity.FormSchema` and write process variables
+- AND the binding behavior SHALL be identical to the current implementation
 
 ## ADDED Requirements
 

@@ -40,7 +40,7 @@ ITSM 工作流编辑器核心规范，定义编辑器的三栏布局、节点面
 - **THEN** 顶部右侧工具栏显示：Undo（灰色如果无历史）、Redo（灰色如果无 future）、自动布局、保存按钮
 
 ### Requirement: 节点类型扩展
-系统 SHALL 在 types.ts 中扩展 NODE_TYPES 数组，新增 timer、signal、parallel、inclusive、subprocess、script 六种类型，保留原有 9 种不变。WFNodeData 接口扩展支持 formDefinitionId、inputMapping、outputMapping、scriptAssignments、subprocessJson 等新字段。
+系统 SHALL 在 types.ts 中扩展 NODE_TYPES 数组，新增 timer、signal、parallel、inclusive、subprocess、script 六种类型，保留原有 9 种不变。系统 SHALL 在 types.ts 中将 form/user_task 节点的 `formDefinitionId` 字段替换为 `formSchema` (FormSchema 对象)。WFNodeData 接口 SHALL 移除 `formDefinitionId?: string`，新增 `formSchema?: FormSchema`。WFNodeData 接口扩展支持 inputMapping、outputMapping、scriptAssignments、subprocessJson 等新字段。
 
 #### Scenario: 类型定义完整性
 - **WHEN** 编辑器使用 NodeType 联合类型
@@ -49,3 +49,11 @@ ITSM 工作流编辑器核心规范，定义编辑器的三栏布局、节点面
 #### Scenario: 新字段向后兼容
 - **WHEN** 加载旧格式的 workflowJson（不含新字段）
 - **THEN** 新字段默认为 undefined，编辑器正常工作
+
+#### Scenario: form 节点属性面板内嵌表单设计器
+- **WHEN** 用户选中一个 form 或 user_task 节点
+- **THEN** 右侧属性面板 SHALL 显示内嵌的 FormDesigner 组件，允许直接编辑 formSchema
+
+#### Scenario: 保存时 formSchema 嵌入 workflowJson
+- **WHEN** 用户保存工作流
+- **THEN** 每个 form/user_task 节点的 data.formSchema SHALL 包含完整的表单 schema JSON

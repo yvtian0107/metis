@@ -1,27 +1,27 @@
 ## MODIFIED Requirements
 
 ### Requirement: ServiceDefinition model form reference
-ServiceDefinition SHALL reference forms via `form_id` (*uint, FK to itsm_form_definitions) instead of storing inline `form_schema` (JSONField). The `form_schema` column SHALL be removed from the model. ServiceDefinitionResponse SHALL include `formId` (*uint) instead of `formSchema`.
+ServiceDefinition SHALL store the intake form schema inline via `intake_form_schema` (JSONField, TEXT, nullable) instead of referencing an external FormDefinition via `form_id`. The `form_id` column SHALL be removed. ServiceDefinitionResponse SHALL include `intakeFormSchema` (JSONField) instead of `formId`.
 
-#### Scenario: Create service with form reference
-- **WHEN** a CreateServiceDefinition request includes `formId: 5`
-- **THEN** the system SHALL store `form_id=5` and return the created service with `formId: 5`
+#### Scenario: Create service with inline form schema
+- **WHEN** a CreateServiceDefinition request includes `intakeFormSchema: {"version":1,"fields":[...]}`
+- **THEN** the system SHALL store the schema inline and return the created service with the embedded schema
 
 #### Scenario: Create service without form
-- **WHEN** a CreateServiceDefinition request omits `formId`
-- **THEN** the system SHALL accept the request with `form_id=NULL`
+- **WHEN** a CreateServiceDefinition request omits `intakeFormSchema`
+- **THEN** the system SHALL accept the request with `intake_form_schema=NULL`
 
-#### Scenario: Referenced form not found
-- **WHEN** a CreateServiceDefinition request references a formId that does not exist
-- **THEN** the system SHALL return HTTP 400 with an error message
+#### Scenario: Invalid form schema rejected
+- **WHEN** a CreateServiceDefinition request includes an `intakeFormSchema` that fails ValidateSchema()
+- **THEN** the system SHALL return HTTP 400 with validation errors
 
 ### Requirement: Workflow node form reference
-WorkflowDef NodeData SHALL reference forms via `formId` (string, FormDefinition code) instead of inline `formSchema` (json.RawMessage). The `form_schema` field SHALL be removed from NodeData struct. The engine SHALL resolve formId to the full schema at activity creation time and snapshot it into `activity.form_schema`.
+WorkflowDef NodeData SHALL store form schema inline via `formSchema` (json.RawMessage) instead of referencing a FormDefinition via `formId`. The `formId` field SHALL be removed from NodeData struct. The engine SHALL read formSchema directly from the node data when creating activities.
 
-#### Scenario: Classic engine resolves form
-- **WHEN** the ClassicEngine encounters a form node with `formId: "form_general_incident"`
-- **THEN** it SHALL look up the FormDefinition by code, snapshot its schema into the created activity's form_schema field
+#### Scenario: Classic engine reads inline form schema
+- **WHEN** the ClassicEngine encounters a form node with `formSchema: {"version":1,"fields":[...]}`
+- **THEN** it SHALL copy the schema directly into the created activity's form_schema field
 
-#### Scenario: Form not found at runtime
-- **WHEN** the engine encounters a formId that does not exist in FormDefinition table
-- **THEN** it SHALL record a timeline warning and create the activity without form_schema
+#### Scenario: Node without form schema
+- **WHEN** the engine encounters a form/user_task node with no formSchema
+- **THEN** it SHALL create the activity without form_schema

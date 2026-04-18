@@ -192,3 +192,94 @@ SmartEngine.Cancel SHALL 取消工单所有活跃活动、取消待处理 assign
 - **WHEN** toolCalls 中 "itsm.service_load" 出现 1 次
 - **AND** 断言 "service_load 被调用至少 2 次"
 - **THEN** 断言 SHALL 失败并报告实际调用次数
+
+### Requirement: 审批岗位分配断言 step
+
+系统 SHALL 提供通用 BDD step `当前审批分配到岗位 "<position_code>"`，断言当前活动的 TicketAssignment 中 position 的 code 匹配期望值。该 step 不绑定具体服务类型，可被所有 BDD 场景复用。
+
+#### Scenario: 岗位分配断言匹配
+- **WHEN** 当前活动有 TicketAssignment 且关联的 Position.Code 为 "ops_admin"
+- **AND** 执行断言 `当前审批分配到岗位 "ops_admin"`
+- **THEN** 断言通过
+
+#### Scenario: 岗位分配断言不匹配
+- **WHEN** 当前活动有 TicketAssignment 且关联的 Position.Code 为 "network_admin"
+- **AND** 执行断言 `当前审批分配到岗位 "ops_admin"`
+- **THEN** 断言失败并报告实际岗位
+
+### Requirement: 审批可见性断言 step
+
+系统 SHALL 提供通用 BDD step `当前审批仅对 "<username>" 可见`，断言当前活动的 TicketAssignment 通过 position_department 解析后，仅指定用户在可处理人列表中。
+
+#### Scenario: 可见性断言通过
+- **WHEN** 当前审批分配到 it/ops_admin 岗位，且 ops-operator 是该岗位唯一成员
+- **AND** 执行断言 `当前审批仅对 "ops-operator" 可见`
+- **THEN** 断言通过（ops-operator 可见，network-operator 和 security-operator 不可见）
+
+### Requirement: 越权认领失败断言 step
+
+系统 SHALL 提供通用 BDD step `"<username>" 认领当前工单应失败`，尝试让指定用户认领当前活动的 assignment，断言操作失败（用户不在该 assignment 的 position_department 可处理人中）。
+
+#### Scenario: 非目标岗位用户认领失败
+- **WHEN** 当前审批分配到 it/ops_admin 岗位
+- **AND** network-operator（属于 it/network_admin）尝试认领
+- **THEN** 认领操作失败
+
+### Requirement: 越权审批失败断言 step
+
+系统 SHALL 提供通用 BDD step `"<username>" 审批当前工单应失败`，尝试让指定用户直接审批当前活动，断言操作失败。
+
+#### Scenario: 非目标岗位用户审批失败
+- **WHEN** 当前审批分配到 it/ops_admin 岗位
+- **AND** security-operator（属于 it/security_admin）尝试审批
+- **THEN** 审批操作失败
+
+### Requirement: syncActionSubmitter 同步执行 Action 任务
+
+系统 SHALL 提供 `syncActionSubmitter` 实现 `engine.TaskSubmitter`，在 BDD 测试中同步执行 `itsm-action-execute` 任务（调用 ActionExecutor + auto-progress），其他任务类型 no-op。
+
+#### Scenario: itsm-action-execute 任务被同步执行
+- **WHEN** smart engine 创建 action 类型活动并提交 `itsm-action-execute` 任务
+- **THEN** syncActionSubmitter SHALL 同步调用 `ActionExecutor.Execute()`
+- **AND** 执行完成后 SHALL 自动调用 `engine.Progress()` 标记活动完成
+- **AND** TicketActionExecution 表中 SHALL 存在对应记录
+
+#### Scenario: 非 action 任务被忽略
+- **WHEN** engine 提交 `itsm-smart-progress` 或其他任务
+- **THEN** syncActionSubmitter SHALL 静默忽略（no-op）
+
+### Requirement: LocalActionReceiver HTTP 测试接收器
+
+系统 SHALL 提供 `LocalActionReceiver`，基于 `httptest.Server` 在测试进程内启动 HTTP 服务，记录所有收到的请求。
+
+#### Scenario: 记录 HTTP 请求
+- **WHEN** ActionExecutor 向 LocalActionReceiver 的 /precheck 路径发送 POST 请求
+- **THEN** receiver.Records() SHALL 包含该请求
+- **AND** 记录中包含 Path、Method、Body 字段
+
+#### Scenario: 按路径过滤记录
+- **WHEN** receiver 收到 /precheck 和 /apply 各 1 个请求
+- **THEN** receiver.RecordsByPath("/precheck") SHALL 返回 1 条记录
+- **AND** receiver.RecordsByPath("/apply") SHALL 返回 1 条记录
+
+#### Scenario: 清空记录
+- **WHEN** 调用 receiver.Clear()
+- **THEN** receiver.Records() SHALL 返回空列表
+
+### Requirement: replaceTemplateVars 支持 form_data 和 code 变量
+
+`replaceTemplateVars` SHALL 支持 `{{ticket.form_data.<key>}}` 格式的模板变量（从 ticket 的 FormData JSON 字段中提取一级键值），以及 `{{ticket.code}}` 变量。
+
+#### Scenario: form_data 变量替换
+- **WHEN** body 模板为 `{"db":"{{ticket.form_data.database_name}}"}`
+- **AND** ticket.FormData 为 `{"database_name":"prod-db-01"}`
+- **THEN** 替换结果 SHALL 为 `{"db":"prod-db-01"}`
+
+#### Scenario: code 变量替换
+- **WHEN** body 模板为 `{"code":"{{ticket.code}}"}`
+- **AND** ticket.Code 为 "DB-001"
+- **THEN** 替换结果 SHALL 为 `{"code":"DB-001"}`
+
+#### Scenario: 向后兼容已有变量
+- **WHEN** body 模板包含 `{{ticket.id}}` 和 `{{ticket.status}}`
+- **THEN** 替换行为 SHALL 与扩展前一致
