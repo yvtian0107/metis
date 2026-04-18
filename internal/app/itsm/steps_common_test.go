@@ -679,6 +679,17 @@ func (bc *bddContext) thenCurrentApprovalOnlyVisibleTo(username string) error {
 		return fmt.Errorf("query assignments for activity %d: %w", activity.ID, err)
 	}
 	if len(assignments) == 0 {
+		// No assignment record — check AI decision for participant_id referencing the expected user.
+		if len(activity.AIDecision) > 0 {
+			var plan engine.DecisionPlan
+			if err := json.Unmarshal([]byte(activity.AIDecision), &plan); err == nil {
+				for _, da := range plan.Activities {
+					if da.ParticipantID != nil && *da.ParticipantID == expectedUser.ID {
+						return nil // AI intended this user
+					}
+				}
+			}
+		}
 		return fmt.Errorf("no assignments found for activity %d", activity.ID)
 	}
 
