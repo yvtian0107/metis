@@ -232,27 +232,59 @@ func seedAI(db *gorm.DB, enforcer *casbin.Enforcer) error {
 	}
 	seedButtons(skillMenu.ID, skillButtons)
 
-	// 5. Agent 管理菜单
-	var agentMenu model.Menu
-	agentMenu = model.Menu{
+	// 5. Agent 管理菜单 — 拆分为助手智能体和编码智能体
+	var assistantAgentMenu model.Menu
+	assistantAgentMenu = model.Menu{
 		ParentID:   &agentDir.ID,
-		Name:       "Agent",
+		Name:       "助手智能体",
 		Type:       model.MenuTypeMenu,
-		Path:       "/ai/agents",
+		Path:       "/ai/assistant-agents",
 		Icon:       "Bot",
-		Permission: "ai:agent:list",
+		Permission: "ai:assistant-agent:list",
 		Sort:       0,
 	}
-	if err := upsertMenu(&agentMenu); err != nil {
+	if err := upsertMenu(&assistantAgentMenu); err != nil {
 		return err
 	}
 
-	agentButtons := []model.Menu{
-		{Name: "新增 Agent", Type: model.MenuTypeButton, Permission: "ai:agent:create", Sort: 0},
-		{Name: "编辑 Agent", Type: model.MenuTypeButton, Permission: "ai:agent:update", Sort: 1},
-		{Name: "删除 Agent", Type: model.MenuTypeButton, Permission: "ai:agent:delete", Sort: 2},
+	assistantButtons := []model.Menu{
+		{Name: "新增助手智能体", Type: model.MenuTypeButton, Permission: "ai:assistant-agent:create", Sort: 0},
+		{Name: "编辑助手智能体", Type: model.MenuTypeButton, Permission: "ai:assistant-agent:update", Sort: 1},
+		{Name: "删除助手智能体", Type: model.MenuTypeButton, Permission: "ai:assistant-agent:delete", Sort: 2},
 	}
-	seedButtons(agentMenu.ID, agentButtons)
+	seedButtons(assistantAgentMenu.ID, assistantButtons)
+
+	var codingAgentMenu model.Menu
+	codingAgentMenu = model.Menu{
+		ParentID:   &agentDir.ID,
+		Name:       "编码智能体",
+		Type:       model.MenuTypeMenu,
+		Path:       "/ai/coding-agents",
+		Icon:       "Code",
+		Permission: "ai:coding-agent:list",
+		Sort:       1,
+	}
+	if err := upsertMenu(&codingAgentMenu); err != nil {
+		return err
+	}
+
+	codingButtons := []model.Menu{
+		{Name: "新增编码智能体", Type: model.MenuTypeButton, Permission: "ai:coding-agent:create", Sort: 0},
+		{Name: "编辑编码智能体", Type: model.MenuTypeButton, Permission: "ai:coding-agent:update", Sort: 1},
+		{Name: "删除编码智能体", Type: model.MenuTypeButton, Permission: "ai:coding-agent:delete", Sort: 2},
+	}
+	seedButtons(codingAgentMenu.ID, codingButtons)
+
+	// Soft-delete old "Agent" menu (ai:agent:list) if it still exists
+	if err := db.Where("permission = ?", "ai:agent:list").Delete(&model.Menu{}).Error; err != nil {
+		slog.Warn("seed: failed to cleanup old agent menu", "error", err)
+	}
+	// Also clean up old agent button menus
+	for _, oldPerm := range []string{"ai:agent:create", "ai:agent:update", "ai:agent:delete"} {
+		if err := db.Where("permission = ?", oldPerm).Delete(&model.Menu{}).Error; err != nil {
+			slog.Warn("seed: failed to cleanup old agent button", "permission", oldPerm, "error", err)
+		}
+	}
 
 	// 7. Agent templates seed
 	agentTemplates := []AgentTemplate{

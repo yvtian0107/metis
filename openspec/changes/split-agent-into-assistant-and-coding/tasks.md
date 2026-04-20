@@ -9,13 +9,13 @@
 
 - [x] 2.1 Create `assistant_agent_handler.go` with `AssistantAgentHandler` struct wrapping `AgentService` + `AgentRepo`, implementing Create/List/Get/Update/Delete/ListTemplates — all forcing `type=assistant`
 - [x] 2.2 Create `coding_agent_handler.go` with `CodingAgentHandler` struct wrapping `AgentService` + `AgentRepo`, implementing Create/List/Get/Update/Delete/ListTemplates — all forcing `type=coding`
-- [ ] 2.3 Register DI providers for `AssistantAgentHandler` and `CodingAgentHandler` in `app.go` Providers()
+- [x] 2.3 Register DI providers for `AssistantAgentHandler` and `CodingAgentHandler` in `app.go` Providers()
 
 ## 3. Backend Typed Routes
 
-- [ ] 3.1 Register `/api/v1/ai/assistant-agents` route group in `app.go` Routes() with all CRUD + templates endpoints
-- [ ] 3.2 Register `/api/v1/ai/coding-agents` route group in `app.go` Routes() with all CRUD + templates endpoints
-- [ ] 3.3 Keep existing `/api/v1/ai/agents` routes for internal use (no removal yet)
+- [x] 3.1 Register `/api/v1/ai/assistant-agents` route group in `app.go` Routes() with all CRUD + templates endpoints
+- [x] 3.2 Register `/api/v1/ai/coding-agents` route group in `app.go` Routes() with all CRUD + templates endpoints
+- [x] 3.3 Keep existing `/api/v1/ai/agents` routes for internal use (no removal yet)
 
 ## 4. Backend Seed Rewrite
 

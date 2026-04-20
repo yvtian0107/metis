@@ -154,6 +154,22 @@
       "code": {
         "name": "代码执行",
         "description": "在沙箱环境中执行 Python 和 Bash 脚本。"
+      },
+      "general": {
+        "name": "通用工具",
+        "description": "获取当前时间、用户信息等基础能力。"
+      },
+      "itsm": {
+        "name": "IT 服务管理",
+        "description": "服务匹配、工单创建、草稿管理等 ITSM 服务台能力。"
+      },
+      "decision": {
+        "name": "智能决策",
+        "description": "工单上下文查询、知识搜索、参与者解析等流程决策能力。"
+      },
+      "organization": {
+        "name": "组织架构",
+        "description": "查询人员、部门、岗位关系信息。"
       }
     },
     "toolDefs": {
@@ -173,9 +189,89 @@
         "name": "执行脚本",
         "description": "在沙箱中运行 Python 或 Bash 脚本，返回输出结果。"
       },
+      "general.current_time": {
+        "name": "获取当前时间",
+        "description": "获取当前时间，支持传入 IANA 时区名。"
+      },
+      "system.current_user_profile": {
+        "name": "获取当前用户信息",
+        "description": "读取当前用户的基础资料和组织归属（部门、岗位、角色）。"
+      },
+      "itsm.service_match": {
+        "name": "服务匹配",
+        "description": "读取服务目录，返回最匹配的服务候选。"
+      },
+      "itsm.service_confirm": {
+        "name": "服务确认",
+        "description": "确认并锁定用户选择的服务。"
+      },
+      "itsm.service_load": {
+        "name": "服务加载",
+        "description": "加载指定服务的协作规范、表单定义和动作配置。"
+      },
+      "itsm.new_request": {
+        "name": "新申请上下文",
+        "description": "重置当前会话中的旧草稿和旧服务上下文。"
+      },
+      "itsm.draft_prepare": {
+        "name": "草稿整理",
+        "description": "登记当前草稿版本，进入等待用户确认状态。"
+      },
+      "itsm.draft_confirm": {
+        "name": "草稿确认",
+        "description": "用户确认当前草稿后调用，允许继续执行工单创建。"
+      },
+      "itsm.validate_participants": {
+        "name": "参与者预检",
+        "description": "在创建工单前校验审批参与者是否可达。"
+      },
+      "itsm.ticket_create": {
+        "name": "工单创建",
+        "description": "将服务请求创建为 ITSM 工单。"
+      },
+      "itsm.my_tickets": {
+        "name": "我的工单查询",
+        "description": "查询当前用户正在申请中的工单列表。"
+      },
+      "itsm.ticket_withdraw": {
+        "name": "工单撤回",
+        "description": "通过工单号撤回指定工单。"
+      },
+      "decision.ticket_context": {
+        "name": "工单上下文",
+        "description": "查询工单的完整上下文信息，包括表单数据、SLA 状态和活动历史。"
+      },
+      "decision.knowledge_search": {
+        "name": "知识搜索",
+        "description": "搜索服务关联的知识库，返回相关知识片段。"
+      },
+      "decision.resolve_participant": {
+        "name": "参与者解析",
+        "description": "按参与人类型解析出具体用户。"
+      },
       "decision.user_workload": {
         "name": "用户负载查询",
         "description": "查询用户当前工单负载，帮助做处理人负载均衡。"
+      },
+      "decision.similar_history": {
+        "name": "相似历史",
+        "description": "查询同一服务下已完成工单的处理模式，提供历史参考。"
+      },
+      "decision.sla_status": {
+        "name": "SLA 状态",
+        "description": "查询工单的 SLA 状态和紧急程度评估。"
+      },
+      "decision.list_actions": {
+        "name": "可用动作列表",
+        "description": "列出当前服务可用的自动化动作。"
+      },
+      "decision.execute_action": {
+        "name": "执行动作",
+        "description": "同步执行服务配置的自动化动作并返回结果。"
+      },
+      "organization.org_context": {
+        "name": "组织架构查询",
+        "description": "读取人员、部门、岗位关系信息，用于流程决策和参与者解析。"
       }
     },
     "mcp": {
