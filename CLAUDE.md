@@ -4,6 +4,7 @@
 
 - 默认用中文与用户交流。
 - `AGENTS.md` 是指向 `CLAUDE.md` 的软链接；更新说明文件时改 `CLAUDE.md`，不要删除或重建这个链接。
+- `DESIGN.md` 是前端设计沉淀文档，记录已经落地并验证过的页面结构、视觉语言、交互规则和不再使用的旧模式。做 UI 相关改动时，先参考它；当设计方向或已实现模式发生稳定变化时，同步更新它。
 - `openspec/` 是规格工件；`support-files/refer/` 是参考代码。除非用户明确要求，否则不要修改这两处。
 
 ## Commands
@@ -30,4 +31,4 @@
 - 运行时配置不走 `.env`：基础密钥和数据库在 `config.yml`，很多运行参数（如 `server_port`、OTel）在数据库 `SystemConfig`；只有 LLM 测试读取 `.env.test`。
 - 需要“登录即可、无需细粒度权限”的 API 时，除了注册路由，还要更新 `internal/middleware/casbin.go` 的 `casbinWhitelist` 或 `casbinWhitelistPrefixes`；否则会被 Casbin 拦截。
 - React Compiler 已开启（见 `web/vite.config.ts` 的 `reactCompilerPreset()`）；前端改动避免在所有 hooks 之前提前 `return`、避免在 effect 里同步 `setState`、避免在 render 里读写 `ref.current`。
-- 前端 UI 约定见 `DESIGN.md`；最常用的一条是新建/编辑表单优先用 `Sheet`，不要用 `Dialog`。
+- 前端 UI 约定见 `DESIGN.md`；它既包含通用约定，也包含像【供应商管理】这种模块的当前实现基线。最常用的一条是新建/编辑表单优先用 `Sheet`，不要用 `Dialog`。
