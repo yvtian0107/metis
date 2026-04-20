@@ -169,6 +169,43 @@ func (s *AgentService) validateByType(a *Agent) error {
 	return nil
 }
 
+// EnsureType checks that agent.Type matches expectedType; returns ErrAgentNotFound on mismatch.
+func (s *AgentService) EnsureType(a *Agent, expectedType string) error {
+	if a.Type != expectedType {
+		return ErrAgentNotFound
+	}
+	return nil
+}
+
+// GetAccessibleByType loads an agent visible to the user and verifies its type.
+func (s *AgentService) GetAccessibleByType(id, userID uint, expectedType string) (*Agent, error) {
+	a, err := s.GetAccessible(id, userID)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.EnsureType(a, expectedType); err != nil {
+		return nil, err
+	}
+	return a, nil
+}
+
+// GetOwnedByType loads an agent owned by the user and verifies its type.
+func (s *AgentService) GetOwnedByType(id, userID uint, expectedType string) (*Agent, error) {
+	a, err := s.GetOwned(id, userID)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.EnsureType(a, expectedType); err != nil {
+		return nil, err
+	}
+	return a, nil
+}
+
+// ListTemplatesByType returns agent templates filtered by type.
+func (s *AgentService) ListTemplatesByType(agentType string) ([]AgentTemplate, error) {
+	return s.repo.ListTemplatesByType(agentType)
+}
+
 // UpdateBindings replaces all bindings for the given agent
 func (s *AgentService) UpdateBindings(agentID uint, toolIDs, skillIDs, mcpIDs, kbIDs []uint) error {
 	if err := s.repo.ReplaceToolBindings(agentID, toolIDs); err != nil {

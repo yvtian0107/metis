@@ -248,6 +248,14 @@ func (r *AgentRepo) ListTemplates() ([]AgentTemplate, error) {
 	return items, nil
 }
 
+func (r *AgentRepo) ListTemplatesByType(agentType string) ([]AgentTemplate, error) {
+	var items []AgentTemplate
+	if err := r.db.Where("type = ?", agentType).Order("id ASC").Find(&items).Error; err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 func (r *AgentRepo) FindTemplateByID(id uint) (*AgentTemplate, error) {
 	var t AgentTemplate
 	if err := r.db.First(&t, id).Error; err != nil {

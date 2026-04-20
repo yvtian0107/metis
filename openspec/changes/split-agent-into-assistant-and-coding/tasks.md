@@ -1,9 +1,9 @@
 ## 1. Backend Service Layer
 
-- [ ] 1.1 Add `EnsureType(agent *Agent, expectedType string) error` method to `AgentService` that returns `ErrAgentNotFound` on type mismatch
-- [ ] 1.2 Add `GetAccessibleByType(id, userID uint, expectedType string)` convenience method to `AgentService` that chains `GetAccessible` + `EnsureType`
-- [ ] 1.3 Add `GetOwnedByType(id, userID uint, expectedType string)` convenience method to `AgentService`
-- [ ] 1.4 Add `ListTemplatesByType(agentType string)` method to `AgentService` / `AgentRepo` that filters templates by type
+- [x] 1.1 Add `EnsureType(agent *Agent, expectedType string) error` method to `AgentService` that returns `ErrAgentNotFound` on type mismatch
+- [x] 1.2 Add `GetAccessibleByType(id, userID uint, expectedType string)` convenience method to `AgentService` that chains `GetAccessible` + `EnsureType`
+- [x] 1.3 Add `GetOwnedByType(id, userID uint, expectedType string)` convenience method to `AgentService`
+- [x] 1.4 Add `ListTemplatesByType(agentType string)` method to `AgentService` / `AgentRepo` that filters templates by type
 
 ## 2. Backend Typed Handlers
 
