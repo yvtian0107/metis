@@ -172,6 +172,10 @@
       "execute_script": {
         "name": "Execute Script",
         "description": "Run a Python or Bash script in a sandbox and return the output."
+      },
+      "decision.user_workload": {
+        "name": "User Workload",
+        "description": "Check a user's current ticket workload to help balance assignments."
       }
     },
     "mcp": {

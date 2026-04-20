@@ -36,6 +36,7 @@ interface NamedItem {
 }
 
 function useBindingNames(ids: number[], queryKey: string[], endpoint: string) {
+  const { t } = useTranslation(["ai"])
   const { data: items = [] } = useQuery({
     queryKey,
     queryFn: () =>
@@ -44,7 +45,8 @@ function useBindingNames(ids: number[], queryKey: string[], endpoint: string) {
   })
   return ids.map((id) => {
     const item = items.find((i) => i.id === id)
-    return item ? (item.displayName || item.name) : `#${id}`
+    if (!item) return `#${id}`
+    return t(`ai:tools.toolDefs.${item.name}.name`, { defaultValue: item.displayName || item.name })
   })
 }
 

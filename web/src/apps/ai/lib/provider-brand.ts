@@ -9,13 +9,13 @@ const PROVIDER_BRAND_MAP: Record<string, ProviderBrand> = {
   openai: {
     stripe: "bg-emerald-500",
     avatarBg: "bg-emerald-50 text-emerald-700",
-    avatarText: "AI",
+    avatarText: "OA",
     label: "OpenAI",
   },
   anthropic: {
     stripe: "bg-amber-500",
     avatarBg: "bg-amber-50 text-amber-700",
-    avatarText: "An",
+    avatarText: "AP",
     label: "Anthropic",
   },
   ollama: {

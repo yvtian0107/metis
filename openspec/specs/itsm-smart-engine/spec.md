@@ -58,7 +58,35 @@ DecisionPlan 结构 SHALL 新增 `ExecutionMode string` 字段（JSON key: `exec
 #### Scenario: single 模式只创建第一个 activity
 - **WHEN** `executeDecisionPlan()` 处理 `ExecutionMode` 为空或 `"single"` 的 DecisionPlan 且 activities 包含多个条目
 - **THEN** SHALL 只创建第一个 activity 并设为 current
-- **AND** 后续 activity 的信息 SHALL 由下一轮决策循环根据最新上下文决定
+- **AND** SHALL 不预先创建后续 activity 记录
+- **AND** 后续步骤 SHALL 由下一轮决策循环根据最新工单上下文重新决定
+
+### Requirement: SmartEngine continuation trigger points
+SmartEngine SHALL 在真正完成一个 smart 活动边界时近实时提交 `itsm-smart-progress` 续跑任务，而不是依赖轮询式推进。触发点至少包括：人工审批/处理完成、action 活动完成、AI `pending_approval` 决策被确认、AI `pending_approval` 决策被拒绝。
+
+#### Scenario: 人工审批完成后近实时续跑
+- **WHEN** smart 工单的当前人工活动完成并提交结果
+- **THEN** 系统 SHALL 在该完成事务成功后提交 `itsm-smart-progress` 任务
+- **AND** 下一轮决策 SHALL 无需等待周期性扫描才开始
+
+#### Scenario: action 完成后近实时续跑
+- **WHEN** smart 工单的 action 活动执行完成
+- **THEN** 系统 SHALL 在 action 完成后提交 `itsm-smart-progress` 任务
+- **AND** 引擎 SHALL 基于 action 结果进入下一轮决策
+
+#### Scenario: AI 决策确认后近实时续跑
+- **WHEN** status=`pending_approval` 的 AI 活动被授权用户确认
+- **THEN** 系统 SHALL 应用该决策并提交 `itsm-smart-progress` 任务
+
+#### Scenario: AI 决策拒绝后近实时续跑
+- **WHEN** status=`pending_approval` 的 AI 活动被授权用户拒绝
+- **THEN** 系统 SHALL 记录拒绝结果与理由并提交 `itsm-smart-progress` 任务
+- **AND** 下一轮决策 SHALL 在包含拒绝上下文的前提下重新运行
+
+#### Scenario: 并发触发续跑不重复推进状态
+- **WHEN** 同一 smart 工单因接近同时的完成事件多次提交 `itsm-smart-progress`
+- **THEN** 引擎 SHALL 在进入决策前重新检查当前 ticket/activity 状态
+- **AND** 重复提交 SHALL 不得导致同一逻辑步骤被重复创建或重复完成
 
 ### Requirement: Signal 按引擎类型分派
 `ticket_service.Signal()` SHALL 根据工单的 `engine_type` 分派到正确的引擎，而非硬编码 classic engine。

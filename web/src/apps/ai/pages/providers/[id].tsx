@@ -37,6 +37,7 @@ import {
   DataTableActionsHead,
 } from "@/components/ui/data-table"
 import { getProviderBrand } from "../../lib/provider-brand"
+import { ProviderLogo } from "../../components/provider-logo"
 import { StatusDot } from "../../components/status-dot"
 import { ProviderSheet, type ProviderItem } from "../../components/provider-sheet"
 import { ModelSheet, type ModelItem } from "../../components/model-sheet"
@@ -112,8 +113,8 @@ function ProviderInfoSection({
     <section className="space-y-4 border-b pb-5">
       <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
         <div className="flex min-w-0 items-start gap-4">
-          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border bg-muted/35 text-sm font-bold text-foreground/80">
-            {brand.avatarText}
+          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border bg-muted/35 p-2">
+            <ProviderLogo type={provider.type} label={brand.label} className="h-full w-full object-contain" />
           </div>
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
@@ -231,8 +232,8 @@ function ModelManagementSection({ provider }: { provider: ProviderItem }) {
                   </span>
                 </div>
                 <div className="flex items-center gap-2">
-                  <div className="relative">
-                    <Search className="absolute left-2.5 top-2 h-3.5 w-3.5 text-muted-foreground" />
+                  <div className="relative border-b border-border/50">
+                    <Search className="absolute left-0 top-2 h-3.5 w-3.5 text-muted-foreground/70" />
                     <Input
                       placeholder={t("ai:models.searchPlaceholder")}
                       value={keyword}
@@ -241,7 +242,7 @@ function ModelManagementSection({ provider }: { provider: ProviderItem }) {
                         setSearchByType((prev) => ({ ...prev, [type]: nextKeyword }))
                         setPageByType((prev) => ({ ...prev, [type]: 1 }))
                       }}
-                      className="h-8 w-44 rounded-full pl-8 text-xs"
+                      className="h-8 w-40 rounded-none border-0 bg-transparent px-0 pl-7 text-xs shadow-none ring-0 placeholder:text-muted-foreground/70 focus-visible:ring-0 focus-visible:outline-none"
                     />
                   </div>
                   {canCreateModel && type ? (

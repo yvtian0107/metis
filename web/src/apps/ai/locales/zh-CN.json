@@ -172,6 +172,10 @@
       "execute_script": {
         "name": "执行脚本",
         "description": "在沙箱中运行 Python 或 Bash 脚本，返回输出结果。"
+      },
+      "decision.user_workload": {
+        "name": "用户负载查询",
+        "description": "查询用户当前工单负载，帮助做处理人负载均衡。"
       }
     },
     "mcp": {

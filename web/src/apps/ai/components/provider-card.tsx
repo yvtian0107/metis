@@ -11,6 +11,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { getProviderBrand } from "../lib/provider-brand"
+import { ProviderLogo } from "./provider-logo"
 import { StatusDot } from "./status-dot"
 import type { ProviderItem } from "./provider-sheet"
 
@@ -93,9 +94,9 @@ export function ProviderCard({
     >
       <div className="flex items-start gap-3">
         <div
-          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border bg-muted/35 text-sm font-bold text-foreground/80"
+          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border bg-muted/35 p-2"
         >
-          {brand.avatarText}
+          <ProviderLogo type={provider.type} label={brand.label} className="h-full w-full object-contain" />
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex items-start justify-between gap-3">

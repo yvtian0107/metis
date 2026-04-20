@@ -113,3 +113,32 @@ func TestSessionService_UpdateStatus(t *testing.T) {
 		t.Errorf("status: expected %q, got %q", SessionStatusCompleted, loaded.Status)
 	}
 }
+
+func TestSessionService_Create_HiddenPrivateAgentReturnsNotFound(t *testing.T) {
+	db := setupTestDB(t)
+	agentSvc := newAgentServiceForTest(t, db)
+	svc := newSessionServiceForTest(t, db)
+
+	modelID := uint(1)
+	agent := &Agent{Name: "Agent", Type: AgentTypeAssistant, ModelID: &modelID, CreatedBy: 1, Visibility: AgentVisibilityPrivate}
+	_ = agentSvc.Create(agent)
+
+	if _, err := svc.Create(agent.ID, 2); err != ErrAgentNotFound {
+		t.Fatalf("expected ErrAgentNotFound, got %v", err)
+	}
+}
+
+func TestSessionService_GetOwned_HidesCrossUserSession(t *testing.T) {
+	db := setupTestDB(t)
+	agentSvc := newAgentServiceForTest(t, db)
+	svc := newSessionServiceForTest(t, db)
+
+	modelID := uint(1)
+	agent := &Agent{Name: "Agent", Type: AgentTypeAssistant, ModelID: &modelID, CreatedBy: 1, Visibility: AgentVisibilityTeam}
+	_ = agentSvc.Create(agent)
+	session, _ := svc.Create(agent.ID, 1)
+
+	if _, err := svc.GetOwned(session.ID, 2); err != ErrSessionNotFound {
+		t.Fatalf("expected ErrSessionNotFound, got %v", err)
+	}
+}
