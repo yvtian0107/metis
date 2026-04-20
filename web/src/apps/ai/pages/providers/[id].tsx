@@ -1,9 +1,9 @@
-import { useState, useMemo } from "react"
+import { useState } from "react"
 import { useParams, Link } from "react-router"
 import { useTranslation } from "react-i18next"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import {
-  Pencil, Zap, RefreshCw, Plus, Search,
+  ArrowLeft, Pencil, Zap, RefreshCw, Plus, Search,
   Star, Trash2, Cpu, ChevronLeft, ChevronRight,
 } from "lucide-react"
 import { usePermission } from "@/hooks/use-permission"
@@ -50,12 +50,6 @@ const STATUS_VARIANTS: Record<string, "default" | "secondary" | "outline" | "des
 
 const TYPE_ORDER = ["llm", "embed", "rerank", "tts", "stt", "image", ""] as const
 
-function getModelTypeSummary(provider: ProviderItem) {
-  return TYPE_ORDER
-    .filter((type) => type && (provider.modelTypeCounts?.[type] ?? 0) > 0)
-    .map((type) => ({ type, count: provider.modelTypeCounts[type] }))
-}
-
 function groupByType(models: ModelItem[]) {
   const groups: Record<string, ModelItem[]> = {}
   for (const m of models) {
@@ -73,6 +67,22 @@ function getEmptyTypeGroups() {
 }
 
 const PAGE_SIZE = 5
+
+function getVisiblePages(currentPage: number, totalPages: number) {
+  if (totalPages <= 5) {
+    return Array.from({ length: totalPages }, (_, index) => index + 1)
+  }
+
+  if (currentPage <= 3) {
+    return [1, 2, 3, 4, "ellipsis", totalPages] as const
+  }
+
+  if (currentPage >= totalPages - 2) {
+    return [1, "ellipsis", totalPages - 3, totalPages - 2, totalPages - 1, totalPages] as const
+  }
+
+  return [1, "ellipsis", currentPage - 1, currentPage, currentPage + 1, "ellipsis", totalPages] as const
+}
 
 // ─── Provider Info Section ──────────────────────────────────────────────────
 
@@ -97,7 +107,6 @@ function ProviderInfoSection({
 }) {
   const { t } = useTranslation(["ai", "common"])
   const brand = getProviderBrand(provider.type)
-  const typeSummary = getModelTypeSummary(provider)
 
   return (
     <section className="space-y-4 border-b pb-5">
@@ -113,15 +122,14 @@ function ProviderInfoSection({
                 {t(`ai:types.${provider.type}`, provider.type)}
               </Badge>
             </div>
-            <p className="mt-1.5 text-sm leading-6 text-muted-foreground">{provider.baseUrl}</p>
-            <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-sm text-muted-foreground">
+            <div className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-sm text-muted-foreground">
+              <span>{provider.baseUrl}</span>
               <div className="flex items-center gap-1.5">
                 <StatusDot status={provider.status} loading={isTesting} />
                 <span>{t(`ai:statusLabels.${provider.status}`, provider.status)}</span>
               </div>
               <span>{t("ai:providers.protocol")}: {provider.protocol}</span>
               <span>{t("ai:providers.healthCheckedAt")}: {provider.healthCheckedAt ? formatDateTime(provider.healthCheckedAt) : "—"}</span>
-              <span>{t("ai:providers.modelCount")}: {provider.modelCount}</span>
             </div>
           </div>
         </div>
@@ -145,19 +153,6 @@ function ProviderInfoSection({
           )}
         </div>
       </div>
-
-      <div className="flex flex-wrap gap-2 pl-[3.75rem]">
-        {typeSummary.length > 0 ? typeSummary.map(({ type, count }) => (
-          <Badge key={type} variant="outline" className="h-6 rounded-full px-2 text-[11px] font-normal text-muted-foreground">
-            <span>{t(`ai:modelTypes.${type}`, type)}</span>
-            <span className="ml-1 rounded-full bg-background px-1.5 py-0.5 font-medium tabular-nums text-foreground">
-              {count}
-            </span>
-          </Badge>
-        )) : (
-          <p className="pl-[3.75rem] text-sm text-muted-foreground">{t("ai:models.empty")}</p>
-        )}
-      </div>
     </section>
   )
 }
@@ -170,7 +165,7 @@ function ModelManagementSection({ provider }: { provider: ProviderItem }) {
   const [modelFormOpen, setModelFormOpen] = useState(false)
   const [editingModel, setEditingModel] = useState<ModelItem | null>(null)
   const [creatingType, setCreatingType] = useState<string | null>(null)
-  const [searchKeyword, setSearchKeyword] = useState("")
+  const [searchByType, setSearchByType] = useState<Record<string, string>>({})
   const [pageByType, setPageByType] = useState<Record<string, number>>({})
 
   const canCreateModel = usePermission("ai:model:create")
@@ -185,19 +180,8 @@ function ModelManagementSection({ provider }: { provider: ProviderItem }) {
         `/api/v1/ai/models?providerId=${provider.id}&pageSize=100`,
       ),
   })
-
-  const filteredModels = useMemo(() => {
-    const allModels = data?.items ?? []
-    if (!searchKeyword) return allModels
-    const kw = searchKeyword.toLowerCase()
-    return allModels.filter(
-      (m) =>
-        m.displayName.toLowerCase().includes(kw) ||
-        m.modelId.toLowerCase().includes(kw),
-    )
-  }, [data?.items, searchKeyword])
-
-  const groups = filteredModels.length > 0 ? groupByType(filteredModels) : getEmptyTypeGroups()
+  const allModels = data?.items ?? []
+  const groups = allModels.length > 0 ? groupByType(allModels) : getEmptyTypeGroups()
 
   const deleteMutation = useMutation({
     mutationFn: (id: number) => api.delete(`/api/v1/ai/models/${id}`),
@@ -220,41 +204,51 @@ function ModelManagementSection({ provider }: { provider: ProviderItem }) {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-end">
-        <div className="relative">
-          <Search className="absolute left-2.5 top-2 h-3.5 w-3.5 text-muted-foreground" />
-          <Input
-            placeholder={t("ai:models.searchPlaceholder")}
-            value={searchKeyword}
-            onChange={(e) => setSearchKeyword(e.target.value)}
-            className="h-8 w-52 pl-8 text-xs"
-          />
-        </div>
-      </div>
-
       {isLoading ? (
         <div className="px-5 py-8 text-center text-sm text-muted-foreground">
           {t("common:loading")}
         </div>
       ) : (
         <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-          {groups.map(({ type, items }) => (
-            <section key={type} className="flex h-[420px] flex-col overflow-hidden rounded-xl border bg-card">
-              <div className="flex items-center justify-between border-b bg-muted/25 px-4 py-3">
+          {groups.map(({ type, items: rawItems }) => {
+            const keyword = searchByType[type] ?? ""
+            const filteredItems = !keyword
+              ? rawItems
+              : rawItems.filter((m) => {
+                  const kw = keyword.toLowerCase()
+                  return (
+                    m.displayName.toLowerCase().includes(kw) ||
+                    m.modelId.toLowerCase().includes(kw)
+                  )
+                })
+
+            return (
+            <section key={type} className="flex h-[420px] flex-col overflow-hidden rounded-2xl border border-border/50 bg-background/40">
+              <div className="flex items-center justify-between px-4 py-3">
                 <div className="flex items-center gap-2">
-                  <span className="text-sm font-medium">
+                  <span className="text-sm font-medium tracking-[0.01em] text-foreground/90">
                     {type ? t(`ai:modelTypes.${type}`) : t("ai:modelTypes.unclassified")}
                   </span>
-                  <Badge variant="outline" className="h-5 rounded-full px-1.5 text-[10px] font-medium text-muted-foreground">
-                    {items.length}
-                  </Badge>
                 </div>
                 <div className="flex items-center gap-2">
+                  <div className="relative">
+                    <Search className="absolute left-2.5 top-2 h-3.5 w-3.5 text-muted-foreground" />
+                    <Input
+                      placeholder={t("ai:models.searchPlaceholder")}
+                      value={keyword}
+                      onChange={(e) => {
+                        const nextKeyword = e.target.value
+                        setSearchByType((prev) => ({ ...prev, [type]: nextKeyword }))
+                        setPageByType((prev) => ({ ...prev, [type]: 1 }))
+                      }}
+                      className="h-8 w-44 rounded-full pl-8 text-xs"
+                    />
+                  </div>
                   {canCreateModel && type ? (
                     <Button
                       variant="ghost"
                       size="sm"
-                      className="h-7 px-2 text-xs"
+                      className="h-7 rounded-full px-2.5 text-xs text-muted-foreground hover:text-foreground"
                       onClick={() => {
                         setEditingModel(null)
                         setCreatingType(type)
@@ -267,17 +261,18 @@ function ModelManagementSection({ provider }: { provider: ProviderItem }) {
                   ) : null}
                 </div>
               </div>
-              {items.length === 0 ? (
+              <div className="mx-4 border-t border-border/50" />
+              {filteredItems.length === 0 ? (
                 <div className="flex flex-1 flex-col items-center justify-center gap-2 px-4 py-8 text-center">
                   <Cpu className="h-8 w-8 text-muted-foreground/35" />
-                  <p className="text-sm text-muted-foreground">{t("ai:models.empty")}</p>
+                  <p className="text-sm text-muted-foreground">{keyword ? t("ai:models.empty") : t("ai:models.empty")}</p>
                 </div>
               ) : (
                 (() => {
                   const page = pageByType[type] ?? 1
-                  const totalPages = Math.max(1, Math.ceil(items.length / PAGE_SIZE))
+                  const totalPages = Math.max(1, Math.ceil(filteredItems.length / PAGE_SIZE))
                   const safePage = Math.min(page, totalPages)
-                  const pageItems = items.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE)
+                  const pageItems = filteredItems.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE)
 
                   return (
                     <>
@@ -289,7 +284,7 @@ function ModelManagementSection({ provider }: { provider: ProviderItem }) {
                               <TableHead className="w-[110px]">{t("ai:models.modelId")}</TableHead>
                               <TableHead className="w-[68px]">{t("ai:models.status")}</TableHead>
                               <TableHead className="w-[44px] text-center">{t("ai:models.isDefault")}</TableHead>
-                              <DataTableActionsHead className="w-[104px] text-right">{t("common:actions")}</DataTableActionsHead>
+                              <DataTableActionsHead className="w-[104px] text-center">{t("common:actions")}</DataTableActionsHead>
                             </TableRow>
                           </TableHeader>
                           <TableBody>
@@ -305,8 +300,8 @@ function ModelManagementSection({ provider }: { provider: ProviderItem }) {
                                 <TableCell className="text-center">
                                   {m.isDefault && <Star className="mx-auto h-4 w-4 fill-yellow-500 text-yellow-500" />}
                                 </TableCell>
-                                <DataTableActionsCell className="text-right">
-                                  <div className="flex items-center justify-end gap-1">
+                                <DataTableActionsCell className="text-center">
+                                  <div className="flex items-center justify-center gap-1">
                                     {canSetDefault && !m.isDefault && (
                                       <Button
                                         variant="ghost"
@@ -369,8 +364,30 @@ function ModelManagementSection({ provider }: { provider: ProviderItem }) {
                           </TableBody>
                         </Table>
                       </div>
-                      <div className="flex items-center justify-between border-t px-4 py-2.5 text-xs text-muted-foreground">
-                        <span>{safePage} / {totalPages}</span>
+                      <div className="flex items-center justify-between border-t border-border/50 px-4 py-2.5 text-xs text-muted-foreground">
+                        <div className="flex items-center gap-1">
+                          {getVisiblePages(safePage, totalPages).map((page, index) => {
+                            if (page === "ellipsis") {
+                              return (
+                                <span key={`ellipsis-${safePage}-${index}`} className="px-1 text-muted-foreground/60">
+                                  ...
+                                </span>
+                              )
+                            }
+
+                            return (
+                              <Button
+                                key={page}
+                                variant={page === safePage ? "secondary" : "ghost"}
+                                size="sm"
+                                className="h-7 min-w-7 px-1.5 text-xs"
+                                onClick={() => setPageByType((prev) => ({ ...prev, [type]: page }))}
+                              >
+                                {page}
+                              </Button>
+                            )
+                          })}
+                        </div>
                         <div className="flex items-center gap-1">
                           <Button
                             variant="ghost"
@@ -397,7 +414,7 @@ function ModelManagementSection({ provider }: { provider: ProviderItem }) {
                 })()
               )}
             </section>
-          ))}
+          )})}
         </div>
       )}
 

@@ -23,9 +23,13 @@ func NewMemoryHandler(i do.Injector) (*MemoryHandler, error) {
 
 func (h *MemoryHandler) List(c *gin.Context) {
 	agentID, _ := strconv.Atoi(c.Param("id"))
-	userID, _ := c.Get("userID")
+	userID, ok := requireUserID(c)
+	if !ok {
+		handler.Fail(c, http.StatusUnauthorized, "unauthorized")
+		return
+	}
 
-	memories, err := h.svc.List(uint(agentID), userID.(uint))
+	memories, err := h.svc.List(uint(agentID), userID)
 	if err != nil {
 		handler.Fail(c, http.StatusInternalServerError, err.Error())
 		return
@@ -45,7 +49,11 @@ type createMemoryReq struct {
 
 func (h *MemoryHandler) Create(c *gin.Context) {
 	agentID, _ := strconv.Atoi(c.Param("id"))
-	userID, _ := c.Get("userID")
+	userID, ok := requireUserID(c)
+	if !ok {
+		handler.Fail(c, http.StatusUnauthorized, "unauthorized")
+		return
+	}
 
 	var req createMemoryReq
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -55,7 +63,7 @@ func (h *MemoryHandler) Create(c *gin.Context) {
 
 	m := &AgentMemory{
 		AgentID: uint(agentID),
-		UserID:  userID.(uint),
+		UserID:  userID,
 		Key:     req.Key,
 		Content: req.Content,
 		Source:  MemorySourceUserSet,
@@ -69,8 +77,14 @@ func (h *MemoryHandler) Create(c *gin.Context) {
 }
 
 func (h *MemoryHandler) Delete(c *gin.Context) {
+	agentID, _ := strconv.Atoi(c.Param("id"))
 	mid, _ := strconv.Atoi(c.Param("mid"))
-	if err := h.svc.Delete(uint(mid)); err != nil {
+	userID, ok := requireUserID(c)
+	if !ok {
+		handler.Fail(c, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	if err := h.svc.DeleteForAgentUser(uint(mid), uint(agentID), userID); err != nil {
 		if errors.Is(err, ErrMemoryNotFound) {
 			handler.Fail(c, http.StatusNotFound, err.Error())
 			return

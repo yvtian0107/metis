@@ -109,8 +109,27 @@
     "urlInvalid": "Please enter a valid URL",
     "commandRequired": "Command is required"
   },
+  "menuGroup": {
+    "agents": "Agents",
+    "knowledge": "Knowledge",
+    "tools": "Tools",
+    "modelAccess": "Model Access"
+  },
+  "menu": {
+    "ai:agent:list": "Agent",
+    "ai:knowledge:list": "Knowledge Bases",
+    "ai:tool:list": "Built-in Tools",
+    "ai:mcp:list": "MCP Servers",
+    "ai:skill:list": "Skill Packs",
+    "ai:provider:list": "Providers"
+  },
   "tools": {
     "title": "Tools",
+    "navigation": {
+      "builtin": "Built-in Tools",
+      "mcp": "MCP Servers",
+      "skills": "Skill Packs"
+    },
     "tabs": {
       "builtinTools": "Built-in Tools",
       "mcpServers": "MCP Servers",

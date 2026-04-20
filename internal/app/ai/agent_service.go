@@ -8,15 +8,15 @@ import (
 )
 
 var (
-	ErrAgentNotFound     = errors.New("agent not found")
-	ErrAgentNameConflict = errors.New("agent name already exists")
-	ErrAgentCodeConflict = errors.New("agent code already exists")
+	ErrAgentNotFound           = errors.New("agent not found")
+	ErrAgentNameConflict       = errors.New("agent name already exists")
+	ErrAgentCodeConflict       = errors.New("agent code already exists")
 	ErrAgentHasRunningSessions = errors.New("agent has running sessions")
-	ErrInvalidAgentType  = errors.New("invalid agent type")
-	ErrNodeRequired      = errors.New("node_id is required for remote exec mode")
-	ErrModelRequired     = errors.New("model_id is required for assistant agent")
-	ErrRuntimeRequired   = errors.New("runtime is required for coding agent")
-	ErrCodeRequired      = errors.New("code is required for internal agent")
+	ErrInvalidAgentType        = errors.New("invalid agent type")
+	ErrNodeRequired            = errors.New("node_id is required for remote exec mode")
+	ErrModelRequired           = errors.New("model_id is required for assistant agent")
+	ErrRuntimeRequired         = errors.New("runtime is required for coding agent")
+	ErrCodeRequired            = errors.New("code is required for internal agent")
 )
 
 var ValidAgentTypes = map[string]bool{
@@ -72,6 +72,28 @@ func (s *AgentService) Create(a *Agent) error {
 
 func (s *AgentService) Get(id uint) (*Agent, error) {
 	a, err := s.repo.FindByID(id)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrAgentNotFound
+		}
+		return nil, err
+	}
+	return a, nil
+}
+
+func (s *AgentService) GetAccessible(id, userID uint) (*Agent, error) {
+	a, err := s.repo.FindAccessibleByID(id, userID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrAgentNotFound
+		}
+		return nil, err
+	}
+	return a, nil
+}
+
+func (s *AgentService) GetOwned(id, userID uint) (*Agent, error) {
+	a, err := s.repo.FindOwnedByID(id, userID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, ErrAgentNotFound

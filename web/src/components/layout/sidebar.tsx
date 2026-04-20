@@ -7,7 +7,7 @@ import { useMenuStore, type MenuItem } from "@/stores/menu"
 import { useUiStore } from "@/stores/ui"
 import { getIcon } from "@/lib/icon-map"
 import { cn } from "@/lib/utils"
-import { getMenuGroups } from "@/apps/registry"
+import { getAppNavigation } from "@/apps/registry"
 import {
   Tooltip,
   TooltipContent,
@@ -22,6 +22,57 @@ interface NavApp {
   path: string
   permission: string
   children: MenuItem[]
+  leafItems: MenuItem[]
+}
+
+interface NavSection {
+  key: string | null
+  label: string | null
+  items: MenuItem[]
+}
+
+interface ResolvedNavSection {
+  key: string
+  label: string | null
+  items: MenuItem[]
+}
+
+function getVisibleNavChildren(items: MenuItem[] | undefined): MenuItem[] {
+  return (items || []).filter((item) => item.type !== "button" && !item.isHidden)
+}
+
+function collectLeafMenus(items: MenuItem[] | undefined): MenuItem[] {
+  const leaves: MenuItem[] = []
+  for (const item of getVisibleNavChildren(items)) {
+    if (item.type === "menu") {
+      leaves.push(item)
+      continue
+    }
+    leaves.push(...collectLeafMenus(item.children))
+  }
+  return leaves
+}
+
+function getFirstLeafPath(items: MenuItem[] | undefined): string {
+  return collectLeafMenus(items).find((item) => item.path)?.path || "/"
+}
+
+function findBestLeaf(items: MenuItem[], pathname: string): MenuItem | null {
+  for (const item of items) {
+    if (item.path && pathname === item.path) return item
+  }
+
+  let best: MenuItem | null = null
+  let bestLen = 0
+  for (const item of items) {
+    if (!item.path || item.path === "/") continue
+    if (pathname.startsWith(item.path) && item.path.length > bestLen) {
+      best = item
+      bestLen = item.path.length
+    }
+  }
+
+  return best
 }
 
 function buildNavApps(menuTree: MenuItem[]): NavApp[] {
@@ -29,11 +80,9 @@ function buildNavApps(menuTree: MenuItem[]): NavApp[] {
   for (const item of menuTree) {
     if (item.isHidden) continue
     if (item.type === "directory") {
-      // Directory becomes a tier-1 app, its menu children become tier-2 items
-      const children = (item.children || []).filter(
-        (c) => c.type === "menu" && !c.isHidden,
-      )
-      const firstPath = children[0]?.path || "/"
+      const children = getVisibleNavChildren(item.children)
+      const leafItems = collectLeafMenus(children)
+      const firstPath = getFirstLeafPath(children)
       apps.push({
         id: item.id,
         label: item.name,
@@ -41,9 +90,9 @@ function buildNavApps(menuTree: MenuItem[]): NavApp[] {
         path: firstPath,
         permission: item.permission,
         children,
+        leafItems,
       })
     } else if (item.type === "menu") {
-      // Top-level menu becomes both tier-1 and tier-2
       apps.push({
         id: item.id,
         label: item.name,
@@ -51,6 +100,7 @@ function buildNavApps(menuTree: MenuItem[]): NavApp[] {
         path: item.path || "/",
         permission: item.permission,
         children: [item],
+        leafItems: [item],
       })
     }
   }
@@ -58,24 +108,73 @@ function buildNavApps(menuTree: MenuItem[]): NavApp[] {
 }
 
 function findActiveNavApp(apps: NavApp[], pathname: string): NavApp | null {
-  // Check children paths for exact or prefix match
   for (const app of apps) {
-    for (const child of app.children) {
-      if (child.path && pathname === child.path) return app
-    }
+    if (findBestLeaf(app.leafItems, pathname)) return app
   }
-  // Fallback: match by longest prefix
+
   let best: NavApp | null = null
   let bestLen = 0
   for (const app of apps) {
-    for (const child of app.children) {
-      if (child.path && child.path !== "/" && pathname.startsWith(child.path) && child.path.length > bestLen) {
-        best = app
-        bestLen = child.path.length
-      }
+    const match = findBestLeaf(app.leafItems, pathname)
+    if (match?.path && match.path.length > bestLen) {
+      best = app
+      bestLen = match.path.length
     }
   }
+
   return best ?? apps[0] ?? null
+}
+
+function buildSections(app: NavApp | null): NavSection[] {
+  if (!app) return []
+
+  const leafByPermission = new Map(app.leafItems.map((item) => [item.permission, item]))
+  const navigation = getAppNavigation(app.permission)
+  if (navigation && navigation.length > 0) {
+    const grouped = new Set<string>()
+    const sections: NavSection[] = navigation
+      .map((group) => {
+        const items = group.items
+          .map((item) => leafByPermission.get(item.permission))
+          .filter((item): item is MenuItem => Boolean(item))
+        items.forEach((item) => grouped.add(item.permission))
+        return {
+          key: group.label,
+          label: group.label,
+          items,
+        }
+      })
+      .filter((section) => section.items.length > 0)
+
+    const ungrouped = app.leafItems.filter((item) => !grouped.has(item.permission))
+    if (ungrouped.length > 0) sections.push({ key: null, label: null, items: ungrouped })
+    return sections
+  }
+
+  const sections: NavSection[] = []
+  const ungrouped: MenuItem[] = []
+  for (const child of app.children) {
+    if (child.type === "directory") {
+      const items = collectLeafMenus(child.children)
+      if (items.length > 0) {
+        sections.push({
+          key: child.permission || String(child.id),
+          label: child.name,
+          items,
+        })
+      }
+      continue
+    }
+    ungrouped.push(child)
+  }
+
+  if (ungrouped.length > 0) sections.unshift({ key: null, label: null, items: ungrouped })
+  if (sections.length > 0) return sections
+  return [{ key: null, label: null, items: app.leafItems }]
+}
+
+function resolveSectionKey(section: NavSection, index: number): string {
+  return section.key ?? section.label ?? `ungrouped-${index}`
 }
 
 export function Sidebar() {
@@ -93,28 +192,17 @@ export function Sidebar() {
 
   const navApps = useMemo(() => buildNavApps(menuTree), [menuTree])
   const activeApp = useMemo(() => findActiveNavApp(navApps, pathname), [navApps, pathname])
-
-  const visibleItems = useMemo(() => activeApp?.children ?? [], [activeApp])
-  const menuGroups = useMemo(
-    () => (activeApp ? getMenuGroups(activeApp.permission) : undefined),
+  const activeLeaf = useMemo(
+    () => (activeApp ? findBestLeaf(activeApp.leafItems, pathname) : null),
+    [activeApp, pathname],
+  )
+  const sections = useMemo<ResolvedNavSection[]>(
+    () => buildSections(activeApp).map((section, index) => ({
+      ...section,
+      key: resolveSectionKey(section, index),
+    })),
     [activeApp],
   )
-
-  const sections = useMemo(() => {
-    if (!menuGroups || menuGroups.length === 0) {
-      return [{ label: null as string | null, items: visibleItems }]
-    }
-    const allGrouped = new Set(menuGroups.flatMap((g) => g.items))
-    const groups = menuGroups
-      .map((group) => ({
-        label: group.label as string | null,
-        items: visibleItems.filter((item) => group.items.includes(item.permission)),
-      }))
-      .filter((g) => g.items.length > 0)
-    const ungrouped = visibleItems.filter((item) => !allGrouped.has(item.permission))
-    if (ungrouped.length > 0) groups.push({ label: null, items: ungrouped })
-    return groups
-  }, [menuGroups, visibleItems])
 
   return (
     <aside
@@ -165,7 +253,7 @@ export function Sidebar() {
         )}
       </nav>
 
-      {/* Tier 2: Nav Panel */}
+      {/* Tier 2/3: Grouped Nav Panel */}
       <nav
         className={cn(
           "flex flex-col gap-1 overflow-hidden py-3 transition-all duration-200",
@@ -173,7 +261,7 @@ export function Sidebar() {
         )}
       >
         {sections.map((section, si) => (
-          <div key={section.label ?? "ungrouped"} className={section.label && si > 0 ? "pt-2" : undefined}>
+          <div key={section.key} className={section.label && si > 0 ? "pt-2" : undefined}>
             {section.label && (
               <div className="px-3 pb-1 text-[11px] font-semibold tracking-wider text-muted-foreground/60 uppercase">
                 {t(`menuGroup.${section.label}`, { ns: activeApp?.permission, defaultValue: section.label, nsSeparator: false })}
@@ -181,7 +269,7 @@ export function Sidebar() {
             )}
             {section.items.map((item) => {
               const Icon = getIcon(item.icon)
-              const isActive = pathname === item.path
+              const isActive = activeLeaf?.id === item.id
               return (
                 <button
                   key={item.id}

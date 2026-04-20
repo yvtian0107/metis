@@ -45,6 +45,14 @@ func (r *MemoryRepo) FindByID(id uint) (*AgentMemory, error) {
 	return &m, nil
 }
 
+func (r *MemoryRepo) FindByIDForAgentUser(id, agentID, userID uint) (*AgentMemory, error) {
+	var m AgentMemory
+	if err := r.db.Where("id = ? AND agent_id = ? AND user_id = ?", id, agentID, userID).First(&m).Error; err != nil {
+		return nil, err
+	}
+	return &m, nil
+}
+
 func (r *MemoryRepo) Delete(id uint) error {
 	return r.db.Delete(&AgentMemory{}, id).Error
 }

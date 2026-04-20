@@ -39,12 +39,12 @@ func (h *SessionHandler) Create(c *gin.Context) {
 		return
 	}
 
-	userID, ok := c.Get("userId")
+	userID, ok := requireUserID(c)
 	if !ok {
 		handler.Fail(c, http.StatusUnauthorized, "unauthorized")
 		return
 	}
-	session, err := h.svc.Create(req.AgentID, userID.(uint))
+	session, err := h.svc.Create(req.AgentID, userID)
 	if err != nil {
 		if errors.Is(err, ErrAgentNotFound) {
 			handler.Fail(c, http.StatusNotFound, err.Error())
@@ -61,7 +61,7 @@ func (h *SessionHandler) List(c *gin.Context) {
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("pageSize", "20"))
 	agentID, _ := strconv.Atoi(c.DefaultQuery("agentId", "0"))
-	userID, ok := c.Get("userId")
+	userID, ok := requireUserID(c)
 	if !ok {
 		handler.Fail(c, http.StatusUnauthorized, "unauthorized")
 		return
@@ -69,7 +69,7 @@ func (h *SessionHandler) List(c *gin.Context) {
 
 	sessions, total, err := h.svc.List(SessionListParams{
 		AgentID:  uint(agentID),
-		UserID:   userID.(uint),
+		UserID:   userID,
 		Page:     page,
 		PageSize: pageSize,
 	})
@@ -87,7 +87,12 @@ func (h *SessionHandler) List(c *gin.Context) {
 
 func (h *SessionHandler) Get(c *gin.Context) {
 	sid, _ := strconv.Atoi(c.Param("sid"))
-	session, err := h.svc.Get(uint(sid))
+	userID, ok := requireUserID(c)
+	if !ok {
+		handler.Fail(c, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	session, err := h.svc.GetOwned(uint(sid), userID)
 	if err != nil {
 		if errors.Is(err, ErrSessionNotFound) {
 			handler.Fail(c, http.StatusNotFound, err.Error())
@@ -116,6 +121,19 @@ func (h *SessionHandler) Get(c *gin.Context) {
 
 func (h *SessionHandler) Delete(c *gin.Context) {
 	sid, _ := strconv.Atoi(c.Param("sid"))
+	userID, ok := requireUserID(c)
+	if !ok {
+		handler.Fail(c, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	if _, err := h.svc.GetOwned(uint(sid), userID); err != nil {
+		if errors.Is(err, ErrSessionNotFound) {
+			handler.Fail(c, http.StatusNotFound, err.Error())
+			return
+		}
+		handler.Fail(c, http.StatusInternalServerError, err.Error())
+		return
+	}
 	if err := h.svc.Delete(uint(sid)); err != nil {
 		handler.Fail(c, http.StatusInternalServerError, err.Error())
 		return
@@ -135,6 +153,11 @@ type sendMessageReq struct {
 
 func (h *SessionHandler) SendMessage(c *gin.Context) {
 	sid, _ := strconv.Atoi(c.Param("sid"))
+	userID, ok := requireUserID(c)
+	if !ok {
+		handler.Fail(c, http.StatusUnauthorized, "unauthorized")
+		return
+	}
 	var req sendMessageReq
 	if err := c.ShouldBindJSON(&req); err != nil {
 		handler.Fail(c, http.StatusBadRequest, err.Error())
@@ -145,7 +168,7 @@ func (h *SessionHandler) SendMessage(c *gin.Context) {
 		return
 	}
 
-	session, err := h.svc.Get(uint(sid))
+	session, err := h.svc.GetOwned(uint(sid), userID)
 	if err != nil {
 		if errors.Is(err, ErrSessionNotFound) {
 			handler.Fail(c, http.StatusNotFound, err.Error())
@@ -174,6 +197,19 @@ func (h *SessionHandler) SendMessage(c *gin.Context) {
 
 func (h *SessionHandler) Stream(c *gin.Context) {
 	sid, _ := strconv.Atoi(c.Param("sid"))
+	userID, ok := requireUserID(c)
+	if !ok {
+		handler.Fail(c, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	if _, err := h.svc.GetOwned(uint(sid), userID); err != nil {
+		if errors.Is(err, ErrSessionNotFound) {
+			handler.Fail(c, http.StatusNotFound, err.Error())
+			return
+		}
+		handler.Fail(c, http.StatusInternalServerError, err.Error())
+		return
+	}
 
 	c.Header("Content-Type", "text/event-stream")
 	c.Header("Cache-Control", "no-cache")
@@ -181,10 +217,14 @@ func (h *SessionHandler) Stream(c *gin.Context) {
 	c.Header("X-Accel-Buffering", "no")
 	c.Header("X-Vercel-AI-UI-Message-Stream", "v1")
 
-	streamReader, err := h.gateway.Run(c.Request.Context(), uint(sid))
+	streamReader, err := h.gateway.Run(c.Request.Context(), uint(sid), userID)
 	if err != nil {
+		status := http.StatusInternalServerError
+		if errors.Is(err, ErrSessionNotFound) {
+			status = http.StatusNotFound
+		}
 		data, _ := json.Marshal(map[string]any{"type": "error", "error": err.Error()})
-		c.String(http.StatusInternalServerError, "data: "+string(data)+"\n\n")
+		c.String(status, "data: "+string(data)+"\n\n")
 		return
 	}
 	defer streamReader.Close()
@@ -205,8 +245,13 @@ func (h *SessionHandler) Stream(c *gin.Context) {
 
 func (h *SessionHandler) Cancel(c *gin.Context) {
 	sid, _ := strconv.Atoi(c.Param("sid"))
+	userID, ok := requireUserID(c)
+	if !ok {
+		handler.Fail(c, http.StatusUnauthorized, "unauthorized")
+		return
+	}
 
-	session, err := h.svc.Get(uint(sid))
+	session, err := h.svc.GetOwned(uint(sid), userID)
 	if err != nil {
 		if errors.Is(err, ErrSessionNotFound) {
 			handler.Fail(c, http.StatusNotFound, err.Error())
@@ -222,7 +267,7 @@ func (h *SessionHandler) Cancel(c *gin.Context) {
 	}
 
 	// Signal executor cancellation via Gateway
-	h.gateway.Cancel(session.ID)
+	h.gateway.Cancel(session.ID, userID)
 	if err := h.svc.UpdateStatus(session.ID, SessionStatusCancelled); err != nil {
 		handler.Fail(c, http.StatusInternalServerError, err.Error())
 		return
@@ -238,13 +283,18 @@ type updateSessionReq struct {
 
 func (h *SessionHandler) Update(c *gin.Context) {
 	sid, _ := strconv.Atoi(c.Param("sid"))
+	userID, ok := requireUserID(c)
+	if !ok {
+		handler.Fail(c, http.StatusUnauthorized, "unauthorized")
+		return
+	}
 	var req updateSessionReq
 	if err := c.ShouldBindJSON(&req); err != nil {
 		handler.Fail(c, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	if _, err := h.svc.Get(uint(sid)); err != nil {
+	if _, err := h.svc.GetOwned(uint(sid), userID); err != nil {
 		if errors.Is(err, ErrSessionNotFound) {
 			handler.Fail(c, http.StatusNotFound, err.Error())
 			return
@@ -279,6 +329,11 @@ type editMessageReq struct {
 func (h *SessionHandler) EditMessage(c *gin.Context) {
 	sid, _ := strconv.Atoi(c.Param("sid"))
 	mid, _ := strconv.Atoi(c.Param("mid"))
+	userID, ok := requireUserID(c)
+	if !ok {
+		handler.Fail(c, http.StatusUnauthorized, "unauthorized")
+		return
+	}
 
 	var req editMessageReq
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -286,6 +341,14 @@ func (h *SessionHandler) EditMessage(c *gin.Context) {
 		return
 	}
 
+	if _, err := h.svc.GetOwned(uint(sid), userID); err != nil {
+		if errors.Is(err, ErrSessionNotFound) {
+			handler.Fail(c, http.StatusNotFound, err.Error())
+			return
+		}
+		handler.Fail(c, http.StatusInternalServerError, err.Error())
+		return
+	}
 	msg, err := h.svc.EditMessage(uint(sid), uint(mid), req.Content)
 	if err != nil {
 		handler.Fail(c, http.StatusInternalServerError, err.Error())
@@ -297,8 +360,13 @@ func (h *SessionHandler) EditMessage(c *gin.Context) {
 
 func (h *SessionHandler) Continue(c *gin.Context) {
 	sid, _ := strconv.Atoi(c.Param("sid"))
+	userID, ok := requireUserID(c)
+	if !ok {
+		handler.Fail(c, http.StatusUnauthorized, "unauthorized")
+		return
+	}
 
-	session, err := h.svc.Get(uint(sid))
+	session, err := h.svc.GetOwned(uint(sid), userID)
 	if err != nil {
 		if errors.Is(err, ErrSessionNotFound) {
 			handler.Fail(c, http.StatusNotFound, err.Error())
@@ -326,9 +394,14 @@ const maxImageSize = 5 * 1024 * 1024 // 5MB
 
 func (h *SessionHandler) UploadImage(c *gin.Context) {
 	sid, _ := strconv.Atoi(c.Param("sid"))
+	userID, ok := requireUserID(c)
+	if !ok {
+		handler.Fail(c, http.StatusUnauthorized, "unauthorized")
+		return
+	}
 
 	// Verify session exists
-	_, err := h.svc.Get(uint(sid))
+	_, err := h.svc.GetOwned(uint(sid), userID)
 	if err != nil {
 		if errors.Is(err, ErrSessionNotFound) {
 			handler.Fail(c, http.StatusNotFound, err.Error())

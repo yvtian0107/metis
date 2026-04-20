@@ -38,7 +38,8 @@ function formatRelativeTime(dateStr: string | null): string | null {
   return `${days}d`
 }
 
-function ModelChips({ provider, t }: { provider: ProviderItem; t: (key: string, fallback?: string) => string }) {
+function ModelChips({ provider }: { provider: ProviderItem }) {
+  const { t } = useTranslation("ai")
   const entries = MODEL_TYPE_ORDER
     .map((type) => ({ type, count: provider.modelTypeCounts?.[type] ?? 0 }))
     .filter((entry) => entry.count > 0)
@@ -147,7 +148,7 @@ export function ProviderCard({
       </div>
 
       <div className="flex justify-end py-2.5">
-        <ModelChips provider={provider} t={t} />
+        <ModelChips provider={provider} />
       </div>
 
       <div className="mt-auto flex items-center justify-between border-t pt-3">

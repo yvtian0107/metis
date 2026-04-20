@@ -64,6 +64,16 @@ func (s *MemoryService) Delete(id uint) error {
 	return s.repo.Delete(id)
 }
 
+func (s *MemoryService) DeleteForAgentUser(id, agentID, userID uint) error {
+	if _, err := s.repo.FindByIDForAgentUser(id, agentID, userID); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return ErrMemoryNotFound
+		}
+		return err
+	}
+	return s.repo.Delete(id)
+}
+
 // FormatForPrompt formats all memories for injection into system prompt
 func (s *MemoryService) FormatForPrompt(agentID, userID uint) (string, error) {
 	memories, err := s.repo.List(agentID, userID)

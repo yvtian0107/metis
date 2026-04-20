@@ -26,6 +26,14 @@ func (r *SessionRepo) FindByID(id uint) (*AgentSession, error) {
 	return &s, nil
 }
 
+func (r *SessionRepo) FindOwnedByID(id, userID uint) (*AgentSession, error) {
+	var s AgentSession
+	if err := r.db.Where("id = ? AND user_id = ?", id, userID).First(&s).Error; err != nil {
+		return nil, err
+	}
+	return &s, nil
+}
+
 type SessionListParams struct {
 	AgentID  uint
 	UserID   uint

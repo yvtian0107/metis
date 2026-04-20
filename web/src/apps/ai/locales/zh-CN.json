@@ -109,8 +109,27 @@
     "urlInvalid": "请输入有效的 URL",
     "commandRequired": "命令不能为空"
   },
+  "menuGroup": {
+    "agents": "智能体",
+    "knowledge": "知识",
+    "tools": "工具",
+    "modelAccess": "模型接入"
+  },
+  "menu": {
+    "ai:agent:list": "Agent",
+    "ai:knowledge:list": "知识库",
+    "ai:tool:list": "内建工具",
+    "ai:mcp:list": "MCP 服务",
+    "ai:skill:list": "技能包",
+    "ai:provider:list": "供应商"
+  },
   "tools": {
     "title": "工具",
+    "navigation": {
+      "builtin": "内建工具",
+      "mcp": "MCP 服务",
+      "skills": "技能包"
+    },
     "tabs": {
       "builtinTools": "内建工具",
       "mcpServers": "MCP 服务",

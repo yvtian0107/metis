@@ -27,6 +27,31 @@ func (r *AgentRepo) FindByID(id uint) (*Agent, error) {
 	return &a, nil
 }
 
+func (r *AgentRepo) FindAccessibleByID(id, userID uint) (*Agent, error) {
+	var a Agent
+	query := r.db.Where("id = ?", id)
+	if userID > 0 {
+		query = query.Where(
+			"visibility IN (?, ?) OR (visibility = ? AND created_by = ?)",
+			AgentVisibilityTeam, AgentVisibilityPublic, AgentVisibilityPrivate, userID,
+		)
+	} else {
+		query = query.Where("visibility IN (?, ?)", AgentVisibilityTeam, AgentVisibilityPublic)
+	}
+	if err := query.First(&a).Error; err != nil {
+		return nil, err
+	}
+	return &a, nil
+}
+
+func (r *AgentRepo) FindOwnedByID(id, userID uint) (*Agent, error) {
+	var a Agent
+	if err := r.db.Where("id = ? AND created_by = ?", id, userID).First(&a).Error; err != nil {
+		return nil, err
+	}
+	return &a, nil
+}
+
 func (r *AgentRepo) FindByName(name string) (*Agent, error) {
 	var a Agent
 	if err := r.db.Where("name = ?", name).First(&a).Error; err != nil {

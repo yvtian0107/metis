@@ -7,19 +7,28 @@ import (
 	"sync"
 )
 
+// StreamEncoder encodes internal Event values into a concrete outbound stream format.
+type StreamEncoder interface {
+	Encode(evt Event) error
+	Close() error
+}
+
+// StreamEncoderFactory creates a new encoder bound to the provided writer.
+type StreamEncoderFactory func(w io.Writer) StreamEncoder
+
 // UIMessageStreamEncoder encodes internal Event structures into Vercel AI SDK
 // UI Message Stream format (JSON SSE lines). This format is consumed by
 // @ai-sdk/react useChat when combined with a custom transport.
 type UIMessageStreamEncoder struct {
-	mu         sync.Mutex
-	w          io.Writer
-	messageID  string
-	textBlock  blockState
+	mu          sync.Mutex
+	w           io.Writer
+	messageID   string
+	textBlock   blockState
 	reasonBlock blockState
 }
 
 type blockState struct {
-	id     string
+	id      string
 	started bool
 }
 
@@ -41,8 +50,8 @@ func (enc *UIMessageStreamEncoder) Encode(evt Event) error {
 	case EventTypeLLMStart:
 		enc.messageID = fmt.Sprintf("msg-%d", evt.Sequence)
 		return enc.writeLine(map[string]any{
-			"type":       "start",
-			"messageId":  enc.messageID,
+			"type":      "start",
+			"messageId": enc.messageID,
 		})
 
 	case EventTypeContentDelta:
@@ -116,7 +125,6 @@ func (enc *UIMessageStreamEncoder) Encode(evt Event) error {
 		})
 
 	case EventTypeToolCall:
-		// Ensure any open text block is closed before switching to tool call
 		if enc.textBlock.started {
 			enc.textBlock.started = false
 			if err := enc.writeLine(map[string]any{

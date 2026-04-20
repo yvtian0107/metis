@@ -27,8 +27,8 @@ func NewSessionService(i do.Injector) (*SessionService, error) {
 }
 
 func (s *SessionService) Create(agentID, userID uint) (*AgentSession, error) {
-	// Validate agent exists
-	if _, err := s.agentSvc.Get(agentID); err != nil {
+	// Validate current user can see the target agent.
+	if _, err := s.agentSvc.GetAccessible(agentID, userID); err != nil {
 		return nil, err
 	}
 
@@ -45,6 +45,17 @@ func (s *SessionService) Create(agentID, userID uint) (*AgentSession, error) {
 
 func (s *SessionService) Get(id uint) (*AgentSession, error) {
 	session, err := s.repo.FindByID(id)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrSessionNotFound
+		}
+		return nil, err
+	}
+	return session, nil
+}
+
+func (s *SessionService) GetOwned(id, userID uint) (*AgentSession, error) {
+	session, err := s.repo.FindOwnedByID(id, userID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, ErrSessionNotFound

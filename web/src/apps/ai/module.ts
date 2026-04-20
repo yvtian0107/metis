@@ -7,6 +7,28 @@ registerTranslations("ai", { "zh-CN": zhCN, en })
 
 registerApp({
   name: "ai",
+  navigation: [
+    {
+      label: "agents",
+      items: [{ permission: "ai:agent:list" }],
+    },
+    {
+      label: "knowledge",
+      items: [{ permission: "ai:knowledge:list" }],
+    },
+    {
+      label: "tools",
+      items: [
+        { permission: "ai:tool:list" },
+        { permission: "ai:mcp:list" },
+        { permission: "ai:skill:list" },
+      ],
+    },
+    {
+      label: "modelAccess",
+      items: [{ permission: "ai:provider:list" }],
+    },
+  ],
   routes: [
     {
       path: "ai/providers",
@@ -39,7 +61,22 @@ registerApp({
       children: [
         {
           index: true,
-          lazy: () => import("./pages/tools/index"),
+          lazy: async () => {
+            const { Navigate } = await import("react-router")
+            return { Component: () => Navigate({ to: "/ai/tools/builtin", replace: true }) }
+          },
+        },
+        {
+          path: "builtin",
+          lazy: () => import("./pages/tools/builtin"),
+        },
+        {
+          path: "mcp",
+          lazy: () => import("./pages/tools/mcp"),
+        },
+        {
+          path: "skills",
+          lazy: () => import("./pages/tools/skills"),
         },
       ],
     },

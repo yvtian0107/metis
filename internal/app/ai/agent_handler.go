@@ -26,29 +26,29 @@ func NewAgentHandler(i do.Injector) (*AgentHandler, error) {
 }
 
 type createAgentReq struct {
-	Name         string          `json:"name" binding:"required"`
-	Code         *string         `json:"code"`
-	Description  string          `json:"description"`
-	Avatar       string          `json:"avatar"`
-	Type         string          `json:"type" binding:"required"`
-	Visibility   string          `json:"visibility"`
-	Strategy     string          `json:"strategy"`
-	ModelID      *uint           `json:"modelId"`
-	SystemPrompt string          `json:"systemPrompt"`
-	Temperature  float64         `json:"temperature"`
-	MaxTokens    int             `json:"maxTokens"`
-	MaxTurns     int             `json:"maxTurns"`
-	Runtime      string          `json:"runtime"`
-	RuntimeConfig json.RawMessage `json:"runtimeConfig"`
-	ExecMode     string          `json:"execMode"`
-	NodeID       *uint           `json:"nodeId"`
-	Workspace    string          `json:"workspace"`
-	Instructions string          `json:"instructions"`
-	ToolIDs      []uint          `json:"toolIds"`
-	SkillIDs     []uint          `json:"skillIds"`
-	MCPServerIDs []uint          `json:"mcpServerIds"`
-	KnowledgeBaseIDs []uint      `json:"knowledgeBaseIds"`
-	TemplateID   *uint           `json:"templateId"`
+	Name             string          `json:"name" binding:"required"`
+	Code             *string         `json:"code"`
+	Description      string          `json:"description"`
+	Avatar           string          `json:"avatar"`
+	Type             string          `json:"type" binding:"required"`
+	Visibility       string          `json:"visibility"`
+	Strategy         string          `json:"strategy"`
+	ModelID          *uint           `json:"modelId"`
+	SystemPrompt     string          `json:"systemPrompt"`
+	Temperature      float64         `json:"temperature"`
+	MaxTokens        int             `json:"maxTokens"`
+	MaxTurns         int             `json:"maxTurns"`
+	Runtime          string          `json:"runtime"`
+	RuntimeConfig    json.RawMessage `json:"runtimeConfig"`
+	ExecMode         string          `json:"execMode"`
+	NodeID           *uint           `json:"nodeId"`
+	Workspace        string          `json:"workspace"`
+	Instructions     string          `json:"instructions"`
+	ToolIDs          []uint          `json:"toolIds"`
+	SkillIDs         []uint          `json:"skillIds"`
+	MCPServerIDs     []uint          `json:"mcpServerIds"`
+	KnowledgeBaseIDs []uint          `json:"knowledgeBaseIds"`
+	TemplateID       *uint           `json:"templateId"`
 }
 
 func (h *AgentHandler) Create(c *gin.Context) {
@@ -58,7 +58,7 @@ func (h *AgentHandler) Create(c *gin.Context) {
 		return
 	}
 
-	userID, ok := c.Get("userId")
+	userID, ok := requireUserID(c)
 	if !ok {
 		handler.Fail(c, http.StatusUnauthorized, "unauthorized")
 		return
@@ -71,7 +71,7 @@ func (h *AgentHandler) Create(c *gin.Context) {
 		Avatar:        req.Avatar,
 		Type:          req.Type,
 		Visibility:    req.Visibility,
-		CreatedBy:     userID.(uint),
+		CreatedBy:     userID,
 		Strategy:      req.Strategy,
 		ModelID:       req.ModelID,
 		SystemPrompt:  req.SystemPrompt,
@@ -124,7 +124,7 @@ func (h *AgentHandler) Create(c *gin.Context) {
 func (h *AgentHandler) List(c *gin.Context) {
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("pageSize", "20"))
-	userID, ok := c.Get("userId")
+	userID, ok := requireUserID(c)
 	if !ok {
 		handler.Fail(c, http.StatusUnauthorized, "unauthorized")
 		return
@@ -134,7 +134,7 @@ func (h *AgentHandler) List(c *gin.Context) {
 		Keyword:    c.Query("keyword"),
 		Type:       c.Query("type"),
 		Visibility: c.Query("visibility"),
-		UserID:     userID.(uint),
+		UserID:     userID,
 		Page:       page,
 		PageSize:   pageSize,
 	})
@@ -153,7 +153,12 @@ func (h *AgentHandler) List(c *gin.Context) {
 
 func (h *AgentHandler) Get(c *gin.Context) {
 	id, _ := strconv.Atoi(c.Param("id"))
-	a, err := h.svc.Get(uint(id))
+	userID, ok := requireUserID(c)
+	if !ok {
+		handler.Fail(c, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	a, err := h.svc.GetAccessible(uint(id), userID)
 	if err != nil {
 		if errors.Is(err, ErrAgentNotFound) {
 			handler.Fail(c, http.StatusNotFound, err.Error())
@@ -166,38 +171,43 @@ func (h *AgentHandler) Get(c *gin.Context) {
 }
 
 type updateAgentReq struct {
-	Name         string          `json:"name" binding:"required"`
-	Description  string          `json:"description"`
-	Avatar       string          `json:"avatar"`
-	Visibility   string          `json:"visibility"`
-	IsActive     *bool           `json:"isActive"`
-	Strategy     string          `json:"strategy"`
-	ModelID      *uint           `json:"modelId"`
-	SystemPrompt string          `json:"systemPrompt"`
-	Temperature  float64         `json:"temperature"`
-	MaxTokens    int             `json:"maxTokens"`
-	MaxTurns     int             `json:"maxTurns"`
-	Runtime      string          `json:"runtime"`
-	RuntimeConfig json.RawMessage `json:"runtimeConfig"`
-	ExecMode     string          `json:"execMode"`
-	NodeID       *uint           `json:"nodeId"`
-	Workspace    string          `json:"workspace"`
-	Instructions string          `json:"instructions"`
-	ToolIDs      []uint          `json:"toolIds"`
-	SkillIDs     []uint          `json:"skillIds"`
-	MCPServerIDs []uint          `json:"mcpServerIds"`
-	KnowledgeBaseIDs []uint      `json:"knowledgeBaseIds"`
+	Name             string          `json:"name" binding:"required"`
+	Description      string          `json:"description"`
+	Avatar           string          `json:"avatar"`
+	Visibility       string          `json:"visibility"`
+	IsActive         *bool           `json:"isActive"`
+	Strategy         string          `json:"strategy"`
+	ModelID          *uint           `json:"modelId"`
+	SystemPrompt     string          `json:"systemPrompt"`
+	Temperature      float64         `json:"temperature"`
+	MaxTokens        int             `json:"maxTokens"`
+	MaxTurns         int             `json:"maxTurns"`
+	Runtime          string          `json:"runtime"`
+	RuntimeConfig    json.RawMessage `json:"runtimeConfig"`
+	ExecMode         string          `json:"execMode"`
+	NodeID           *uint           `json:"nodeId"`
+	Workspace        string          `json:"workspace"`
+	Instructions     string          `json:"instructions"`
+	ToolIDs          []uint          `json:"toolIds"`
+	SkillIDs         []uint          `json:"skillIds"`
+	MCPServerIDs     []uint          `json:"mcpServerIds"`
+	KnowledgeBaseIDs []uint          `json:"knowledgeBaseIds"`
 }
 
 func (h *AgentHandler) Update(c *gin.Context) {
 	id, _ := strconv.Atoi(c.Param("id"))
+	userID, ok := requireUserID(c)
+	if !ok {
+		handler.Fail(c, http.StatusUnauthorized, "unauthorized")
+		return
+	}
 	var req updateAgentReq
 	if err := c.ShouldBindJSON(&req); err != nil {
 		handler.Fail(c, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	a, err := h.svc.Get(uint(id))
+	a, err := h.svc.GetOwned(uint(id), userID)
 	if err != nil {
 		if errors.Is(err, ErrAgentNotFound) {
 			handler.Fail(c, http.StatusNotFound, err.Error())
@@ -249,6 +259,19 @@ func (h *AgentHandler) Update(c *gin.Context) {
 
 func (h *AgentHandler) Delete(c *gin.Context) {
 	id, _ := strconv.Atoi(c.Param("id"))
+	userID, ok := requireUserID(c)
+	if !ok {
+		handler.Fail(c, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	if _, err := h.svc.GetOwned(uint(id), userID); err != nil {
+		if errors.Is(err, ErrAgentNotFound) {
+			handler.Fail(c, http.StatusNotFound, err.Error())
+			return
+		}
+		handler.Fail(c, http.StatusInternalServerError, err.Error())
+		return
+	}
 	if err := h.svc.Delete(uint(id)); err != nil {
 		if errors.Is(err, ErrAgentHasRunningSessions) {
 			handler.Fail(c, http.StatusConflict, err.Error())

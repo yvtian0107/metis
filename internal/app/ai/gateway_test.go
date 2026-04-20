@@ -128,7 +128,7 @@ func TestGateway_Run_CompletesSession(t *testing.T) {
 
 	session, _ := gw.sessionSvc.Create(agent.ID, 1)
 
-	reader, err := gw.Run(context.Background(), session.ID)
+	reader, err := gw.Run(context.Background(), session.ID, 1)
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
@@ -137,7 +137,7 @@ func TestGateway_Run_CompletesSession(t *testing.T) {
 	// Allow goroutine to finish
 	time.Sleep(100 * time.Millisecond)
 
-	loaded, _ := gw.sessionSvc.Get(session.ID)
+	loaded, _ := gw.sessionSvc.GetOwned(session.ID, 1)
 	if loaded.Status != SessionStatusCompleted {
 		t.Errorf("status: expected %q, got %q", SessionStatusCompleted, loaded.Status)
 	}
@@ -166,14 +166,14 @@ func TestGateway_Run_ErrorSession(t *testing.T) {
 	_ = gw.agentSvc.Create(agent)
 	session, _ := gw.sessionSvc.Create(agent.ID, 1)
 
-	reader, err := gw.Run(context.Background(), session.ID)
+	reader, err := gw.Run(context.Background(), session.ID, 1)
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
 	_ = drainReader(reader)
 	time.Sleep(100 * time.Millisecond)
 
-	loaded, _ := gw.sessionSvc.Get(session.ID)
+	loaded, _ := gw.sessionSvc.GetOwned(session.ID, 1)
 	if loaded.Status != SessionStatusError {
 		t.Errorf("status: expected %q, got %q", SessionStatusError, loaded.Status)
 	}
@@ -191,7 +191,7 @@ func TestGateway_Run_CancelledSession(t *testing.T) {
 	session, _ := gw.sessionSvc.Create(agent.ID, 1)
 
 	ctx, cancel := context.WithCancel(context.Background())
-	reader, err := gw.Run(ctx, session.ID)
+	reader, err := gw.Run(ctx, session.ID, 1)
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
@@ -201,7 +201,7 @@ func TestGateway_Run_CancelledSession(t *testing.T) {
 	_ = drainReader(reader)
 	time.Sleep(100 * time.Millisecond)
 
-	loaded, _ := gw.sessionSvc.Get(session.ID)
+	loaded, _ := gw.sessionSvc.GetOwned(session.ID, 1)
 	if loaded.Status != SessionStatusCancelled {
 		t.Errorf("status: expected %q, got %q", SessionStatusCancelled, loaded.Status)
 	}

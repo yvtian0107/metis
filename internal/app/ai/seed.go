@@ -10,6 +10,48 @@ import (
 )
 
 func seedAI(db *gorm.DB, enforcer *casbin.Enforcer) error {
+	upsertMenu := func(menu *model.Menu) error {
+		var existing model.Menu
+		if err := db.Where("permission = ?", menu.Permission).First(&existing).Error; err == nil {
+			existing.ParentID = menu.ParentID
+			existing.Name = menu.Name
+			existing.Type = menu.Type
+			existing.Path = menu.Path
+			existing.Icon = menu.Icon
+			existing.Sort = menu.Sort
+			if err := db.Save(&existing).Error; err != nil {
+				return err
+			}
+			menu.ID = existing.ID
+			return nil
+		}
+		if err := db.Create(menu).Error; err != nil {
+			return err
+		}
+		slog.Info("seed: created menu", "name", menu.Name, "permission", menu.Permission)
+		return nil
+	}
+
+	seedButtons := func(parentID uint, buttons []model.Menu) {
+		for _, btn := range buttons {
+			var existing model.Menu
+			if err := db.Where("permission = ?", btn.Permission).First(&existing).Error; err == nil {
+				existing.ParentID = &parentID
+				existing.Name = btn.Name
+				existing.Type = btn.Type
+				existing.Sort = btn.Sort
+				if err := db.Save(&existing).Error; err != nil {
+					slog.Error("seed: failed to update button menu", "permission", btn.Permission, "error", err)
+				}
+				continue
+			}
+			btn.ParentID = &parentID
+			if err := db.Create(&btn).Error; err != nil {
+				slog.Error("seed: failed to create button menu", "permission", btn.Permission, "error", err)
+			}
+		}
+	}
+
 	// 1. AI 管理目录
 	var aiDir model.Menu
 	if err := db.Where("permission = ?", "ai").First(&aiDir).Error; err != nil {
@@ -26,22 +68,67 @@ func seedAI(db *gorm.DB, enforcer *casbin.Enforcer) error {
 		slog.Info("seed: created menu", "name", aiDir.Name, "permission", aiDir.Permission)
 	}
 
+	agentDir := model.Menu{
+		ParentID:   &aiDir.ID,
+		Name:       "智能体",
+		Type:       model.MenuTypeDirectory,
+		Icon:       "Bot",
+		Permission: "ai:group:agent",
+		Sort:       0,
+	}
+	if err := upsertMenu(&agentDir); err != nil {
+		return err
+	}
+
+	knowledgeDir := model.Menu{
+		ParentID:   &aiDir.ID,
+		Name:       "知识",
+		Type:       model.MenuTypeDirectory,
+		Icon:       "BookOpen",
+		Permission: "ai:group:knowledge",
+		Sort:       1,
+	}
+	if err := upsertMenu(&knowledgeDir); err != nil {
+		return err
+	}
+
+	toolDir := model.Menu{
+		ParentID:   &aiDir.ID,
+		Name:       "工具",
+		Type:       model.MenuTypeDirectory,
+		Icon:       "Wrench",
+		Permission: "ai:group:tool",
+		Sort:       2,
+	}
+	if err := upsertMenu(&toolDir); err != nil {
+		return err
+	}
+
+	modelAccessDir := model.Menu{
+		ParentID:   &aiDir.ID,
+		Name:       "模型接入",
+		Type:       model.MenuTypeDirectory,
+		Icon:       "Server",
+		Permission: "ai:group:model-access",
+		Sort:       3,
+	}
+	if err := upsertMenu(&modelAccessDir); err != nil {
+		return err
+	}
+
 	// 2. 供应商管理菜单（含 inline 模型管理）
 	var providerMenu model.Menu
-	if err := db.Where("permission = ?", "ai:provider:list").First(&providerMenu).Error; err != nil {
-		providerMenu = model.Menu{
-			ParentID:   &aiDir.ID,
-			Name:       "供应商管理",
-			Type:       model.MenuTypeMenu,
-			Path:       "/ai/providers",
-			Icon:       "Server",
-			Permission: "ai:provider:list",
-			Sort:       0,
-		}
-		if err := db.Create(&providerMenu).Error; err != nil {
-			return err
-		}
-		slog.Info("seed: created menu", "name", providerMenu.Name, "permission", providerMenu.Permission)
+	providerMenu = model.Menu{
+		ParentID:   &modelAccessDir.ID,
+		Name:       "供应商",
+		Type:       model.MenuTypeMenu,
+		Path:       "/ai/providers",
+		Icon:       "Server",
+		Permission: "ai:provider:list",
+		Sort:       0,
+	}
+	if err := upsertMenu(&providerMenu); err != nil {
+		return err
 	}
 
 	buttons := []model.Menu{
@@ -55,34 +142,21 @@ func seedAI(db *gorm.DB, enforcer *casbin.Enforcer) error {
 		{Name: "设为默认", Type: model.MenuTypeButton, Permission: "ai:model:default", Sort: 7},
 		{Name: "同步模型", Type: model.MenuTypeButton, Permission: "ai:model:sync", Sort: 8},
 	}
-	for _, btn := range buttons {
-		var existing model.Menu
-		if err := db.Where("permission = ?", btn.Permission).First(&existing).Error; err != nil {
-			btn.ParentID = &providerMenu.ID
-			if err := db.Create(&btn).Error; err != nil {
-				slog.Error("seed: failed to create button menu", "permission", btn.Permission, "error", err)
-				continue
-			}
-			slog.Info("seed: created menu", "name", btn.Name, "permission", btn.Permission)
-		}
-	}
+	seedButtons(providerMenu.ID, buttons)
 
 	// 3. 知识库管理菜单
 	var kbMenu model.Menu
-	if err := db.Where("permission = ?", "ai:knowledge:list").First(&kbMenu).Error; err != nil {
-		kbMenu = model.Menu{
-			ParentID:   &aiDir.ID,
-			Name:       "知识库",
-			Type:       model.MenuTypeMenu,
-			Path:       "/ai/knowledge",
-			Icon:       "BookOpen",
-			Permission: "ai:knowledge:list",
-			Sort:       1,
-		}
-		if err := db.Create(&kbMenu).Error; err != nil {
-			return err
-		}
-		slog.Info("seed: created menu", "name", kbMenu.Name, "permission", kbMenu.Permission)
+	kbMenu = model.Menu{
+		ParentID:   &knowledgeDir.ID,
+		Name:       "知识库",
+		Type:       model.MenuTypeMenu,
+		Path:       "/ai/knowledge",
+		Icon:       "BookOpen",
+		Permission: "ai:knowledge:list",
+		Sort:       0,
+	}
+	if err := upsertMenu(&kbMenu); err != nil {
+		return err
 	}
 
 	kbButtons := []model.Menu{
@@ -93,74 +167,84 @@ func seedAI(db *gorm.DB, enforcer *casbin.Enforcer) error {
 		{Name: "上传原料", Type: model.MenuTypeButton, Permission: "ai:knowledge:source:create", Sort: 4},
 		{Name: "删除原料", Type: model.MenuTypeButton, Permission: "ai:knowledge:source:delete", Sort: 5},
 	}
-	for _, btn := range kbButtons {
-		var existing model.Menu
-		if err := db.Where("permission = ?", btn.Permission).First(&existing).Error; err != nil {
-			btn.ParentID = &kbMenu.ID
-			if err := db.Create(&btn).Error; err != nil {
-				slog.Error("seed: failed to create button menu", "permission", btn.Permission, "error", err)
-				continue
-			}
-			slog.Info("seed: created menu", "name", btn.Name, "permission", btn.Permission)
-		}
-	}
+	seedButtons(kbMenu.ID, kbButtons)
 
 	// 4. 工具菜单
-	var toolMenu model.Menu
-	if err := db.Where("permission = ?", "ai:tool:list").First(&toolMenu).Error; err != nil {
-		toolMenu = model.Menu{
-			ParentID:   &aiDir.ID,
-			Name:       "工具",
-			Type:       model.MenuTypeMenu,
-			Path:       "/ai/tools",
-			Icon:       "Wrench",
-			Permission: "ai:tool:list",
-			Sort:       2,
-		}
-		if err := db.Create(&toolMenu).Error; err != nil {
-			return err
-		}
-		slog.Info("seed: created menu", "name", toolMenu.Name, "permission", toolMenu.Permission)
+	var builtinToolsMenu model.Menu
+	builtinToolsMenu = model.Menu{
+		ParentID:   &toolDir.ID,
+		Name:       "内建工具",
+		Type:       model.MenuTypeMenu,
+		Path:       "/ai/tools/builtin",
+		Icon:       "Wrench",
+		Permission: "ai:tool:list",
+		Sort:       0,
+	}
+	if err := upsertMenu(&builtinToolsMenu); err != nil {
+		return err
 	}
 
-	toolButtons := []model.Menu{
+	builtinToolButtons := []model.Menu{
 		{Name: "编辑内建工具", Type: model.MenuTypeButton, Permission: "ai:tool:update", Sort: 0},
+	}
+	seedButtons(builtinToolsMenu.ID, builtinToolButtons)
+
+	var mcpMenu model.Menu
+	mcpMenu = model.Menu{
+		ParentID:   &toolDir.ID,
+		Name:       "MCP 服务",
+		Type:       model.MenuTypeMenu,
+		Path:       "/ai/tools/mcp",
+		Icon:       "PlugZap",
+		Permission: "ai:mcp:list",
+		Sort:       1,
+	}
+	if err := upsertMenu(&mcpMenu); err != nil {
+		return err
+	}
+
+	mcpButtons := []model.Menu{
 		{Name: "新增 MCP 服务", Type: model.MenuTypeButton, Permission: "ai:mcp:create", Sort: 1},
 		{Name: "编辑 MCP 服务", Type: model.MenuTypeButton, Permission: "ai:mcp:update", Sort: 2},
 		{Name: "删除 MCP 服务", Type: model.MenuTypeButton, Permission: "ai:mcp:delete", Sort: 3},
 		{Name: "测试 MCP 连接", Type: model.MenuTypeButton, Permission: "ai:mcp:test", Sort: 4},
+	}
+	seedButtons(mcpMenu.ID, mcpButtons)
+
+	var skillMenu model.Menu
+	skillMenu = model.Menu{
+		ParentID:   &toolDir.ID,
+		Name:       "技能包",
+		Type:       model.MenuTypeMenu,
+		Path:       "/ai/tools/skills",
+		Icon:       "Package",
+		Permission: "ai:skill:list",
+		Sort:       2,
+	}
+	if err := upsertMenu(&skillMenu); err != nil {
+		return err
+	}
+
+	skillButtons := []model.Menu{
 		{Name: "导入技能包", Type: model.MenuTypeButton, Permission: "ai:skill:create", Sort: 5},
 		{Name: "编辑技能包", Type: model.MenuTypeButton, Permission: "ai:skill:update", Sort: 6},
 		{Name: "删除技能包", Type: model.MenuTypeButton, Permission: "ai:skill:delete", Sort: 7},
 	}
-	for _, btn := range toolButtons {
-		var existing model.Menu
-		if err := db.Where("permission = ?", btn.Permission).First(&existing).Error; err != nil {
-			btn.ParentID = &toolMenu.ID
-			if err := db.Create(&btn).Error; err != nil {
-				slog.Error("seed: failed to create button menu", "permission", btn.Permission, "error", err)
-				continue
-			}
-			slog.Info("seed: created menu", "name", btn.Name, "permission", btn.Permission)
-		}
-	}
+	seedButtons(skillMenu.ID, skillButtons)
 
 	// 5. Agent 管理菜单
 	var agentMenu model.Menu
-	if err := db.Where("permission = ?", "ai:agent:list").First(&agentMenu).Error; err != nil {
-		agentMenu = model.Menu{
-			ParentID:   &aiDir.ID,
-			Name:       "Agent",
-			Type:       model.MenuTypeMenu,
-			Path:       "/ai/agents",
-			Icon:       "Bot",
-			Permission: "ai:agent:list",
-			Sort:       3,
-		}
-		if err := db.Create(&agentMenu).Error; err != nil {
-			return err
-		}
-		slog.Info("seed: created menu", "name", agentMenu.Name, "permission", agentMenu.Permission)
+	agentMenu = model.Menu{
+		ParentID:   &agentDir.ID,
+		Name:       "Agent",
+		Type:       model.MenuTypeMenu,
+		Path:       "/ai/agents",
+		Icon:       "Bot",
+		Permission: "ai:agent:list",
+		Sort:       0,
+	}
+	if err := upsertMenu(&agentMenu); err != nil {
+		return err
 	}
 
 	agentButtons := []model.Menu{
@@ -168,17 +252,7 @@ func seedAI(db *gorm.DB, enforcer *casbin.Enforcer) error {
 		{Name: "编辑 Agent", Type: model.MenuTypeButton, Permission: "ai:agent:update", Sort: 1},
 		{Name: "删除 Agent", Type: model.MenuTypeButton, Permission: "ai:agent:delete", Sort: 2},
 	}
-	for _, btn := range agentButtons {
-		var existing model.Menu
-		if err := db.Where("permission = ?", btn.Permission).First(&existing).Error; err != nil {
-			btn.ParentID = &agentMenu.ID
-			if err := db.Create(&btn).Error; err != nil {
-				slog.Error("seed: failed to create button menu", "permission", btn.Permission, "error", err)
-				continue
-			}
-			slog.Info("seed: created menu", "name", btn.Name, "permission", btn.Permission)
-		}
-	}
+	seedButtons(agentMenu.ID, agentButtons)
 
 	// 7. Agent templates seed
 	agentTemplates := []AgentTemplate{
@@ -426,6 +500,10 @@ func seedAI(db *gorm.DB, enforcer *casbin.Enforcer) error {
 
 	menuPerms := [][]string{
 		{"admin", "ai", "read"},
+		{"admin", "ai:group:agent", "read"},
+		{"admin", "ai:group:knowledge", "read"},
+		{"admin", "ai:group:tool", "read"},
+		{"admin", "ai:group:model-access", "read"},
 		{"admin", "ai:provider:list", "read"},
 		{"admin", "ai:provider:create", "read"},
 		{"admin", "ai:provider:update", "read"},
@@ -446,10 +524,12 @@ func seedAI(db *gorm.DB, enforcer *casbin.Enforcer) error {
 		// Tool registry
 		{"admin", "ai:tool:list", "read"},
 		{"admin", "ai:tool:update", "read"},
+		{"admin", "ai:mcp:list", "read"},
 		{"admin", "ai:mcp:create", "read"},
 		{"admin", "ai:mcp:update", "read"},
 		{"admin", "ai:mcp:delete", "read"},
 		{"admin", "ai:mcp:test", "read"},
+		{"admin", "ai:skill:list", "read"},
 		{"admin", "ai:skill:create", "read"},
 		{"admin", "ai:skill:update", "read"},
 		{"admin", "ai:skill:delete", "read"},
