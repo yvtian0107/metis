@@ -5,6 +5,8 @@ import (
 	"log/slog"
 
 	"gorm.io/gorm"
+
+	"metis/internal/app/itsm/engine"
 )
 
 // ITSMTool defines a tool that ITSM registers into the ai_tools table.
@@ -17,7 +19,7 @@ type ITSMTool struct {
 
 // AllTools returns the ITSM tool definitions.
 func AllTools() []ITSMTool {
-	return []ITSMTool{
+	tools := []ITSMTool{
 		{
 			Name:        "itsm.service_match",
 			DisplayName: "服务匹配",
@@ -137,6 +139,20 @@ func AllTools() []ITSMTool {
 			}`),
 		},
 	}
+	for _, def := range engine.DecisionToolDefs() {
+		params, err := json.Marshal(def.Parameters)
+		if err != nil {
+			slog.Warn("ITSM tools seed: failed to marshal decision tool schema", "name", def.Name, "error", err)
+			continue
+		}
+		tools = append(tools, ITSMTool{
+			Name:             def.Name,
+			DisplayName:      def.Name,
+			Description:      def.Description,
+			ParametersSchema: params,
+		})
+	}
+	return tools
 }
 
 // SeedTools registers ITSM tool definitions into the ai_tools table.
@@ -173,8 +189,12 @@ func SeedTools(db *gorm.DB) error {
 			slog.Info("ITSM tools seed: updated tool", "name", tool.Name)
 		} else {
 			// Create new
+			toolkit := "itsm"
+			if len(tool.Name) > 9 && tool.Name[:9] == "decision." {
+				toolkit = "decision"
+			}
 			if err := db.Table("ai_tools").Create(map[string]any{
-				"toolkit":           "itsm",
+				"toolkit":           toolkit,
 				"name":              tool.Name,
 				"display_name":      tool.DisplayName,
 				"description":       tool.Description,
@@ -352,6 +372,7 @@ func SeedAgents(db *gorm.DB) error {
 				"decision.similar_history",
 				"decision.sla_status",
 				"decision.list_actions",
+				"decision.execute_action",
 			},
 		},
 	}
@@ -364,32 +385,25 @@ func SeedAgents(db *gorm.DB) error {
 		}
 		if agent.Code != "" {
 			if err := db.Table("ai_agents").Where("code = ?", agent.Code).Select("id", "code").First(&existing).Error; err == nil {
-				// Preset agent exists — update system_prompt and behavior params on every sync
-				db.Table("ai_agents").Where("id = ?", existing.ID).Updates(map[string]any{
-					"system_prompt": agent.SystemPrompt,
-					"temperature":   agent.Temperature,
-					"max_tokens":    agent.MaxTokens,
-					"max_turns":     agent.MaxTurns,
-				})
-				slog.Info("ITSM agent seed: synced preset agent", "name", agent.Name, "code", agent.Code)
+				// Preset agent exists — skip system_prompt update to preserve custom edits
+				slog.Info("ITSM agent seed: 智能体已存在，跳过 prompt 更新", "name", agent.Name, "code", agent.Code)
+				syncAgentToolBindings(db, existing.ID, agent.ToolNames)
 				continue
 			}
 		}
 
 		// Fallback: check by name for backward compatibility
 		if err := db.Table("ai_agents").Where("name = ?", agent.Name).Select("id", "code").First(&existing).Error; err == nil {
-			// Agent exists by name — set code if missing, then update
-			updates := map[string]any{
-				"system_prompt": agent.SystemPrompt,
-				"temperature":   agent.Temperature,
-				"max_tokens":    agent.MaxTokens,
-				"max_turns":     agent.MaxTurns,
-			}
+			// Agent exists by name — set code if missing, skip prompt update
+			updates := map[string]any{}
 			if existing.Code == "" && agent.Code != "" {
 				updates["code"] = agent.Code
 			}
-			db.Table("ai_agents").Where("id = ?", existing.ID).Updates(updates)
-			slog.Info("ITSM agent seed: synced agent by name", "name", agent.Name, "code", agent.Code)
+			if len(updates) > 0 {
+				db.Table("ai_agents").Where("id = ?", existing.ID).Updates(updates)
+			}
+			slog.Info("ITSM agent seed: 智能体已存在，跳过 prompt 更新", "name", agent.Name, "code", agent.Code)
+			syncAgentToolBindings(db, existing.ID, agent.ToolNames)
 			continue
 		}
 
@@ -416,29 +430,61 @@ func SeedAgents(db *gorm.DB) error {
 
 		slog.Info("ITSM agent seed: created agent", "name", agent.Name)
 
-		// Bind tools
+		// Bind tools for newly created agent
 		if len(agent.ToolNames) > 0 {
-			// Get the created agent ID
 			var agentRow struct{ ID uint }
 			if err := db.Table("ai_agents").Where("name = ?", agent.Name).Select("id").First(&agentRow).Error; err != nil {
 				slog.Error("ITSM agent seed: failed to find created agent for tool binding", "name", agent.Name, "error", err)
 				continue
 			}
-
-			for _, toolName := range agent.ToolNames {
-				var toolRow struct{ ID uint }
-				if err := db.Table("ai_tools").Where("name = ?", toolName).Select("id").First(&toolRow).Error; err != nil {
-					slog.Warn("ITSM agent seed: tool not found, skipping binding", "agent", agent.Name, "tool", toolName)
-					continue
-				}
-				db.Table("ai_agent_tools").Create(map[string]any{
-					"agent_id": agentRow.ID,
-					"tool_id":  toolRow.ID,
-				})
-			}
-			slog.Info("ITSM agent seed: bound tools", "agent", agent.Name, "tools", agent.ToolNames)
+			syncAgentToolBindings(db, agentRow.ID, agent.ToolNames)
 		}
 	}
 
 	return nil
+}
+
+// syncAgentToolBindings ensures the agent's tool bindings match the desired ToolNames list.
+// It adds missing bindings and removes stale ones.
+func syncAgentToolBindings(db *gorm.DB, agentID uint, toolNames []string) {
+	// Resolve desired tool IDs
+	desiredToolIDs := make(map[uint]string) // toolID -> toolName
+	for _, toolName := range toolNames {
+		var toolRow struct{ ID uint }
+		if err := db.Table("ai_tools").Where("name = ?", toolName).Select("id").First(&toolRow).Error; err != nil {
+			slog.Warn("ITSM agent seed: tool not found, skipping binding", "agent_id", agentID, "tool", toolName)
+			continue
+		}
+		desiredToolIDs[toolRow.ID] = toolName
+	}
+
+	// Query current bindings
+	var currentBindings []struct {
+		ToolID uint `gorm:"column:tool_id"`
+	}
+	db.Table("ai_agent_tools").Where("agent_id = ?", agentID).Select("tool_id").Find(&currentBindings)
+
+	currentSet := make(map[uint]bool)
+	for _, b := range currentBindings {
+		currentSet[b.ToolID] = true
+	}
+
+	// Add missing bindings
+	for toolID := range desiredToolIDs {
+		if !currentSet[toolID] {
+			db.Table("ai_agent_tools").Create(map[string]any{
+				"agent_id": agentID,
+				"tool_id":  toolID,
+			})
+			slog.Info("ITSM agent seed: added tool binding", "agent_id", agentID, "tool", desiredToolIDs[toolID])
+		}
+	}
+
+	// Remove stale bindings
+	for _, b := range currentBindings {
+		if _, wanted := desiredToolIDs[b.ToolID]; !wanted {
+			db.Table("ai_agent_tools").Where("agent_id = ? AND tool_id = ?", agentID, b.ToolID).Delete(nil)
+			slog.Info("ITSM agent seed: removed stale tool binding", "agent_id", agentID, "tool_id", b.ToolID)
+		}
+	}
 }

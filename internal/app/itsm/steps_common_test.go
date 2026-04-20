@@ -50,10 +50,10 @@ type bddContext struct {
 	service           *ServiceDefinition
 	priority          *Priority
 	ticket            *Ticket
-	tickets           map[string]*Ticket // multi-ticket scenarios, key = alias
-	fallbackUserID    uint               // fallback assignee for participant validation scenarios
-	dialogState       dialogTestState    // dialog validation test state
-	actionReceiver    *LocalActionReceiver // action HTTP test receiver (nil if not needed)
+	tickets           map[string]*Ticket        // multi-ticket scenarios, key = alias
+	fallbackUserID    uint                      // fallback assignee for participant validation scenarios
+	dialogState       dialogTestState           // dialog validation test state
+	actionReceiver    *LocalActionReceiver      // action HTTP test receiver (nil if not needed)
 	serviceActions    map[string]*ServiceAction // key = action code
 }
 
@@ -923,7 +923,7 @@ func (bc *bddContext) thenApproveShouldFail(username string) error {
 // Shared smart engine retry step
 // ---------------------------------------------------------------------------
 
-// whenSmartEngineDecisionCycleUntilComplete runs the decision cycle up to 5 times,
+// whenSmartEngineDecisionCycleUntilComplete runs the decision cycle up to 8 times,
 // stopping early once the ticket reaches a terminal state ("completed", "cancelled", "failed").
 // Between attempts it auto-approves any pending/in_progress activities the LLM may have
 // created, clearing the path for a completion decision on the next cycle.
@@ -932,7 +932,10 @@ func (bc *bddContext) whenSmartEngineDecisionCycleUntilComplete() error {
 		return fmt.Errorf("no ticket in context")
 	}
 
-	const maxAttempts = 5
+	const maxAttempts = 8
+	const maxPendingApprovalConfirms = 2 // cap to prevent infinite loop
+
+	pendingApprovalConfirms := 0
 
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		// Refresh ticket status.
@@ -945,6 +948,30 @@ func (bc *bddContext) whenSmartEngineDecisionCycleUntilComplete() error {
 		// on previous cycles, so they don't block the completion decision.
 		if attempt > 1 {
 			bc.autoApproveBlockingActivities()
+
+			// Also handle pending_approval activities (with cap to avoid infinite loop).
+			if pendingApprovalConfirms < maxPendingApprovalConfirms {
+				var paActivities []TicketActivity
+				bc.db.Where("ticket_id = ? AND status = ?", bc.ticket.ID, "pending_approval").
+					Find(&paActivities)
+				for _, act := range paActivities {
+					if pendingApprovalConfirms >= maxPendingApprovalConfirms {
+						break
+					}
+					log.Printf("[retry-approve] confirming pending_approval activity %d (confirm %d/%d)",
+						act.ID, pendingApprovalConfirms+1, maxPendingApprovalConfirms)
+					var plan engine.DecisionPlan
+					if err := json.Unmarshal([]byte(act.AIDecision), &plan); err != nil {
+						continue
+					}
+					bc.smartEngine.ExecuteConfirmedPlan(bc.db, bc.ticket.ID, &plan)
+					bc.db.Model(&TicketActivity{}).Where("id = ?", act.ID).
+						Updates(map[string]any{"status": "completed", "finished_at": time.Now()})
+					pendingApprovalConfirms++
+					// Auto-approve the newly created activities from the confirmed plan.
+					bc.autoApproveBlockingActivities()
+				}
+			}
 		}
 
 		ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
@@ -983,6 +1010,10 @@ func isTerminal(status string) bool {
 // autoApproveBlockingActivities finds any pending/in_progress activities (non-parallel)
 // for the current ticket and auto-approves them via SmartEngine.Progress so the next
 // decision cycle can produce a "complete" decision.
+//
+// Note: pending_approval activities are intentionally NOT auto-confirmed here. Confirming
+// them creates new activities that the AI sees as "more work to do", triggering an infinite
+// loop. Only the explicit whenAssigneeClaimsAndApproves step handles pending_approval.
 func (bc *bddContext) autoApproveBlockingActivities() {
 	var activities []TicketActivity
 	bc.db.Where("ticket_id = ? AND status IN ?",
@@ -990,60 +1021,65 @@ func (bc *bddContext) autoApproveBlockingActivities() {
 		Find(&activities)
 
 	for _, act := range activities {
-		// Determine operator from assignment.
-		var assignment TicketAssignment
-		if err := bc.db.Where("activity_id = ?", act.ID).First(&assignment).Error; err != nil {
-			// No assignment — create one with the requester as fallback.
-			fallbackID := bc.ticket.RequesterID
-			provider := &testUserProvider{db: bc.db}
-			candidates, _ := provider.ListActiveUsers()
-			for _, c := range candidates {
-				if c.UserID != bc.ticket.RequesterID {
-					fallbackID = c.UserID
-					break
-				}
+		bc.autoApproveSingleActivity(act)
+	}
+}
+
+// autoApproveSingleActivity approves a single pending/in_progress activity.
+func (bc *bddContext) autoApproveSingleActivity(act TicketActivity) {
+	// Determine operator from assignment.
+	var assignment TicketAssignment
+	if err := bc.db.Where("activity_id = ?", act.ID).First(&assignment).Error; err != nil {
+		// No assignment — create one with the requester as fallback.
+		fallbackID := bc.ticket.RequesterID
+		provider := &testUserProvider{db: bc.db}
+		candidates, _ := provider.ListActiveUsers()
+		for _, c := range candidates {
+			if c.UserID != bc.ticket.RequesterID {
+				fallbackID = c.UserID
+				break
 			}
-			bc.db.Create(&TicketAssignment{
-				TicketID:        bc.ticket.ID,
-				ActivityID:      act.ID,
-				ParticipantType: "user",
-				UserID:          &fallbackID,
-				AssigneeID:      &fallbackID,
-				Status:          "claimed",
-				IsCurrent:       true,
-			})
-			assignment.AssigneeID = &fallbackID
 		}
-
-		var operatorID uint
-		if assignment.AssigneeID != nil {
-			operatorID = *assignment.AssigneeID
-		} else if assignment.UserID != nil {
-			operatorID = *assignment.UserID
-		} else {
-			// Resolve from position+department.
-			operatorID = bc.resolveOperatorFromAssignment(assignment)
-		}
-		if operatorID == 0 {
-			continue
-		}
-
-		// Claim if not yet claimed.
-		bc.db.Model(&TicketAssignment{}).
-			Where("activity_id = ?", act.ID).
-			Updates(map[string]any{"assignee_id": operatorID, "status": "claimed"})
-
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		err := bc.smartEngine.Progress(ctx, bc.db, engine.ProgressParams{
-			TicketID:   bc.ticket.ID,
-			ActivityID: act.ID,
-			Outcome:    "approved",
-			OperatorID: operatorID,
+		bc.db.Create(&TicketAssignment{
+			TicketID:        bc.ticket.ID,
+			ActivityID:      act.ID,
+			ParticipantType: "user",
+			UserID:          &fallbackID,
+			AssigneeID:      &fallbackID,
+			Status:          "claimed",
+			IsCurrent:       true,
 		})
-		cancel()
-		if err != nil {
-			log.Printf("[auto-approve] activity %d: %v", act.ID, err)
-		}
+		assignment.AssigneeID = &fallbackID
+	}
+
+	var operatorID uint
+	if assignment.AssigneeID != nil {
+		operatorID = *assignment.AssigneeID
+	} else if assignment.UserID != nil {
+		operatorID = *assignment.UserID
+	} else {
+		// Resolve from position+department.
+		operatorID = bc.resolveOperatorFromAssignment(assignment)
+	}
+	if operatorID == 0 {
+		return
+	}
+
+	// Claim if not yet claimed.
+	bc.db.Model(&TicketAssignment{}).
+		Where("activity_id = ?", act.ID).
+		Updates(map[string]any{"assignee_id": operatorID, "status": "claimed"})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	err := bc.smartEngine.Progress(ctx, bc.db, engine.ProgressParams{
+		TicketID:   bc.ticket.ID,
+		ActivityID: act.ID,
+		Outcome:    "approved",
+		OperatorID: operatorID,
+	})
+	cancel()
+	if err != nil {
+		log.Printf("[auto-approve] activity %d: %v", act.ID, err)
 	}
 }
 

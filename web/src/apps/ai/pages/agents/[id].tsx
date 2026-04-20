@@ -36,6 +36,7 @@ interface NamedItem {
 }
 
 function useBindingNames(ids: number[], queryKey: string[], endpoint: string) {
+  const { t } = useTranslation(["ai"])
   const { data: items = [] } = useQuery({
     queryKey,
     queryFn: () =>
@@ -44,7 +45,8 @@ function useBindingNames(ids: number[], queryKey: string[], endpoint: string) {
   })
   return ids.map((id) => {
     const item = items.find((i) => i.id === id)
-    return item ? (item.displayName || item.name) : `#${id}`
+    if (!item) return `#${id}`
+    return t(`ai:tools.toolDefs.${item.name}.name`, { defaultValue: item.displayName || item.name })
   })
 }
 
@@ -162,7 +164,7 @@ function AgentConfiguration({ agent }: { agent: AgentWithBindings }) {
         <CardContent className="space-y-4">
           <div>
             <h4 className="text-sm font-medium mb-2">{t("ai:agents.tools")}</h4>
-            <BindingBadges ids={agent.toolIds} queryKey={["ai-binding-tools"]} endpoint="/api/v1/ai/tools?pageSize=100" />
+            <BindingBadges ids={agent.toolIds} queryKey={["ai-agent-detail-tools"]} endpoint="/api/v1/ai/tools?pageSize=100" />
           </div>
           <div>
             <h4 className="text-sm font-medium mb-2">{t("ai:agents.mcpServers")}</h4>

@@ -465,6 +465,7 @@ export interface ActivityItem {
   aiReasoning: string | null
   confidence: number | null
   overriddenBy: number | null
+  canAct: boolean
   startedAt: string | null
   finishedAt: string | null
   createdAt: string
@@ -545,6 +546,7 @@ export interface ApprovalItem {
   createdAt: string
   assignmentId: number
   participantType: string
+  canAct: boolean
   approvalKind: "workflow" | "ai_confirm"
 }
 

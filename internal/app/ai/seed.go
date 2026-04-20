@@ -10,6 +10,48 @@ import (
 )
 
 func seedAI(db *gorm.DB, enforcer *casbin.Enforcer) error {
+	upsertMenu := func(menu *model.Menu) error {
+		var existing model.Menu
+		if err := db.Where("permission = ?", menu.Permission).First(&existing).Error; err == nil {
+			existing.ParentID = menu.ParentID
+			existing.Name = menu.Name
+			existing.Type = menu.Type
+			existing.Path = menu.Path
+			existing.Icon = menu.Icon
+			existing.Sort = menu.Sort
+			if err := db.Save(&existing).Error; err != nil {
+				return err
+			}
+			menu.ID = existing.ID
+			return nil
+		}
+		if err := db.Create(menu).Error; err != nil {
+			return err
+		}
+		slog.Info("seed: created menu", "name", menu.Name, "permission", menu.Permission)
+		return nil
+	}
+
+	seedButtons := func(parentID uint, buttons []model.Menu) {
+		for _, btn := range buttons {
+			var existing model.Menu
+			if err := db.Where("permission = ?", btn.Permission).First(&existing).Error; err == nil {
+				existing.ParentID = &parentID
+				existing.Name = btn.Name
+				existing.Type = btn.Type
+				existing.Sort = btn.Sort
+				if err := db.Save(&existing).Error; err != nil {
+					slog.Error("seed: failed to update button menu", "permission", btn.Permission, "error", err)
+				}
+				continue
+			}
+			btn.ParentID = &parentID
+			if err := db.Create(&btn).Error; err != nil {
+				slog.Error("seed: failed to create button menu", "permission", btn.Permission, "error", err)
+			}
+		}
+	}
+
 	// 1. AI 管理目录
 	var aiDir model.Menu
 	if err := db.Where("permission = ?", "ai").First(&aiDir).Error; err != nil {
@@ -26,22 +68,67 @@ func seedAI(db *gorm.DB, enforcer *casbin.Enforcer) error {
 		slog.Info("seed: created menu", "name", aiDir.Name, "permission", aiDir.Permission)
 	}
 
+	agentDir := model.Menu{
+		ParentID:   &aiDir.ID,
+		Name:       "智能体",
+		Type:       model.MenuTypeDirectory,
+		Icon:       "Bot",
+		Permission: "ai:group:agent",
+		Sort:       0,
+	}
+	if err := upsertMenu(&agentDir); err != nil {
+		return err
+	}
+
+	knowledgeDir := model.Menu{
+		ParentID:   &aiDir.ID,
+		Name:       "知识",
+		Type:       model.MenuTypeDirectory,
+		Icon:       "BookOpen",
+		Permission: "ai:group:knowledge",
+		Sort:       1,
+	}
+	if err := upsertMenu(&knowledgeDir); err != nil {
+		return err
+	}
+
+	toolDir := model.Menu{
+		ParentID:   &aiDir.ID,
+		Name:       "工具",
+		Type:       model.MenuTypeDirectory,
+		Icon:       "Wrench",
+		Permission: "ai:group:tool",
+		Sort:       2,
+	}
+	if err := upsertMenu(&toolDir); err != nil {
+		return err
+	}
+
+	modelAccessDir := model.Menu{
+		ParentID:   &aiDir.ID,
+		Name:       "模型接入",
+		Type:       model.MenuTypeDirectory,
+		Icon:       "Server",
+		Permission: "ai:group:model-access",
+		Sort:       3,
+	}
+	if err := upsertMenu(&modelAccessDir); err != nil {
+		return err
+	}
+
 	// 2. 供应商管理菜单（含 inline 模型管理）
 	var providerMenu model.Menu
-	if err := db.Where("permission = ?", "ai:provider:list").First(&providerMenu).Error; err != nil {
-		providerMenu = model.Menu{
-			ParentID:   &aiDir.ID,
-			Name:       "供应商管理",
-			Type:       model.MenuTypeMenu,
-			Path:       "/ai/providers",
-			Icon:       "Server",
-			Permission: "ai:provider:list",
-			Sort:       0,
-		}
-		if err := db.Create(&providerMenu).Error; err != nil {
-			return err
-		}
-		slog.Info("seed: created menu", "name", providerMenu.Name, "permission", providerMenu.Permission)
+	providerMenu = model.Menu{
+		ParentID:   &modelAccessDir.ID,
+		Name:       "供应商",
+		Type:       model.MenuTypeMenu,
+		Path:       "/ai/providers",
+		Icon:       "Server",
+		Permission: "ai:provider:list",
+		Sort:       0,
+	}
+	if err := upsertMenu(&providerMenu); err != nil {
+		return err
 	}
 
 	buttons := []model.Menu{
@@ -55,34 +142,21 @@ func seedAI(db *gorm.DB, enforcer *casbin.Enforcer) error {
 		{Name: "设为默认", Type: model.MenuTypeButton, Permission: "ai:model:default", Sort: 7},
 		{Name: "同步模型", Type: model.MenuTypeButton, Permission: "ai:model:sync", Sort: 8},
 	}
-	for _, btn := range buttons {
-		var existing model.Menu
-		if err := db.Where("permission = ?", btn.Permission).First(&existing).Error; err != nil {
-			btn.ParentID = &providerMenu.ID
-			if err := db.Create(&btn).Error; err != nil {
-				slog.Error("seed: failed to create button menu", "permission", btn.Permission, "error", err)
-				continue
-			}
-			slog.Info("seed: created menu", "name", btn.Name, "permission", btn.Permission)
-		}
-	}
+	seedButtons(providerMenu.ID, buttons)
 
 	// 3. 知识库管理菜单
 	var kbMenu model.Menu
-	if err := db.Where("permission = ?", "ai:knowledge:list").First(&kbMenu).Error; err != nil {
-		kbMenu = model.Menu{
-			ParentID:   &aiDir.ID,
-			Name:       "知识库",
-			Type:       model.MenuTypeMenu,
-			Path:       "/ai/knowledge",
-			Icon:       "BookOpen",
-			Permission: "ai:knowledge:list",
-			Sort:       1,
-		}
-		if err := db.Create(&kbMenu).Error; err != nil {
-			return err
-		}
-		slog.Info("seed: created menu", "name", kbMenu.Name, "permission", kbMenu.Permission)
+	kbMenu = model.Menu{
+		ParentID:   &knowledgeDir.ID,
+		Name:       "知识库",
+		Type:       model.MenuTypeMenu,
+		Path:       "/ai/knowledge",
+		Icon:       "BookOpen",
+		Permission: "ai:knowledge:list",
+		Sort:       0,
+	}
+	if err := upsertMenu(&kbMenu); err != nil {
+		return err
 	}
 
 	kbButtons := []model.Menu{
@@ -93,95 +167,128 @@ func seedAI(db *gorm.DB, enforcer *casbin.Enforcer) error {
 		{Name: "上传原料", Type: model.MenuTypeButton, Permission: "ai:knowledge:source:create", Sort: 4},
 		{Name: "删除原料", Type: model.MenuTypeButton, Permission: "ai:knowledge:source:delete", Sort: 5},
 	}
-	for _, btn := range kbButtons {
-		var existing model.Menu
-		if err := db.Where("permission = ?", btn.Permission).First(&existing).Error; err != nil {
-			btn.ParentID = &kbMenu.ID
-			if err := db.Create(&btn).Error; err != nil {
-				slog.Error("seed: failed to create button menu", "permission", btn.Permission, "error", err)
-				continue
-			}
-			slog.Info("seed: created menu", "name", btn.Name, "permission", btn.Permission)
-		}
-	}
+	seedButtons(kbMenu.ID, kbButtons)
 
 	// 4. 工具菜单
-	var toolMenu model.Menu
-	if err := db.Where("permission = ?", "ai:tool:list").First(&toolMenu).Error; err != nil {
-		toolMenu = model.Menu{
-			ParentID:   &aiDir.ID,
-			Name:       "工具",
-			Type:       model.MenuTypeMenu,
-			Path:       "/ai/tools",
-			Icon:       "Wrench",
-			Permission: "ai:tool:list",
-			Sort:       2,
-		}
-		if err := db.Create(&toolMenu).Error; err != nil {
-			return err
-		}
-		slog.Info("seed: created menu", "name", toolMenu.Name, "permission", toolMenu.Permission)
+	var builtinToolsMenu model.Menu
+	builtinToolsMenu = model.Menu{
+		ParentID:   &toolDir.ID,
+		Name:       "内建工具",
+		Type:       model.MenuTypeMenu,
+		Path:       "/ai/tools/builtin",
+		Icon:       "Wrench",
+		Permission: "ai:tool:list",
+		Sort:       0,
+	}
+	if err := upsertMenu(&builtinToolsMenu); err != nil {
+		return err
 	}
 
-	toolButtons := []model.Menu{
+	builtinToolButtons := []model.Menu{
 		{Name: "编辑内建工具", Type: model.MenuTypeButton, Permission: "ai:tool:update", Sort: 0},
+	}
+	seedButtons(builtinToolsMenu.ID, builtinToolButtons)
+
+	var mcpMenu model.Menu
+	mcpMenu = model.Menu{
+		ParentID:   &toolDir.ID,
+		Name:       "MCP 服务",
+		Type:       model.MenuTypeMenu,
+		Path:       "/ai/tools/mcp",
+		Icon:       "PlugZap",
+		Permission: "ai:mcp:list",
+		Sort:       1,
+	}
+	if err := upsertMenu(&mcpMenu); err != nil {
+		return err
+	}
+
+	mcpButtons := []model.Menu{
 		{Name: "新增 MCP 服务", Type: model.MenuTypeButton, Permission: "ai:mcp:create", Sort: 1},
 		{Name: "编辑 MCP 服务", Type: model.MenuTypeButton, Permission: "ai:mcp:update", Sort: 2},
 		{Name: "删除 MCP 服务", Type: model.MenuTypeButton, Permission: "ai:mcp:delete", Sort: 3},
 		{Name: "测试 MCP 连接", Type: model.MenuTypeButton, Permission: "ai:mcp:test", Sort: 4},
+	}
+	seedButtons(mcpMenu.ID, mcpButtons)
+
+	var skillMenu model.Menu
+	skillMenu = model.Menu{
+		ParentID:   &toolDir.ID,
+		Name:       "技能包",
+		Type:       model.MenuTypeMenu,
+		Path:       "/ai/tools/skills",
+		Icon:       "Package",
+		Permission: "ai:skill:list",
+		Sort:       2,
+	}
+	if err := upsertMenu(&skillMenu); err != nil {
+		return err
+	}
+
+	skillButtons := []model.Menu{
 		{Name: "导入技能包", Type: model.MenuTypeButton, Permission: "ai:skill:create", Sort: 5},
 		{Name: "编辑技能包", Type: model.MenuTypeButton, Permission: "ai:skill:update", Sort: 6},
 		{Name: "删除技能包", Type: model.MenuTypeButton, Permission: "ai:skill:delete", Sort: 7},
 	}
-	for _, btn := range toolButtons {
-		var existing model.Menu
-		if err := db.Where("permission = ?", btn.Permission).First(&existing).Error; err != nil {
-			btn.ParentID = &toolMenu.ID
-			if err := db.Create(&btn).Error; err != nil {
-				slog.Error("seed: failed to create button menu", "permission", btn.Permission, "error", err)
-				continue
-			}
-			slog.Info("seed: created menu", "name", btn.Name, "permission", btn.Permission)
-		}
+	seedButtons(skillMenu.ID, skillButtons)
+
+	// 5. Agent 管理菜单 — 拆分为助手智能体和编码智能体
+	var assistantAgentMenu model.Menu
+	assistantAgentMenu = model.Menu{
+		ParentID:   &agentDir.ID,
+		Name:       "助手智能体",
+		Type:       model.MenuTypeMenu,
+		Path:       "/ai/assistant-agents",
+		Icon:       "Bot",
+		Permission: "ai:assistant-agent:list",
+		Sort:       0,
+	}
+	if err := upsertMenu(&assistantAgentMenu); err != nil {
+		return err
 	}
 
-	// 5. Agent 管理菜单
-	var agentMenu model.Menu
-	if err := db.Where("permission = ?", "ai:agent:list").First(&agentMenu).Error; err != nil {
-		agentMenu = model.Menu{
-			ParentID:   &aiDir.ID,
-			Name:       "Agent",
-			Type:       model.MenuTypeMenu,
-			Path:       "/ai/agents",
-			Icon:       "Bot",
-			Permission: "ai:agent:list",
-			Sort:       3,
-		}
-		if err := db.Create(&agentMenu).Error; err != nil {
-			return err
-		}
-		slog.Info("seed: created menu", "name", agentMenu.Name, "permission", agentMenu.Permission)
+	assistantButtons := []model.Menu{
+		{Name: "新增助手智能体", Type: model.MenuTypeButton, Permission: "ai:assistant-agent:create", Sort: 0},
+		{Name: "编辑助手智能体", Type: model.MenuTypeButton, Permission: "ai:assistant-agent:update", Sort: 1},
+		{Name: "删除助手智能体", Type: model.MenuTypeButton, Permission: "ai:assistant-agent:delete", Sort: 2},
+	}
+	seedButtons(assistantAgentMenu.ID, assistantButtons)
+
+	var codingAgentMenu model.Menu
+	codingAgentMenu = model.Menu{
+		ParentID:   &agentDir.ID,
+		Name:       "编码智能体",
+		Type:       model.MenuTypeMenu,
+		Path:       "/ai/coding-agents",
+		Icon:       "Code",
+		Permission: "ai:coding-agent:list",
+		Sort:       1,
+	}
+	if err := upsertMenu(&codingAgentMenu); err != nil {
+		return err
 	}
 
-	agentButtons := []model.Menu{
-		{Name: "新增 Agent", Type: model.MenuTypeButton, Permission: "ai:agent:create", Sort: 0},
-		{Name: "编辑 Agent", Type: model.MenuTypeButton, Permission: "ai:agent:update", Sort: 1},
-		{Name: "删除 Agent", Type: model.MenuTypeButton, Permission: "ai:agent:delete", Sort: 2},
+	codingButtons := []model.Menu{
+		{Name: "新增编码智能体", Type: model.MenuTypeButton, Permission: "ai:coding-agent:create", Sort: 0},
+		{Name: "编辑编码智能体", Type: model.MenuTypeButton, Permission: "ai:coding-agent:update", Sort: 1},
+		{Name: "删除编码智能体", Type: model.MenuTypeButton, Permission: "ai:coding-agent:delete", Sort: 2},
 	}
-	for _, btn := range agentButtons {
-		var existing model.Menu
-		if err := db.Where("permission = ?", btn.Permission).First(&existing).Error; err != nil {
-			btn.ParentID = &agentMenu.ID
-			if err := db.Create(&btn).Error; err != nil {
-				slog.Error("seed: failed to create button menu", "permission", btn.Permission, "error", err)
-				continue
-			}
-			slog.Info("seed: created menu", "name", btn.Name, "permission", btn.Permission)
+	seedButtons(codingAgentMenu.ID, codingButtons)
+
+	// Soft-delete old "Agent" menu (ai:agent:list) if it still exists
+	if err := db.Where("permission = ?", "ai:agent:list").Delete(&model.Menu{}).Error; err != nil {
+		slog.Warn("seed: failed to cleanup old agent menu", "error", err)
+	}
+	// Also clean up old agent button menus
+	for _, oldPerm := range []string{"ai:agent:create", "ai:agent:update", "ai:agent:delete"} {
+		if err := db.Where("permission = ?", oldPerm).Delete(&model.Menu{}).Error; err != nil {
+			slog.Warn("seed: failed to cleanup old agent button", "permission", oldPerm, "error", err)
 		}
 	}
 
 	// 7. Agent templates seed
 	agentTemplates := []AgentTemplate{
+		// Assistant templates
 		{
 			Name:        "通用助手",
 			Description: "通用 AI 助手，可回答问题、调用工具完成任务",
@@ -222,12 +329,69 @@ func seedAI(db *gorm.DB, enforcer *casbin.Enforcer) error {
 			}`),
 		},
 		{
-			Name:        "编程助手",
-			Description: "编程 AI 助手，在代码仓库中读写文件、执行命令",
+			Name:        "探索助手",
+			Description: "思维伙伴，帮助探索创意、梳理需求、头脑风暴",
+			Icon:        "Compass",
+			Type:        AgentTypeAssistant,
+			Config: model.JSONText(`{
+				"strategy": "react",
+				"systemPrompt": "你是一个探索型助手，擅长帮助用户梳理想法、发散思维、整理需求。用提问引导用户深入思考，而不是直接给出答案。",
+				"temperature": 0.9,
+				"maxTokens": 4096,
+				"maxTurns": 20
+			}`),
+		},
+		{
+			Name:        "支持助手",
+			Description: "内部技术支持助手，帮助团队成员解决技术问题",
+			Icon:        "LifeBuoy",
+			Type:        AgentTypeAssistant,
+			Config: model.JSONText(`{
+				"strategy": "react",
+				"systemPrompt": "你是一个内部技术支持助手，帮助团队成员解决日常技术问题。优先参考知识库中的内部文档，给出具体可操作的解决方案。",
+				"temperature": 0.5,
+				"maxTokens": 4096,
+				"maxTurns": 10
+			}`),
+		},
+		// Coding templates
+		{
+			Name:        "Claude Code",
+			Description: "基于 Claude Code 的编码智能体，适合复杂代码生成与重构",
 			Icon:        "Code",
 			Type:        AgentTypeCoding,
 			Config: model.JSONText(`{
 				"runtime": "claude-code",
+				"execMode": "local"
+			}`),
+		},
+		{
+			Name:        "OpenCode",
+			Description: "基于 OpenCode 的编码智能体，轻量级终端编程助手",
+			Icon:        "Terminal",
+			Type:        AgentTypeCoding,
+			Config: model.JSONText(`{
+				"runtime": "opencode",
+				"execMode": "local"
+			}`),
+		},
+		{
+			Name:        "Codex",
+			Description: "基于 OpenAI Codex 的编码智能体，擅长代码补全与生成",
+			Icon:        "Cpu",
+			Type:        AgentTypeCoding,
+			Config: model.JSONText(`{
+				"runtime": "codex",
+				"execMode": "local"
+			}`),
+		},
+		{
+			Name:        "Aider",
+			Description: "基于 Aider 的编码智能体，适合 Git 仓库内的增量编码",
+			Icon:        "GitBranch",
+			Type:        AgentTypeCoding,
+			Config: model.JSONText(`{
+				"runtime": "aider",
 				"execMode": "local"
 			}`),
 		},
@@ -403,7 +567,7 @@ func seedAI(db *gorm.DB, enforcer *casbin.Enforcer) error {
 		{"admin", "/api/v1/ai/skills/:id", "PUT"},
 		{"admin", "/api/v1/ai/skills/:id/active", "PATCH"},
 		{"admin", "/api/v1/ai/skills/:id", "DELETE"},
-		// Agents
+		// Agents (legacy — kept for internal use)
 		{"admin", "/api/v1/ai/agents", "GET"},
 		{"admin", "/api/v1/ai/agents", "POST"},
 		{"admin", "/api/v1/ai/agents/templates", "GET"},
@@ -413,6 +577,20 @@ func seedAI(db *gorm.DB, enforcer *casbin.Enforcer) error {
 		{"admin", "/api/v1/ai/agents/:id/memories", "GET"},
 		{"admin", "/api/v1/ai/agents/:id/memories", "POST"},
 		{"admin", "/api/v1/ai/agents/:id/memories/:mid", "DELETE"},
+		// Assistant agents (typed)
+		{"admin", "/api/v1/ai/assistant-agents", "GET"},
+		{"admin", "/api/v1/ai/assistant-agents", "POST"},
+		{"admin", "/api/v1/ai/assistant-agents/templates", "GET"},
+		{"admin", "/api/v1/ai/assistant-agents/:id", "GET"},
+		{"admin", "/api/v1/ai/assistant-agents/:id", "PUT"},
+		{"admin", "/api/v1/ai/assistant-agents/:id", "DELETE"},
+		// Coding agents (typed)
+		{"admin", "/api/v1/ai/coding-agents", "GET"},
+		{"admin", "/api/v1/ai/coding-agents", "POST"},
+		{"admin", "/api/v1/ai/coding-agents/templates", "GET"},
+		{"admin", "/api/v1/ai/coding-agents/:id", "GET"},
+		{"admin", "/api/v1/ai/coding-agents/:id", "PUT"},
+		{"admin", "/api/v1/ai/coding-agents/:id", "DELETE"},
 		// Sessions
 		{"admin", "/api/v1/ai/sessions", "GET"},
 		{"admin", "/api/v1/ai/sessions", "POST"},
@@ -426,6 +604,10 @@ func seedAI(db *gorm.DB, enforcer *casbin.Enforcer) error {
 
 	menuPerms := [][]string{
 		{"admin", "ai", "read"},
+		{"admin", "ai:group:agent", "read"},
+		{"admin", "ai:group:knowledge", "read"},
+		{"admin", "ai:group:tool", "read"},
+		{"admin", "ai:group:model-access", "read"},
 		{"admin", "ai:provider:list", "read"},
 		{"admin", "ai:provider:create", "read"},
 		{"admin", "ai:provider:update", "read"},
@@ -446,18 +628,30 @@ func seedAI(db *gorm.DB, enforcer *casbin.Enforcer) error {
 		// Tool registry
 		{"admin", "ai:tool:list", "read"},
 		{"admin", "ai:tool:update", "read"},
+		{"admin", "ai:mcp:list", "read"},
 		{"admin", "ai:mcp:create", "read"},
 		{"admin", "ai:mcp:update", "read"},
 		{"admin", "ai:mcp:delete", "read"},
 		{"admin", "ai:mcp:test", "read"},
+		{"admin", "ai:skill:list", "read"},
 		{"admin", "ai:skill:create", "read"},
 		{"admin", "ai:skill:update", "read"},
 		{"admin", "ai:skill:delete", "read"},
-		// Agent
+		// Agent (legacy — kept for internal use)
 		{"admin", "ai:agent:list", "read"},
 		{"admin", "ai:agent:create", "read"},
 		{"admin", "ai:agent:update", "read"},
 		{"admin", "ai:agent:delete", "read"},
+		// Assistant agent
+		{"admin", "ai:assistant-agent:list", "read"},
+		{"admin", "ai:assistant-agent:create", "read"},
+		{"admin", "ai:assistant-agent:update", "read"},
+		{"admin", "ai:assistant-agent:delete", "read"},
+		// Coding agent
+		{"admin", "ai:coding-agent:list", "read"},
+		{"admin", "ai:coding-agent:create", "read"},
+		{"admin", "ai:coding-agent:update", "read"},
+		{"admin", "ai:coding-agent:delete", "read"},
 	}
 
 	allPolicies := append(policies, menuPerms...)
@@ -465,6 +659,39 @@ func seedAI(db *gorm.DB, enforcer *casbin.Enforcer) error {
 		if has, _ := enforcer.HasPolicy(p); !has {
 			if _, err := enforcer.AddPolicy(p); err != nil {
 				slog.Error("seed: failed to add policy", "policy", p, "error", err)
+			}
+		}
+	}
+
+	// Permission migration: detect non-admin roles with old ai:agent:* perms,
+	// grant equivalent new ai:assistant-agent:* + ai:coding-agent:* perms, then remove old perms.
+	oldAgentPerms := []string{"ai:agent:list", "ai:agent:create", "ai:agent:update", "ai:agent:delete"}
+	for _, oldPerm := range oldAgentPerms {
+		// Find all roles that have this old permission
+		existingPolicies, _ := enforcer.GetFilteredPolicy(1, oldPerm, "read")
+		for _, ep := range existingPolicies {
+			role := ep[0]
+			if role == "admin" {
+				continue // admin already has new perms from the seed above
+			}
+			suffix := oldPerm[len("ai:agent:"):]
+			// Grant new typed perms
+			newPerms := []string{
+				"ai:assistant-agent:" + suffix,
+				"ai:coding-agent:" + suffix,
+			}
+			for _, np := range newPerms {
+				if has, _ := enforcer.HasPolicy([]string{role, np, "read"}); !has {
+					if _, err := enforcer.AddPolicy([]string{role, np, "read"}); err != nil {
+						slog.Error("seed: failed to migrate agent permission", "role", role, "perm", np, "error", err)
+					} else {
+						slog.Info("seed: migrated agent permission", "role", role, "old", oldPerm, "new", np)
+					}
+				}
+			}
+			// Remove old permission
+			if _, err := enforcer.RemovePolicy([]string{role, oldPerm, "read"}); err != nil {
+				slog.Warn("seed: failed to remove old agent permission", "role", role, "perm", oldPerm, "error", err)
 			}
 		}
 	}

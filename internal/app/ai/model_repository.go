@@ -111,6 +111,40 @@ func (r *ModelRepo) ListByProviderID(providerID uint) ([]AIModel, error) {
 	return models, nil
 }
 
+func (r *ModelRepo) TypeCountsForProviders(providerIDs []uint) (map[uint]map[string]int, error) {
+	if len(providerIDs) == 0 {
+		return map[uint]map[string]int{}, nil
+	}
+
+	type row struct {
+		ProviderID uint
+		Type       string
+		Count      int
+	}
+
+	var rows []row
+	if err := r.db.Model(&AIModel{}).
+		Select("provider_id, type, COUNT(*) as count").
+		Where("provider_id IN ?", providerIDs).
+		Group("provider_id, type").
+		Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+
+	counts := make(map[uint]map[string]int, len(providerIDs))
+	for _, id := range providerIDs {
+		counts[id] = map[string]int{}
+	}
+	for _, row := range rows {
+		if counts[row.ProviderID] == nil {
+			counts[row.ProviderID] = map[string]int{}
+		}
+		counts[row.ProviderID][row.Type] = row.Count
+	}
+
+	return counts, nil
+}
+
 func (r *ModelRepo) DB() *gorm.DB {
 	return r.db.DB
 }

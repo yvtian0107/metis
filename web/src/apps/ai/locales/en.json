@@ -109,8 +109,27 @@
     "urlInvalid": "Please enter a valid URL",
     "commandRequired": "Command is required"
   },
+  "menuGroup": {
+    "agents": "Agents",
+    "knowledge": "Knowledge",
+    "tools": "Tools",
+    "modelAccess": "Model Access"
+  },
+  "menu": {
+    "ai:agent:list": "Agent",
+    "ai:knowledge:list": "Knowledge Bases",
+    "ai:tool:list": "Built-in Tools",
+    "ai:mcp:list": "MCP Servers",
+    "ai:skill:list": "Skill Packs",
+    "ai:provider:list": "Providers"
+  },
   "tools": {
     "title": "Tools",
+    "navigation": {
+      "builtin": "Built-in Tools",
+      "mcp": "MCP Servers",
+      "skills": "Skill Packs"
+    },
     "tabs": {
       "builtinTools": "Built-in Tools",
       "mcpServers": "MCP Servers",
@@ -135,6 +154,22 @@
       "code": {
         "name": "Code Execution",
         "description": "Execute Python and Bash scripts in a sandboxed environment."
+      },
+      "general": {
+        "name": "General",
+        "description": "Get current time, user profile, and other basic utilities."
+      },
+      "itsm": {
+        "name": "IT Service Management",
+        "description": "Service matching, ticket creation, draft management, and other ITSM service desk capabilities."
+      },
+      "decision": {
+        "name": "Smart Decision",
+        "description": "Ticket context queries, knowledge search, participant resolution, and other workflow decision capabilities."
+      },
+      "organization": {
+        "name": "Organization",
+        "description": "Query personnel, department, and position relationships."
       }
     },
     "toolDefs": {
@@ -153,6 +188,90 @@
       "execute_script": {
         "name": "Execute Script",
         "description": "Run a Python or Bash script in a sandbox and return the output."
+      },
+      "general.current_time": {
+        "name": "Get Current Time",
+        "description": "Get the current time with optional IANA timezone support."
+      },
+      "system.current_user_profile": {
+        "name": "Get Current User Profile",
+        "description": "Read the current user's basic profile and organizational affiliations (department, position, role)."
+      },
+      "itsm.service_match": {
+        "name": "Service Match",
+        "description": "Search the service catalog and return the best matching service candidates."
+      },
+      "itsm.service_confirm": {
+        "name": "Service Confirm",
+        "description": "Confirm and lock the user's selected service."
+      },
+      "itsm.service_load": {
+        "name": "Service Load",
+        "description": "Load the collaboration spec, form definition, and action config for a service."
+      },
+      "itsm.new_request": {
+        "name": "New Request Context",
+        "description": "Reset the current session's old draft and service context."
+      },
+      "itsm.draft_prepare": {
+        "name": "Draft Prepare",
+        "description": "Register the current draft version and enter user confirmation state."
+      },
+      "itsm.draft_confirm": {
+        "name": "Draft Confirm",
+        "description": "Called after user confirms the draft, allowing ticket creation to proceed."
+      },
+      "itsm.validate_participants": {
+        "name": "Validate Participants",
+        "description": "Validate that approval participants are reachable before creating a ticket."
+      },
+      "itsm.ticket_create": {
+        "name": "Create Ticket",
+        "description": "Create an ITSM ticket from the service request."
+      },
+      "itsm.my_tickets": {
+        "name": "My Tickets",
+        "description": "Query the current user's active ticket list."
+      },
+      "itsm.ticket_withdraw": {
+        "name": "Withdraw Ticket",
+        "description": "Withdraw a specific ticket by ticket code."
+      },
+      "decision.ticket_context": {
+        "name": "Ticket Context",
+        "description": "Query the full ticket context including form data, SLA status, and activity history."
+      },
+      "decision.knowledge_search": {
+        "name": "Knowledge Search",
+        "description": "Search knowledge bases associated with the service for relevant snippets."
+      },
+      "decision.resolve_participant": {
+        "name": "Resolve Participant",
+        "description": "Resolve specific users by participant type."
+      },
+      "decision.user_workload": {
+        "name": "User Workload",
+        "description": "Check a user's current ticket workload to help balance assignments."
+      },
+      "decision.similar_history": {
+        "name": "Similar History",
+        "description": "Query completed tickets under the same service for historical patterns."
+      },
+      "decision.sla_status": {
+        "name": "SLA Status",
+        "description": "Query the ticket's SLA status and urgency assessment."
+      },
+      "decision.list_actions": {
+        "name": "List Actions",
+        "description": "List available automation actions for the current service."
+      },
+      "decision.execute_action": {
+        "name": "Execute Action",
+        "description": "Synchronously execute a configured automation action and return the result."
+      },
+      "organization.org_context": {
+        "name": "Organization Context",
+        "description": "Query personnel, department, and position relationships for workflow decisions."
       }
     },
     "mcp": {

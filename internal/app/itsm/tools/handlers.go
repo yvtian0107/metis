@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 
 	"metis/internal/app"
@@ -19,17 +20,17 @@ type ToolHandler func(ctx context.Context, userID uint, args json.RawMessage) (j
 
 // ServiceDeskState represents the multi-turn conversation state for the service desk flow.
 type ServiceDeskState struct {
-	Stage                string         `json:"stage"` // idle|candidates_ready|service_selected|service_loaded|awaiting_confirmation|confirmed
-	CandidateServiceIDs  []uint         `json:"candidate_service_ids,omitempty"`
-	TopMatchServiceID    uint           `json:"top_match_service_id,omitempty"`
-	ConfirmedServiceID   uint           `json:"confirmed_service_id,omitempty"`
-	ConfirmationRequired bool           `json:"confirmation_required"`
-	LoadedServiceID      uint           `json:"loaded_service_id,omitempty"`
-	DraftSummary         string         `json:"draft_summary,omitempty"`
-	DraftFormData        map[string]any `json:"draft_form_data,omitempty"`
-	DraftVersion         int            `json:"draft_version"`
-	ConfirmedDraftVersion int           `json:"confirmed_draft_version"`
-	FieldsHash           string         `json:"fields_hash,omitempty"`
+	Stage                 string         `json:"stage"` // idle|candidates_ready|service_selected|service_loaded|awaiting_confirmation|confirmed
+	CandidateServiceIDs   []uint         `json:"candidate_service_ids,omitempty"`
+	TopMatchServiceID     uint           `json:"top_match_service_id,omitempty"`
+	ConfirmedServiceID    uint           `json:"confirmed_service_id,omitempty"`
+	ConfirmationRequired  bool           `json:"confirmation_required"`
+	LoadedServiceID       uint           `json:"loaded_service_id,omitempty"`
+	DraftSummary          string         `json:"draft_summary,omitempty"`
+	DraftFormData         map[string]any `json:"draft_form_data,omitempty"`
+	DraftVersion          int            `json:"draft_version"`
+	ConfirmedDraftVersion int            `json:"confirmed_draft_version"`
+	FieldsHash            string         `json:"fields_hash,omitempty"`
 }
 
 // validTransitions defines the allowed stage transitions.
@@ -240,7 +241,18 @@ func defaultState() *ServiceDeskState {
 }
 
 func hashFormData(data map[string]any) string {
-	b, _ := json.Marshal(data)
+	// Build deterministic JSON by sorting map keys
+	keys := make([]string, 0, len(data))
+	for k := range data {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	sorted := make([]map[string]any, 0, len(keys))
+	for _, k := range keys {
+		sorted = append(sorted, map[string]any{"k": k, "v": data[k]})
+	}
+	b, _ := json.Marshal(sorted)
 	h := sha256.Sum256(b)
 	return fmt.Sprintf("%x", h[:8])
 }
@@ -321,7 +333,7 @@ func serviceMatchHandler(op ServiceDeskOperator, store StateStore) ToolHandler {
 
 		return mustMarshal(map[string]any{
 			"query":                 p.Query,
-			"matches":              matches,
+			"matches":               matches,
 			"confirmation_required": confirmationRequired,
 			"selected_service_id":   selectedServiceID,
 		}), nil

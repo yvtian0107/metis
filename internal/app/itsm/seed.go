@@ -219,6 +219,7 @@ func seedMenus(db *gorm.DB) error {
 		{Name: "指派工单", Type: model.MenuTypeButton, Permission: "itsm:ticket:assign", Sort: 1},
 		{Name: "完结工单", Type: model.MenuTypeButton, Permission: "itsm:ticket:complete", Sort: 2},
 		{Name: "取消工单", Type: model.MenuTypeButton, Permission: "itsm:ticket:cancel", Sort: 3},
+		{Name: "工单覆写", Type: model.MenuTypeButton, Permission: "itsm:ticket:override", Sort: 4},
 	})
 
 	// 我的工单
@@ -389,6 +390,7 @@ func seedPolicies(enforcer *casbin.Enforcer) error {
 		{"admin", "itsm:ticket:assign", "read"},
 		{"admin", "itsm:ticket:complete", "read"},
 		{"admin", "itsm:ticket:cancel", "read"},
+		{"admin", "itsm:ticket:override", "read"},
 		{"admin", "itsm:ticket:mine", "read"},
 		{"admin", "itsm:ticket:todo", "read"},
 		{"admin", "itsm:ticket:history", "read"},
@@ -510,7 +512,7 @@ func seedServiceDefinitions(db *gorm.DB) error {
 			Description:       "用于验证请求节点预检动作、审批后自动放行动作与工单闭环。",
 			CatalogCode:       "application-platform:database",
 			SLACode:           "infra-change",
-			CollaborationSpec: `用户提交生产数据库备份白名单临时放行申请。系统先进入申请人请求节点，并在进入节点时自动执行预检动作，校验目标数据库、运维来源 IP 和放行时间窗信息是否齐备。申请人提交后，交给信息部的数据库管理员岗位审批，审批参与者类型必须使用 position_department，部门编码使用 it，岗位编码使用 dba_admin。审批通过后，在离开审批节点时自动执行白名单放行动作，并在动作成功后直接结束流程。`,
+			CollaborationSpec: `用户提交生产数据库备份白名单临时放行申请。系统先进入申请人请求节点，并在进入节点时自动执行预检动作，校验目标数据库、运维来源 IP 和放行时间窗信息是否齐备。申请人提交后，交给信息部的数据库管理员岗位审批，审批参与者类型必须使用 position_department，部门编码使用 it，岗位编码使用 db_admin。审批通过后，在离开审批节点时自动执行白名单放行动作，并在动作成功后直接结束流程。`,
 			Actions: []ServiceAction{
 				{
 					Name: "备份白名单预检", Code: "backup_whitelist_precheck",

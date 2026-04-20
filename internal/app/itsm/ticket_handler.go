@@ -407,9 +407,9 @@ func (h *TicketHandler) Timeline(c *gin.Context) {
 }
 
 type ProgressTicketRequest struct {
-	ActivityID uint              `json:"activityId" binding:"required"`
-	Outcome    string            `json:"outcome" binding:"required"`
-	Result     json.RawMessage   `json:"result"`
+	ActivityID uint            `json:"activityId" binding:"required"`
+	Outcome    string          `json:"outcome" binding:"required"`
+	Result     json.RawMessage `json:"result"`
 }
 
 func (h *TicketHandler) Progress(c *gin.Context) {
@@ -452,9 +452,9 @@ func (h *TicketHandler) Progress(c *gin.Context) {
 }
 
 type SignalTicketRequest struct {
-	ActivityID uint              `json:"activityId" binding:"required"`
-	Outcome    string            `json:"outcome" binding:"required"`
-	Data       json.RawMessage   `json:"data"`
+	ActivityID uint            `json:"activityId" binding:"required"`
+	Outcome    string          `json:"outcome" binding:"required"`
+	Data       json.RawMessage `json:"data"`
 }
 
 func (h *TicketHandler) Signal(c *gin.Context) {
@@ -502,8 +502,10 @@ func (h *TicketHandler) Activities(c *gin.Context) {
 		handler.Fail(c, http.StatusBadRequest, "invalid id")
 		return
 	}
+	userID, _ := c.Get("userId")
+	operatorID := userID.(uint)
 
-	activities, err := h.svc.GetActivities(id)
+	activities, err := h.svc.GetActivities(id, operatorID)
 	if err != nil {
 		handler.Fail(c, http.StatusInternalServerError, err.Error())
 		return
@@ -542,6 +544,10 @@ func (h *TicketHandler) ConfirmActivity(c *gin.Context) {
 			handler.Fail(c, http.StatusBadRequest, err.Error())
 		case errors.Is(err, engine.ErrActivityNotFound):
 			handler.Fail(c, http.StatusNotFound, err.Error())
+		case errors.Is(err, ErrNotApprover):
+			handler.Fail(c, http.StatusForbidden, err.Error())
+		case errors.Is(err, ErrActivityAlready):
+			handler.Fail(c, http.StatusConflict, err.Error())
 		default:
 			handler.Fail(c, http.StatusInternalServerError, err.Error())
 		}
@@ -590,6 +596,10 @@ func (h *TicketHandler) RejectActivity(c *gin.Context) {
 			handler.Fail(c, http.StatusBadRequest, err.Error())
 		case errors.Is(err, engine.ErrActivityNotFound):
 			handler.Fail(c, http.StatusNotFound, err.Error())
+		case errors.Is(err, ErrNotApprover):
+			handler.Fail(c, http.StatusForbidden, err.Error())
+		case errors.Is(err, ErrActivityAlready):
+			handler.Fail(c, http.StatusConflict, err.Error())
 		default:
 			handler.Fail(c, http.StatusInternalServerError, err.Error())
 		}

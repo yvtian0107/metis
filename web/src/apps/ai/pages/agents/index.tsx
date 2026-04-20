@@ -3,7 +3,7 @@ import { useNavigate } from "react-router"
 import { useTranslation } from "react-i18next"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import {
-  Plus, Search, Bot, Code2, BrainCircuit, MessageSquare,
+  Plus, Search, Bot, SquareTerminal, MessageSquare,
   MoreHorizontal, Pencil, ExternalLink, Trash2, Loader2,
 } from "lucide-react"
 import { usePermission } from "@/hooks/use-permission"
@@ -28,9 +28,9 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 
-const TYPE_CONFIG: Record<string, { icon: typeof Bot; gradient: string }> = {
-  assistant: { icon: BrainCircuit, gradient: "from-violet-500/10 to-indigo-500/10" },
-  coding: { icon: Code2, gradient: "from-emerald-500/10 to-teal-500/10" },
+const TYPE_CONFIG: Record<string, { icon: typeof Bot }> = {
+  assistant: { icon: Bot },
+  coding: { icon: SquareTerminal },
 }
 
 function AgentCard({
@@ -50,72 +50,76 @@ function AgentCard({
 }) {
   const { t } = useTranslation(["ai", "common"])
   const navigate = useNavigate()
-  const config = TYPE_CONFIG[agent.type] ?? { icon: Bot, gradient: "from-gray-500/10 to-gray-400/10" }
+  const config = TYPE_CONFIG[agent.type] ?? { icon: Bot }
   const Icon = config.icon
   const isChatting = chattingId === agent.id
 
   return (
-    <div className={`group relative flex flex-col gap-3 rounded-lg border bg-card p-4 transition-all duration-200 hover:shadow-sm hover:border-primary/30 ${!agent.isActive ? "opacity-50" : ""}`}>
+    <div className={`group relative flex min-h-[164px] flex-col rounded-xl border bg-card p-4 transition-all duration-200 hover:border-border/90 hover:shadow-sm ${!agent.isActive ? "opacity-55" : ""}`}>
       <div className="flex items-start gap-3">
-        <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-gradient-to-br ${config.gradient}`}>
-          <Icon className="h-4.5 w-4.5 text-foreground/70" />
+        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border bg-muted/35">
+          <Icon className="h-5 w-5 text-foreground/80" />
         </div>
         <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
-            <h3 className="font-medium text-sm truncate">{agent.name}</h3>
-            <Badge variant="outline" className="shrink-0 text-[10px] px-1.5 py-0">
-              {t(`ai:agents.agentTypes.${agent.type}`)}
-            </Badge>
-          </div>
-          <p className="text-xs text-muted-foreground truncate mt-0.5">
-            {agent.description || t(`ai:agents.agentTypes.${agent.type}`)}
-          </p>
-        </div>
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <h3 className="truncate text-base font-semibold leading-tight">{agent.name}</h3>
+                <Badge variant="outline" className="shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
+                  {t(`ai:agents.agentTypes.${agent.type}`)}
+                </Badge>
+              </div>
+              <p className="mt-1.5 line-clamp-2 text-sm leading-5 text-muted-foreground">
+                {agent.description || t(`ai:agents.agentTypes.${agent.type}`)}
+              </p>
+            </div>
 
-        {(canUpdate || canDelete) && (
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-7 w-7 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
-              >
-                <MoreHorizontal className="h-4 w-4" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              {canUpdate && (
-                <DropdownMenuItem onClick={() => navigate(`/ai/agents/${agent.id}/edit`)}>
-                  <Pencil className="mr-2 h-3.5 w-3.5" />
-                  {t("common:edit")}
-                </DropdownMenuItem>
-              )}
-              <DropdownMenuItem onClick={() => navigate(`/ai/agents/${agent.id}`)}>
-                <ExternalLink className="mr-2 h-3.5 w-3.5" />
-                {t("ai:agents.viewDetail")}
-              </DropdownMenuItem>
-              {canDelete && (
-                <>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem className="text-destructive focus:text-destructive" onClick={onDelete}>
-                    <Trash2 className="mr-2 h-3.5 w-3.5" />
-                    {t("common:delete")}
+            {(canUpdate || canDelete) && (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8 shrink-0 opacity-0 transition-opacity group-hover:opacity-100"
+                  >
+                    <MoreHorizontal className="h-4 w-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  {canUpdate && (
+                    <DropdownMenuItem onClick={() => navigate(`/ai/agents/${agent.id}/edit`)}>
+                      <Pencil className="mr-2 h-3.5 w-3.5" />
+                      {t("common:edit")}
+                    </DropdownMenuItem>
+                  )}
+                  <DropdownMenuItem onClick={() => navigate(`/ai/agents/${agent.id}`)}>
+                    <ExternalLink className="mr-2 h-3.5 w-3.5" />
+                    {t("ai:agents.viewDetail")}
                   </DropdownMenuItem>
-                </>
-              )}
-            </DropdownMenuContent>
-          </DropdownMenu>
-        )}
+                  {canDelete && (
+                    <>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem className="text-destructive focus:text-destructive" onClick={onDelete}>
+                        <Trash2 className="mr-2 h-3.5 w-3.5" />
+                        {t("common:delete")}
+                      </DropdownMenuItem>
+                    </>
+                  )}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
+          </div>
+        </div>
       </div>
 
-      <div className="mt-auto flex items-center justify-between pt-1">
-        <Badge variant={agent.isActive ? "default" : "secondary"} className="text-[10px]">
+      <div className="mt-auto flex items-center justify-between border-t pt-3">
+        <Badge variant="secondary" className="h-7 rounded-full px-2.5 text-[11px] font-medium text-foreground">
           {agent.isActive ? t("ai:statusLabels.active") : t("ai:statusLabels.inactive")}
         </Badge>
         <Button
           variant="ghost"
           size="sm"
-          className="h-7 gap-1.5 text-xs"
+          className="h-8 gap-1.5 px-2.5 text-xs font-medium"
           disabled={!agent.isActive || isChatting}
           onClick={(e) => { e.stopPropagation(); onChat() }}
         >
@@ -209,7 +213,7 @@ export function Component() {
           )}
         </div>
       ) : (
-        <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+        <div className="grid grid-cols-[repeat(auto-fill,minmax(340px,1fr))] gap-4">
           {agents.map((agent) => (
             <AgentCard
               key={agent.id}

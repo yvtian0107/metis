@@ -22,6 +22,7 @@
     "daysAgo": "{{count}} days ago"
   },
   "menu": {
+    "ai": "AI",
     "system": "System",
     "system:user:list": "Users",
     "system:role:list": "Roles",

@@ -256,6 +256,7 @@ func seedPositions(db *gorm.DB) error {
 		{Name: "应用管理员", Code: "app_admin", Description: "负责业务应用系统的部署和运维管理", Sort: 5},
 		{Name: "运维管理员", Code: "ops_admin", Description: "负责整体运维工作的协调和管理", Sort: 6},
 		{Name: "总部助理", Code: "assistant", Description: "负责总部审批与流程协作", Sort: 7},
+		{Name: "串行评审人", Code: "serial_reviewer", Description: "负责内置高风险变更流程的首级串行审批", Sort: 8},
 	}
 
 	for _, pos := range positions {
@@ -276,8 +277,8 @@ func seedPositions(db *gorm.DB) error {
 func seedDepartmentPositions(db *gorm.DB) error {
 	// Map department codes to allowed position codes
 	deptPositions := map[string][]string{
-		"headquarters": {"assistant"},
-		"it":           {"it_admin", "network_admin", "security_admin", "db_admin"},
+		"headquarters": {"assistant", "serial_reviewer"},
+		"it":           {"it_admin", "network_admin", "security_admin", "db_admin", "ops_admin"},
 		"rd":           {"app_admin"},
 		"ops":          {"ops_admin", "it_admin", "network_admin"},
 	}

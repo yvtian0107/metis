@@ -12,8 +12,8 @@ import (
 )
 
 type TicketRepo struct {
-	db     *database.DB
-	seqMu  sync.Mutex
+	db    *database.DB
+	seqMu sync.Mutex
 }
 
 func NewTicketRepo(i do.Injector) (*TicketRepo, error) {
@@ -258,6 +258,7 @@ type ApprovalItem struct {
 	// Assignment fields (zero for ai_confirm items)
 	AssignmentID    uint   `json:"assignmentId"`
 	ParticipantType string `json:"participantType"`
+	CanAct          bool   `json:"canAct"`
 	// Discriminator
 	ApprovalKind string `json:"approvalKind"`
 }
@@ -265,7 +266,7 @@ type ApprovalItem struct {
 // ListApprovals returns pending approval items: workflow approvals (via assignment) and AI decision confirmations (pending_approval status).
 func (r *TicketRepo) ListApprovals(userID uint, positionIDs []uint, deptIDs []uint, page, pageSize int) ([]ApprovalItem, int64, error) {
 	// Build user matching condition for workflow approvals
-	userCond := r.db.Where("a.user_id = ?", userID)
+	userCond := r.db.Where("a.user_id = ? OR a.assignee_id = ?", userID, userID)
 	if len(positionIDs) > 0 {
 		userCond = userCond.Or("a.position_id IN ?", positionIDs)
 	}
@@ -283,10 +284,13 @@ func (r *TicketRepo) ListApprovals(userID uint, positionIDs []uint, deptIDs []ui
 			r.db.Where(
 				// Workflow approvals: approve activity + active status + user match
 				r.db.Where("act.activity_type = ? AND act.status IN ?", "approve", []string{"pending", "in_progress"}).
+					Where("a.status = ?", AssignmentPending).
 					Where(userCond),
 			).Or(
-				// AI confirmations: pending_approval status (no assignment needed)
-				"act.status = ?", "pending_approval",
+				// AI confirmations: pending_approval status owned by actionable assignments only
+				r.db.Where("act.status = ?", "pending_approval").
+					Where("a.status = ?", AssignmentPending).
+					Where(userCond),
 			),
 		)
 
@@ -310,6 +314,7 @@ func (r *TicketRepo) ListApprovals(userID uint, positionIDs []uint, deptIDs []ui
 			act.id AS activity_id, act.name AS activity_name, act.activity_type, act.status AS activity_status,
 			act.form_schema, act.ai_confidence, act.ai_reasoning, act.started_at, act.created_at,
 			COALESCE(a.id, 0) AS assignment_id, COALESCE(a.participant_type, '') AS participant_type,
+			CASE WHEN COALESCE(a.id, 0) > 0 THEN true ELSE false END AS can_act,
 			CASE WHEN act.status = 'pending_approval' THEN 'ai_confirm' ELSE 'workflow' END AS approval_kind`).
 		Order("p.value ASC, act.created_at ASC").
 		Offset(offset).Limit(pageSize).
@@ -321,7 +326,7 @@ func (r *TicketRepo) ListApprovals(userID uint, positionIDs []uint, deptIDs []ui
 
 // CountApprovals returns the combined count of pending workflow approvals and AI decision confirmations.
 func (r *TicketRepo) CountApprovals(userID uint, positionIDs []uint, deptIDs []uint) (int64, error) {
-	userCond := r.db.Where("a.user_id = ?", userID)
+	userCond := r.db.Where("a.user_id = ? OR a.assignee_id = ?", userID, userID)
 	if len(positionIDs) > 0 {
 		userCond = userCond.Or("a.position_id IN ?", positionIDs)
 	}
@@ -336,9 +341,12 @@ func (r *TicketRepo) CountApprovals(userID uint, positionIDs []uint, deptIDs []u
 		Where(
 			r.db.Where(
 				r.db.Where("act.activity_type = ? AND act.status IN ?", "approve", []string{"pending", "in_progress"}).
+					Where("a.status = ?", AssignmentPending).
 					Where(userCond),
 			).Or(
-				"act.status = ?", "pending_approval",
+				r.db.Where("act.status = ?", "pending_approval").
+					Where("a.status = ?", AssignmentPending).
+					Where(userCond),
 			),
 		)
 

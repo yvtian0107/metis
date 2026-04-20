@@ -16,14 +16,16 @@ import (
 )
 
 type ProviderHandler struct {
-	svc      *ProviderService
-	repo     *ProviderRepo
+	svc       *ProviderService
+	repo      *ProviderRepo
+	modelRepo *ModelRepo
 }
 
 func NewProviderHandler(i do.Injector) (*ProviderHandler, error) {
 	return &ProviderHandler{
-		svc:  do.MustInvoke[*ProviderService](i),
-		repo: do.MustInvoke[*ProviderRepo](i),
+		svc:       do.MustInvoke[*ProviderService](i),
+		repo:      do.MustInvoke[*ProviderRepo](i),
+		modelRepo: do.MustInvoke[*ModelRepo](i),
 	}, nil
 }
 
@@ -52,7 +54,7 @@ func (h *ProviderHandler) Create(c *gin.Context) {
 	c.Set("audit_resource_id", strconv.Itoa(int(p.ID)))
 	c.Set("audit_summary", "Created AI provider: "+p.Name)
 
-	handler.OK(c, p.ToResponse(h.svc.MaskAPIKey(p), 0))
+	handler.OK(c, p.ToResponse(h.svc.MaskAPIKey(p), 0, nil))
 }
 
 func (h *ProviderHandler) List(c *gin.Context) {
@@ -74,10 +76,11 @@ func (h *ProviderHandler) List(c *gin.Context) {
 		ids[i] = p.ID
 	}
 	modelCounts, _ := h.repo.ModelCountsForProviders(ids)
+	modelTypeCounts, _ := h.modelRepo.TypeCountsForProviders(ids)
 
 	items := make([]ProviderResponse, len(providers))
 	for i, p := range providers {
-		items[i] = p.ToResponse(h.svc.MaskAPIKey(&p), modelCounts[p.ID])
+		items[i] = p.ToResponse(h.svc.MaskAPIKey(&p), modelCounts[p.ID], modelTypeCounts[p.ID])
 	}
 
 	handler.OK(c, gin.H{"items": items, "total": total})
@@ -95,7 +98,8 @@ func (h *ProviderHandler) Get(c *gin.Context) {
 		return
 	}
 	count, _ := h.repo.CountModelsByProviderID(p.ID)
-	handler.OK(c, p.ToResponse(h.svc.MaskAPIKey(p), int(count)))
+	typeCounts, _ := h.modelRepo.TypeCountsForProviders([]uint{p.ID})
+	handler.OK(c, p.ToResponse(h.svc.MaskAPIKey(p), int(count), typeCounts[p.ID]))
 }
 
 type updateProviderReq struct {
@@ -129,7 +133,8 @@ func (h *ProviderHandler) Update(c *gin.Context) {
 	c.Set("audit_summary", "Updated AI provider: "+p.Name)
 
 	count, _ := h.repo.CountModelsByProviderID(p.ID)
-	handler.OK(c, p.ToResponse(h.svc.MaskAPIKey(p), int(count)))
+	typeCounts, _ := h.modelRepo.TypeCountsForProviders([]uint{p.ID})
+	handler.OK(c, p.ToResponse(h.svc.MaskAPIKey(p), int(count), typeCounts[p.ID]))
 }
 
 func (h *ProviderHandler) Delete(c *gin.Context) {

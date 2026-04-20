@@ -12,6 +12,21 @@ import (
 	"metis/internal/llm"
 )
 
+type recordingStreamEncoder struct {
+	encoded []Event
+	closed  bool
+}
+
+func (e *recordingStreamEncoder) Encode(evt Event) error {
+	e.encoded = append(e.encoded, evt)
+	return nil
+}
+
+func (e *recordingStreamEncoder) Close() error {
+	e.closed = true
+	return nil
+}
+
 func newGatewayForTest(t *testing.T, db *gorm.DB, mockLLM llm.Client) *AgentGateway {
 	t.Helper()
 	agentRepo := &AgentRepo{db: &database.DB{DB: db}}
@@ -25,15 +40,18 @@ func newGatewayForTest(t *testing.T, db *gorm.DB, mockLLM llm.Client) *AgentGate
 	memorySvc := &MemoryService{repo: memoryRepo}
 
 	return &AgentGateway{
-		agentSvc:              agentSvc,
-		sessionSvc:            sessionSvc,
-		memorySvc:             memorySvc,
-		agentRepo:             agentRepo,
-		modelRepo:             modelRepo,
-		providerRepo:          providerRepo,
-		encKey:                newTestEncryptionKey(t),
-		toolRegistries:        []ToolHandlerRegistry{NewGeneralToolRegistry(nil, nil)},
-		executions:            make(map[uint]context.CancelFunc),
+		agentSvc:       agentSvc,
+		sessionSvc:     sessionSvc,
+		memorySvc:      memorySvc,
+		agentRepo:      agentRepo,
+		modelRepo:      modelRepo,
+		providerRepo:   providerRepo,
+		encKey:         newTestEncryptionKey(t),
+		toolRegistries: []ToolHandlerRegistry{NewGeneralToolRegistry(nil, nil)},
+		executions:     make(map[uint]context.CancelFunc),
+		streamEncoderFactory: func(w io.Writer) StreamEncoder {
+			return NewUIMessageStreamEncoder(w)
+		},
 		testLLMClientOverride: mockLLM,
 	}
 }
@@ -128,7 +146,7 @@ func TestGateway_Run_CompletesSession(t *testing.T) {
 
 	session, _ := gw.sessionSvc.Create(agent.ID, 1)
 
-	reader, err := gw.Run(context.Background(), session.ID)
+	reader, err := gw.Run(context.Background(), session.ID, 1)
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
@@ -137,7 +155,7 @@ func TestGateway_Run_CompletesSession(t *testing.T) {
 	// Allow goroutine to finish
 	time.Sleep(100 * time.Millisecond)
 
-	loaded, _ := gw.sessionSvc.Get(session.ID)
+	loaded, _ := gw.sessionSvc.GetOwned(session.ID, 1)
 	if loaded.Status != SessionStatusCompleted {
 		t.Errorf("status: expected %q, got %q", SessionStatusCompleted, loaded.Status)
 	}
@@ -166,14 +184,14 @@ func TestGateway_Run_ErrorSession(t *testing.T) {
 	_ = gw.agentSvc.Create(agent)
 	session, _ := gw.sessionSvc.Create(agent.ID, 1)
 
-	reader, err := gw.Run(context.Background(), session.ID)
+	reader, err := gw.Run(context.Background(), session.ID, 1)
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
 	_ = drainReader(reader)
 	time.Sleep(100 * time.Millisecond)
 
-	loaded, _ := gw.sessionSvc.Get(session.ID)
+	loaded, _ := gw.sessionSvc.GetOwned(session.ID, 1)
 	if loaded.Status != SessionStatusError {
 		t.Errorf("status: expected %q, got %q", SessionStatusError, loaded.Status)
 	}
@@ -191,7 +209,7 @@ func TestGateway_Run_CancelledSession(t *testing.T) {
 	session, _ := gw.sessionSvc.Create(agent.ID, 1)
 
 	ctx, cancel := context.WithCancel(context.Background())
-	reader, err := gw.Run(ctx, session.ID)
+	reader, err := gw.Run(ctx, session.ID, 1)
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
@@ -201,9 +219,56 @@ func TestGateway_Run_CancelledSession(t *testing.T) {
 	_ = drainReader(reader)
 	time.Sleep(100 * time.Millisecond)
 
-	loaded, _ := gw.sessionSvc.Get(session.ID)
+	loaded, _ := gw.sessionSvc.GetOwned(session.ID, 1)
 	if loaded.Status != SessionStatusCancelled {
 		t.Errorf("status: expected %q, got %q", SessionStatusCancelled, loaded.Status)
+	}
+}
+
+func TestGateway_Run_CrossUserSessionReturnsNotFound(t *testing.T) {
+	db := setupTestDB(t)
+	gw := newGatewayForTest(t, db, nil)
+
+	modelID := uint(1)
+	agent := &Agent{Name: "Agent", Type: AgentTypeAssistant, ModelID: &modelID, Strategy: AgentStrategyReact, CreatedBy: 1, Visibility: AgentVisibilityTeam}
+	_ = gw.agentSvc.Create(agent)
+	session, _ := gw.sessionSvc.Create(agent.ID, 1)
+
+	if _, err := gw.Run(context.Background(), session.ID, 2); err != ErrSessionNotFound {
+		t.Fatalf("expected ErrSessionNotFound, got %v", err)
+	}
+}
+
+func TestGateway_Run_UsesConfiguredEncoderFactory(t *testing.T) {
+	db := setupTestDB(t)
+	mockLLM := newMockLLMClient([]llm.StreamEvent{
+		{Type: "content_delta", Content: "Hello!"},
+		{Type: "done", Usage: &llm.Usage{InputTokens: 2, OutputTokens: 2}},
+	}, nil)
+	gw := newGatewayForTest(t, db, mockLLM)
+
+	modelID := uint(1)
+	agent := &Agent{Name: "Agent", Type: AgentTypeAssistant, ModelID: &modelID, Strategy: AgentStrategyReact, CreatedBy: 1, Visibility: AgentVisibilityTeam}
+	_ = gw.agentSvc.Create(agent)
+	session, _ := gw.sessionSvc.Create(agent.ID, 1)
+
+	recorder := &recordingStreamEncoder{}
+	gw.streamEncoderFactory = func(w io.Writer) StreamEncoder {
+		return recorder
+	}
+
+	reader, err := gw.Run(context.Background(), session.ID, 1)
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	_ = drainReader(reader)
+	time.Sleep(100 * time.Millisecond)
+
+	if len(recorder.encoded) == 0 {
+		t.Fatal("expected encoder to receive events")
+	}
+	if !recorder.closed {
+		t.Fatal("expected encoder to be closed")
 	}
 }
 

@@ -301,7 +301,7 @@ export const taskApi = {
 
 // --- AI Agent types ---
 
-export interface AgentInfo {
+export interface AgentBase {
   id: number;
   name: string;
   description: string;
@@ -310,31 +310,46 @@ export interface AgentInfo {
   isActive: boolean;
   visibility: 'private' | 'team' | 'public';
   createdBy: number;
-  // assistant fields
-  strategy?: string;
-  modelId?: number;
-  systemPrompt?: string;
   temperature: number;
   maxTokens: number;
   maxTurns: number;
-  // coding fields
-  runtime?: string;
-  runtimeConfig?: Record<string, unknown>;
-  execMode?: string;
-  nodeId?: number;
-  workspace?: string;
-  // common
   instructions?: string;
   suggestedPrompts?: string[];
   createdAt: string;
   updatedAt: string;
 }
 
+export interface AssistantAgentInfo extends AgentBase {
+  type: 'assistant';
+  strategy?: string;
+  modelId?: number;
+  systemPrompt?: string;
+}
+
+export interface CodingAgentInfo extends AgentBase {
+  type: 'coding';
+  runtime?: string;
+  runtimeConfig?: Record<string, unknown>;
+  execMode?: string;
+  nodeId?: number;
+  workspace?: string;
+}
+
+export type AgentInfo = AssistantAgentInfo | CodingAgentInfo;
+
 export interface AgentWithBindings extends AgentInfo {
   toolIds: number[];
   skillIds: number[];
   mcpServerIds: number[];
   knowledgeBaseIds: number[];
+}
+
+interface AgentDetailResponse {
+  agent: AgentInfo;
+  toolIds?: number[];
+  skillIds?: number[];
+  mcpServerIds?: number[];
+  knowledgeBaseIds?: number[];
 }
 
 export interface AgentTemplate {
@@ -389,7 +404,19 @@ export const agentApi = {
     return api.get<PaginatedResponse<AgentInfo>>(`/api/v1/ai/agents?${p}`);
   },
 
-  get: (id: number) => api.get<AgentWithBindings>(`/api/v1/ai/agents/${id}`),
+  get: async (id: number) => {
+    const data = await api.get<AgentWithBindings | AgentDetailResponse>(`/api/v1/ai/agents/${id}`);
+    if ('agent' in data) {
+      return {
+        ...data.agent,
+        toolIds: data.toolIds ?? [],
+        skillIds: data.skillIds ?? [],
+        mcpServerIds: data.mcpServerIds ?? [],
+        knowledgeBaseIds: data.knowledgeBaseIds ?? [],
+      } satisfies AgentWithBindings;
+    }
+    return data;
+  },
 
   create: (data: Partial<AgentInfo> & {
     toolIds?: number[];

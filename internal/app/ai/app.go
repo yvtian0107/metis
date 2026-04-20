@@ -84,6 +84,8 @@ func (a *AIApp) Providers(i do.Injector) {
 	do.Provide(i, NewAgentRepo)
 	do.Provide(i, NewAgentService)
 	do.Provide(i, NewAgentHandler)
+	do.Provide(i, NewAssistantAgentHandler)
+	do.Provide(i, NewCodingAgentHandler)
 	do.Provide(i, NewSessionRepo)
 	do.Provide(i, NewSessionService)
 	do.Provide(i, NewSessionHandler)
@@ -196,7 +198,7 @@ func (a *AIApp) Routes(api *gin.RouterGroup) {
 		skills.DELETE("/:id", skillH.Delete)
 	}
 
-	// Agent runtime
+	// Agent runtime (legacy — kept for internal use)
 	agentH := do.MustInvoke[*AgentHandler](a.injector)
 	agents := api.Group("/ai/agents")
 	{
@@ -206,6 +208,29 @@ func (a *AIApp) Routes(api *gin.RouterGroup) {
 		agents.GET("/:id", agentH.Get)
 		agents.PUT("/:id", agentH.Update)
 		agents.DELETE("/:id", agentH.Delete)
+	}
+
+	// Typed agent routes
+	assistantH := do.MustInvoke[*AssistantAgentHandler](a.injector)
+	assistantAgents := api.Group("/ai/assistant-agents")
+	{
+		assistantAgents.POST("", assistantH.Create)
+		assistantAgents.GET("", assistantH.List)
+		assistantAgents.GET("/templates", assistantH.ListTemplates)
+		assistantAgents.GET("/:id", assistantH.Get)
+		assistantAgents.PUT("/:id", assistantH.Update)
+		assistantAgents.DELETE("/:id", assistantH.Delete)
+	}
+
+	codingH := do.MustInvoke[*CodingAgentHandler](a.injector)
+	codingAgents := api.Group("/ai/coding-agents")
+	{
+		codingAgents.POST("", codingH.Create)
+		codingAgents.GET("", codingH.List)
+		codingAgents.GET("/templates", codingH.ListTemplates)
+		codingAgents.GET("/:id", codingH.Get)
+		codingAgents.PUT("/:id", codingH.Update)
+		codingAgents.DELETE("/:id", codingH.Delete)
 	}
 
 	sessionH := do.MustInvoke[*SessionHandler](a.injector)

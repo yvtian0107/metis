@@ -152,6 +152,25 @@ func TestAgentService_Delete_Success(t *testing.T) {
 	}
 }
 
+func TestAgentService_GetAccessible_HidesPrivateAgentFromOthers(t *testing.T) {
+	db := setupTestDB(t)
+	svc := newAgentServiceForTest(t, db)
+
+	modelID := uint(1)
+	a := &Agent{Name: "Agent", Type: AgentTypeAssistant, ModelID: &modelID, CreatedBy: 1, Visibility: AgentVisibilityPrivate}
+	_ = svc.Create(a)
+
+	if _, err := svc.GetAccessible(a.ID, 2); err != ErrAgentNotFound {
+		t.Fatalf("expected ErrAgentNotFound, got %v", err)
+	}
+	if _, err := svc.GetOwned(a.ID, 2); err != ErrAgentNotFound {
+		t.Fatalf("expected ErrAgentNotFound, got %v", err)
+	}
+	if _, err := svc.GetAccessible(a.ID, 1); err != nil {
+		t.Fatalf("creator should access private agent: %v", err)
+	}
+}
+
 func TestAgentService_UpdateBindings_And_GetBindings(t *testing.T) {
 	db := setupTestDB(t)
 	svc := newAgentServiceForTest(t, db)

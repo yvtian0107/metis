@@ -8,15 +8,15 @@ import (
 )
 
 var (
-	ErrAgentNotFound     = errors.New("agent not found")
-	ErrAgentNameConflict = errors.New("agent name already exists")
-	ErrAgentCodeConflict = errors.New("agent code already exists")
+	ErrAgentNotFound           = errors.New("agent not found")
+	ErrAgentNameConflict       = errors.New("agent name already exists")
+	ErrAgentCodeConflict       = errors.New("agent code already exists")
 	ErrAgentHasRunningSessions = errors.New("agent has running sessions")
-	ErrInvalidAgentType  = errors.New("invalid agent type")
-	ErrNodeRequired      = errors.New("node_id is required for remote exec mode")
-	ErrModelRequired     = errors.New("model_id is required for assistant agent")
-	ErrRuntimeRequired   = errors.New("runtime is required for coding agent")
-	ErrCodeRequired      = errors.New("code is required for internal agent")
+	ErrInvalidAgentType        = errors.New("invalid agent type")
+	ErrNodeRequired            = errors.New("node_id is required for remote exec mode")
+	ErrModelRequired           = errors.New("model_id is required for assistant agent")
+	ErrRuntimeRequired         = errors.New("runtime is required for coding agent")
+	ErrCodeRequired            = errors.New("code is required for internal agent")
 )
 
 var ValidAgentTypes = map[string]bool{
@@ -72,6 +72,28 @@ func (s *AgentService) Create(a *Agent) error {
 
 func (s *AgentService) Get(id uint) (*Agent, error) {
 	a, err := s.repo.FindByID(id)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrAgentNotFound
+		}
+		return nil, err
+	}
+	return a, nil
+}
+
+func (s *AgentService) GetAccessible(id, userID uint) (*Agent, error) {
+	a, err := s.repo.FindAccessibleByID(id, userID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrAgentNotFound
+		}
+		return nil, err
+	}
+	return a, nil
+}
+
+func (s *AgentService) GetOwned(id, userID uint) (*Agent, error) {
+	a, err := s.repo.FindOwnedByID(id, userID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, ErrAgentNotFound
@@ -145,6 +167,43 @@ func (s *AgentService) validateByType(a *Agent) error {
 		}
 	}
 	return nil
+}
+
+// EnsureType checks that agent.Type matches expectedType; returns ErrAgentNotFound on mismatch.
+func (s *AgentService) EnsureType(a *Agent, expectedType string) error {
+	if a.Type != expectedType {
+		return ErrAgentNotFound
+	}
+	return nil
+}
+
+// GetAccessibleByType loads an agent visible to the user and verifies its type.
+func (s *AgentService) GetAccessibleByType(id, userID uint, expectedType string) (*Agent, error) {
+	a, err := s.GetAccessible(id, userID)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.EnsureType(a, expectedType); err != nil {
+		return nil, err
+	}
+	return a, nil
+}
+
+// GetOwnedByType loads an agent owned by the user and verifies its type.
+func (s *AgentService) GetOwnedByType(id, userID uint, expectedType string) (*Agent, error) {
+	a, err := s.GetOwned(id, userID)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.EnsureType(a, expectedType); err != nil {
+		return nil, err
+	}
+	return a, nil
+}
+
+// ListTemplatesByType returns agent templates filtered by type.
+func (s *AgentService) ListTemplatesByType(agentType string) ([]AgentTemplate, error) {
+	return s.repo.ListTemplatesByType(agentType)
 }
 
 // UpdateBindings replaces all bindings for the given agent

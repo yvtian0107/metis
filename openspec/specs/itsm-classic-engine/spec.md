@@ -1,10 +1,8 @@
-# Delta Spec: itsm-classic-engine
+## Purpose
 
-> Capability: itsm-classic-engine
-> Change: classic-engine-enterprise
-> Type: MODIFIED + ADDED
+ITSM ClassicEngine workflow engine -- token-based BPMN-style execution for classic service processes.
 
-## MODIFIED Requirements
+## Requirements
 
 ### Requirement: Progress method advances workflow
 
@@ -47,7 +45,24 @@ ClassicEngine.Progress() SHALL acquire a FOR UPDATE lock on the activity row and
 - THEN the engine SHALL parse bindings from `activity.FormSchema` and write process variables
 - AND the binding behavior SHALL be identical to the current implementation
 
-## ADDED Requirements
+### Requirement: Classic engine code organization
+The `classic.go` monolithic file SHALL be split into multiple files by responsibility. All functions SHALL remain in the `engine` package with unchanged signatures and behavior.
+
+#### Scenario: File split does not change behavior
+
+- WHEN classic engine files are reorganized
+- THEN all existing unit tests and BDD tests SHALL pass without modification
+
+#### Scenario: File organization by responsibility
+
+- WHEN the split is complete
+- THEN the files SHALL be organized as:
+  - `classic_core.go` -- Start/Progress/Cancel entry points and graph traversal
+  - `classic_nodes.go` -- Per-node-type processing functions
+  - `classic_activity.go` -- Activity creation, update, and query helpers
+  - `classic_token.go` -- ExecutionToken tree operations
+  - `classic_notify.go` -- Notification dispatch logic
+  - `classic_helpers.go` -- Type aliases, JSON helpers, and small utility functions
 
 ### Requirement: Timer task returns ErrNotReady when not yet due
 

@@ -18,6 +18,7 @@ type decisionToolDef struct {
 
 // decisionToolContext holds the shared context for all decision tool executions.
 type decisionToolContext struct {
+	ctx               context.Context
 	data              DecisionDataProvider
 	ticketID          uint
 	serviceID         uint
@@ -49,6 +50,11 @@ func buildDecisionToolDefs() []llm.ToolDef {
 		defs[i] = t.Def
 	}
 	return defs
+}
+
+// DecisionToolDefs exposes the persisted builtin decision tool definitions for seed sync.
+func DecisionToolDefs() []llm.ToolDef {
+	return buildDecisionToolDefs()
 }
 
 // --- Tool: decision.ticket_context ---
@@ -96,7 +102,7 @@ func toolTicketContext() decisionToolDef {
 			}
 
 			// Activity history
-			activities, _ := ctx.data.GetCompletedActivities(ctx.ticketID)
+			activities, _ := ctx.data.GetDecisionHistory(ctx.ticketID)
 
 			var history []map[string]any
 			for _, a := range activities {
@@ -110,6 +116,9 @@ func toolTicketContext() decisionToolDef {
 				}
 				if a.AIReasoning != "" {
 					entry["ai_reasoning"] = a.AIReasoning
+				}
+				if a.DecisionReasoning != "" {
+					entry["decision_reasoning"] = a.DecisionReasoning
 				}
 				history = append(history, entry)
 			}
@@ -188,7 +197,9 @@ func toolKnowledgeSearch() decisionToolDef {
 				Query string `json:"query"`
 				Limit int    `json:"limit"`
 			}
-			json.Unmarshal(args, &params)
+			if err := json.Unmarshal(args, &params); err != nil {
+				return toolError(fmt.Sprintf("参数格式错误: %v", err))
+			}
 			if params.Limit <= 0 {
 				params.Limit = 3
 			}
@@ -300,7 +311,9 @@ func toolUserWorkload() decisionToolDef {
 			var params struct {
 				UserID uint `json:"user_id"`
 			}
-			json.Unmarshal(args, &params)
+			if err := json.Unmarshal(args, &params); err != nil {
+				return toolError(fmt.Sprintf("参数格式错误: %v", err))
+			}
 
 			user, err := ctx.data.GetUserBasicInfo(params.UserID)
 			if err != nil {
@@ -312,8 +325,8 @@ func toolUserWorkload() decisionToolDef {
 
 			return json.Marshal(map[string]any{
 				"user_id":            user.ID,
-				"name":              user.Username,
-				"is_active":         user.IsActive,
+				"name":               user.Username,
+				"is_active":          user.IsActive,
 				"pending_activities": pendingCount,
 			})
 		},
@@ -338,7 +351,9 @@ func toolSimilarHistory() decisionToolDef {
 			var params struct {
 				Limit int `json:"limit"`
 			}
-			json.Unmarshal(args, &params)
+			if err := json.Unmarshal(args, &params); err != nil {
+				return toolError(fmt.Sprintf("参数格式错误: %v", err))
+			}
 			if params.Limit <= 0 {
 				params.Limit = 5
 			}
@@ -494,7 +509,9 @@ func toolExecuteAction() decisionToolDef {
 			var params struct {
 				ActionID uint `json:"action_id"`
 			}
-			json.Unmarshal(args, &params)
+			if err := json.Unmarshal(args, &params); err != nil {
+				return toolError(fmt.Sprintf("参数格式错误: %v", err))
+			}
 
 			if ctx.actionExecutor == nil {
 				return toolError("动作执行器不可用")
@@ -509,10 +526,29 @@ func toolExecuteAction() decisionToolDef {
 				return toolError("动作已停用")
 			}
 
-			// Create a placeholder activity for tracking the execution
-			// (ActionExecutor.Execute requires an activityID for recording)
+			// Idempotency: check if this action was already successfully executed for this ticket
+			execs, _ := ctx.data.GetExecutedActions(ctx.ticketID)
+			for _, e := range execs {
+				if e.ActionCode == action.Code && e.Status == "success" {
+					return json.Marshal(map[string]any{
+						"success":     true,
+						"action_name": action.Name,
+						"action_code": action.Code,
+						"cached":      true,
+						"message":     fmt.Sprintf("动作 [%s] 已执行成功（缓存结果）", action.Name),
+					})
+				}
+			}
+
+			// Use a child context derived from the decision context with a timeout.
+			// The ActionExecutor internally loads the action config and applies per-request
+			// timeouts, but we bound the overall execution (including retries) with this context.
+			// Default overall timeout: action timeout * (retries+1) with a floor of 30s.
+			execCtx, cancel := context.WithTimeout(ctx.ctx, 120*time.Second)
+			defer cancel()
+
 			err = ctx.actionExecutor.Execute(
-				context.Background(),
+				execCtx,
 				ctx.ticketID, 0, params.ActionID,
 			)
 

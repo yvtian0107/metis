@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef } from "react"
 import { useTranslation } from "react-i18next"
 import { useQueryClient } from "@tanstack/react-query"
-import { Bot, Loader2, AlertTriangle, CheckCircle2, XCircle, FileText } from "lucide-react"
+import { Bot, Loader2, AlertTriangle, CheckCircle2, XCircle, FileText, Clock } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -35,7 +35,7 @@ function determineState(ticket: TicketItem, activities: ActivityItem[]): SmartSt
     (a) => a.id === ticket.currentActivityId,
   )
 
-  if (currentActivity?.status === "pending_approval") return "pending_approval"
+  if (currentActivity?.status === "pending_approval" && currentActivity.canAct) return "pending_approval"
 
   const activeActivity = activities.find(
     (a) =>
@@ -110,6 +110,11 @@ export function SmartCurrentActivityCard({ ticket, activities, currentUserId }: 
     const duration = ticket.finishedAt
       ? Math.round((new Date(ticket.finishedAt).getTime() - new Date(ticket.createdAt).getTime()) / 60000)
       : null
+    const durationDisplay = duration != null
+      ? duration >= 60
+        ? `${Math.floor(duration / 60)} ${t("smart.hours", { defaultValue: "小时" })} ${duration % 60} ${t("smart.minutes")}`
+        : `${duration} ${t("smart.minutes")}`
+      : null
     return (
       <Card>
         <CardHeader className="pb-3">
@@ -123,10 +128,10 @@ export function SmartCurrentActivityCard({ ticket, activities, currentUserId }: 
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-3 text-sm">
-          {duration != null && (
+          {durationDisplay != null && (
             <div className="flex justify-between">
               <span className="text-muted-foreground">{t("smart.processDuration")}</span>
-              <span>{duration} {t("smart.minutes")}</span>
+              <span>{durationDisplay}</span>
             </div>
           )}
           {lastAiActivity?.aiReasoning && (
@@ -179,6 +184,27 @@ export function SmartCurrentActivityCard({ ticket, activities, currentUserId }: 
     return <AIDecisionPanel ticketId={ticket.id} activity={currentActivity} />
   }
 
+  if (currentActivity?.status === "pending_approval") {
+	return (
+	  <Card>
+	    <CardHeader className="pb-3">
+	      <CardTitle className="flex items-center gap-2 text-base">
+	        <Bot className="h-4 w-4" />
+	        {t("smart.aiDecision")}
+	        <Badge variant="outline" className="ml-auto text-yellow-600 border-yellow-300">
+	          {t("smart.pendingApproval")}
+	        </Badge>
+	      </CardTitle>
+	    </CardHeader>
+	    <CardContent>
+	      <p className="text-sm text-muted-foreground">
+	        {t("smart.pendingApprovalReadonly", { defaultValue: "当前 AI 决策正在等待有权限的处理人确认。" })}
+	      </p>
+	    </CardContent>
+	  </Card>
+	)
+  }
+
   // --- State: Human Activity ---
   if (state === "human_activity" && activeHumanActivity) {
     return (
@@ -213,6 +239,11 @@ export function SmartCurrentActivityCard({ ticket, activities, currentUserId }: 
           {/* Action buttons only for the assignee */}
           {ticket.assigneeId === currentUserId && (
             <HumanActivityActions ticketId={ticket.id} activity={activeHumanActivity} />
+          )}
+          {!ticket.assigneeId && (
+            <p className="text-sm text-muted-foreground pt-1">
+              {t("smart.waitingAssignment", { defaultValue: "等待分配处理人" })}
+            </p>
           )}
         </CardContent>
       </Card>
@@ -257,7 +288,16 @@ export function SmartCurrentActivityCard({ ticket, activities, currentUserId }: 
     )
   }
 
-  return null
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="flex items-center gap-2 text-base text-muted-foreground">
+          <Clock className="h-4 w-4" />
+          {t("smart.idleState", { defaultValue: "AI 正在准备下一步" })}
+        </CardTitle>
+      </CardHeader>
+    </Card>
+  )
 }
 
 // --- Human Activity Action Buttons ---
@@ -297,7 +337,7 @@ function HumanActivityActions({ ticketId, activity }: { ticketId: number; activi
 
   return (
     <div className="flex gap-2 pt-1">
-      <Button size="sm" onClick={() => progressMut.mutate("submitted")} disabled={progressMut.isPending}>
+      <Button size="sm" onClick={() => progressMut.mutate("completed")} disabled={progressMut.isPending}>
         <CheckCircle2 className="mr-1 h-3.5 w-3.5" />
         {t("smart.submit")}
       </Button>

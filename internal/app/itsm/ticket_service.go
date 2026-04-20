@@ -10,6 +10,7 @@ import (
 
 	"github.com/samber/do/v2"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"metis/internal/app"
 	"metis/internal/app/itsm/engine"
@@ -17,13 +18,13 @@ import (
 )
 
 var (
-	ErrTicketNotFound   = errors.New("ticket not found")
-	ErrTicketTerminal   = errors.New("ticket is in a terminal state and cannot be modified")
-	ErrServiceNotActive = errors.New("service is not active")
-	ErrActivityNotOwner = errors.New("only the assignee or admin can progress this activity")
-	ErrActivityNotWait  = errors.New("signal is only allowed on wait nodes")
-	ErrNotApprover      = errors.New("you are not an assigned approver for this activity")
-	ErrActivityAlready  = errors.New("activity already completed")
+	ErrTicketNotFound       = errors.New("ticket not found")
+	ErrTicketTerminal       = errors.New("ticket is in a terminal state and cannot be modified")
+	ErrServiceNotActive     = errors.New("service is not active")
+	ErrActivityNotOwner     = errors.New("only the assignee or admin can progress this activity")
+	ErrActivityNotWait      = errors.New("signal is only allowed on wait nodes")
+	ErrNotApprover          = errors.New("you are not an assigned approver for this activity")
+	ErrActivityAlready      = errors.New("activity already completed")
 	ErrSLAAlreadyPaused     = errors.New("SLA is already paused")
 	ErrSLANotPaused         = errors.New("SLA is not paused")
 	ErrAssignmentNotFound   = errors.New("assignment not found")
@@ -34,14 +35,14 @@ var (
 )
 
 type TicketService struct {
-	ticketRepo      *TicketRepo
-	timelineRepo    *TimelineRepo
-	serviceRepo     *ServiceDefRepo
-	slaRepo         *SLATemplateRepo
-	priorityRepo    *PriorityRepo
-	classicEngine   *engine.ClassicEngine
-	smartEngine     *engine.SmartEngine
-	orgResolver app.OrgResolver // nil when Org App not installed
+	ticketRepo    *TicketRepo
+	timelineRepo  *TimelineRepo
+	serviceRepo   *ServiceDefRepo
+	slaRepo       *SLATemplateRepo
+	priorityRepo  *PriorityRepo
+	classicEngine *engine.ClassicEngine
+	smartEngine   *engine.SmartEngine
+	orgResolver   app.OrgResolver // nil when Org App not installed
 }
 
 func NewTicketService(i do.Injector) (*TicketService, error) {
@@ -278,7 +279,7 @@ func (s *TicketService) Signal(ticketID uint, activityID uint, outcome string, d
 	}
 
 	if err := s.ticketRepo.DB().Transaction(func(tx *gorm.DB) error {
-		return s.classicEngine.Progress(context.Background(), tx, engine.ProgressParams{
+		return s.engineFor(t.EngineType).Progress(context.Background(), tx, engine.ProgressParams{
 			TicketID:   ticketID,
 			ActivityID: activityID,
 			Outcome:    outcome,
@@ -293,10 +294,20 @@ func (s *TicketService) Signal(ticketID uint, activityID uint, outcome string, d
 }
 
 // GetActivities returns all activities for a ticket.
-func (s *TicketService) GetActivities(ticketID uint) ([]TicketActivity, error) {
+func (s *TicketService) GetActivities(ticketID uint, operatorID uint) ([]TicketActivity, error) {
 	var activities []TicketActivity
 	if err := s.ticketRepo.DB().Where("ticket_id = ?", ticketID).Order("id ASC").Find(&activities).Error; err != nil {
 		return nil, err
+	}
+	for i := range activities {
+		activities[i].CanAct = false
+		if activities[i].Status == engine.ActivityPendingApproval {
+			canAct, err := s.canActOnPendingApproval(activities[i].ID, operatorID)
+			if err != nil {
+				return nil, err
+			}
+			activities[i].CanAct = canAct
+		}
 	}
 	return activities, nil
 }
@@ -545,7 +556,7 @@ func (s *TicketService) engineFor(engineType string) engine.WorkflowEngine {
 
 // --- Smart engine override operations ---
 
-// ConfirmActivity confirms a pending_approval activity and executes the AI decision plan.
+// ConfirmActivity confirms a pending_approval activity and triggers the next decision cycle.
 func (s *TicketService) ConfirmActivity(ticketID uint, activityID uint, operatorID uint) (*Ticket, error) {
 	t, err := s.ticketRepo.FindByID(ticketID)
 	if err != nil {
@@ -560,27 +571,36 @@ func (s *TicketService) ConfirmActivity(ticketID uint, activityID uint, operator
 
 	if err := s.ticketRepo.DB().Transaction(func(tx *gorm.DB) error {
 		var activity TicketActivity
-		if err := tx.First(&activity, activityID).Error; err != nil {
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&activity, activityID).Error; err != nil {
+			return engine.ErrActivityNotFound
+		}
+		if activity.TicketID != ticketID {
 			return engine.ErrActivityNotFound
 		}
 		if activity.Status != engine.ActivityPendingApproval {
-			return errors.New("activity is not pending approval")
+			return ErrActivityAlready
 		}
-
-		// Parse the stored decision plan
-		var plan engine.DecisionPlan
-		if err := json.Unmarshal([]byte(activity.AIDecision), &plan); err != nil {
-			return errors.New("stored decision plan is invalid")
+		canAct, err := s.canActOnPendingApprovalTx(tx, activity, operatorID)
+		if err != nil {
+			return err
+		}
+		if !canAct {
+			return ErrNotApprover
 		}
 
 		// Mark activity as confirmed and completed
 		now := time.Now()
 		if err := tx.Model(&TicketActivity{}).Where("id = ?", activityID).Updates(map[string]any{
-			"status":      engine.ActivityCompleted,
-			"finished_at": now,
+			"status":             engine.ActivityCompleted,
+			"transition_outcome": "confirm",
+			"finished_at":        now,
 		}).Error; err != nil {
 			return err
 		}
+		tx.Model(&TicketAssignment{}).Where("activity_id = ?", activityID).Updates(map[string]any{
+			"status":      AssignmentCompleted,
+			"finished_at": now,
+		})
 
 		// Record timeline
 		tl := &TicketTimeline{
@@ -594,8 +614,11 @@ func (s *TicketService) ConfirmActivity(ticketID uint, activityID uint, operator
 			return err
 		}
 
-		// Execute the decision plan
-		return s.smartEngine.ExecuteConfirmedPlan(tx, ticketID, &plan)
+		payload, _ := json.Marshal(engine.SmartProgressPayload{
+			TicketID:            ticketID,
+			CompletedActivityID: &activityID,
+		})
+		return s.smartEngine.SubmitProgressTask(payload)
 	}); err != nil {
 		return nil, err
 	}
@@ -618,21 +641,37 @@ func (s *TicketService) RejectActivity(ticketID uint, activityID uint, reason st
 
 	if err := s.ticketRepo.DB().Transaction(func(tx *gorm.DB) error {
 		var activity TicketActivity
-		if err := tx.First(&activity, activityID).Error; err != nil {
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&activity, activityID).Error; err != nil {
+			return engine.ErrActivityNotFound
+		}
+		if activity.TicketID != ticketID {
 			return engine.ErrActivityNotFound
 		}
 		if activity.Status != engine.ActivityPendingApproval {
-			return errors.New("activity is not pending approval")
+			return ErrActivityAlready
+		}
+		canAct, err := s.canActOnPendingApprovalTx(tx, activity, operatorID)
+		if err != nil {
+			return err
+		}
+		if !canAct {
+			return ErrNotApprover
 		}
 
 		now := time.Now()
 		if err := tx.Model(&TicketActivity{}).Where("id = ?", activityID).Updates(map[string]any{
-			"status":        engine.ActivityRejected,
-			"finished_at":   now,
-			"overridden_by": operatorID,
+			"status":             engine.ActivityRejected,
+			"transition_outcome": "reject",
+			"decision_reasoning": reason,
+			"finished_at":        now,
+			"overridden_by":      operatorID,
 		}).Error; err != nil {
 			return err
 		}
+		tx.Model(&TicketAssignment{}).Where("activity_id = ?", activityID).Updates(map[string]any{
+			"status":      AssignmentCompleted,
+			"finished_at": now,
+		})
 
 		msg := "人工拒绝 AI 决策"
 		if reason != "" {
@@ -644,8 +683,17 @@ func (s *TicketService) RejectActivity(ticketID uint, activityID uint, reason st
 			OperatorID: operatorID,
 			EventType:  "ai_decision_rejected",
 			Message:    msg,
+			Reasoning:  reason,
 		}
-		return tx.Create(tl).Error
+		if err := tx.Create(tl).Error; err != nil {
+			return err
+		}
+
+		payload, _ := json.Marshal(engine.SmartProgressPayload{
+			TicketID:            ticketID,
+			CompletedActivityID: &activityID,
+		})
+		return s.smartEngine.SubmitProgressTask(payload)
 	}); err != nil {
 		return nil, err
 	}
@@ -968,6 +1016,30 @@ func (s *TicketService) verifyApprover(activityID uint, operatorID uint) error {
 		return ErrNotApprover
 	}
 	return nil
+}
+
+func (s *TicketService) canActOnPendingApproval(activityID uint, operatorID uint) (bool, error) {
+	var activity TicketActivity
+	if err := s.ticketRepo.DB().First(&activity, activityID).Error; err != nil {
+		return false, err
+	}
+	return s.canActOnPendingApprovalTx(s.ticketRepo.DB(), activity, operatorID)
+}
+
+func (s *TicketService) canActOnPendingApprovalTx(tx *gorm.DB, activity TicketActivity, operatorID uint) (bool, error) {
+	if activity.Status != engine.ActivityPendingApproval {
+		return false, nil
+	}
+
+	var count int64
+	query := tx.Model(&TicketAssignment{}).
+		Where("activity_id = ? AND status = ?", activity.ID, AssignmentPending).
+		Where("user_id = ? OR assignee_id = ?", operatorID, operatorID)
+
+	if err := query.Count(&count).Error; err != nil {
+		return false, err
+	}
+	return count > 0, nil
 }
 
 // SLAPause pauses the SLA clock for a ticket.

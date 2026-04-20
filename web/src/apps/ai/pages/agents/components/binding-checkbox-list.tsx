@@ -20,6 +20,14 @@ interface BindingCheckboxListProps {
 export function BindingCheckboxList({ title, items, isLoading, value, onChange }: BindingCheckboxListProps) {
   const { t } = useTranslation(["ai"])
 
+  function resolveLabel(item: BindingItem) {
+    const name = t(`ai:tools.toolDefs.${item.name}.name`, { defaultValue: item.displayName || item.name })
+    const description = item.description
+      ? t(`ai:tools.toolDefs.${item.name}.description`, { defaultValue: item.description })
+      : undefined
+    return { name, description }
+  }
+
   function toggle(id: number) {
     if (value.includes(id)) {
       onChange(value.filter((v) => v !== id))
@@ -42,7 +50,9 @@ export function BindingCheckboxList({ title, items, isLoading, value, onChange }
           </p>
         ) : (
           <div>
-            {items.map((item) => (
+            {items.map((item) => {
+              const resolved = resolveLabel(item)
+              return (
               <label
                 key={String(item.id)}
                 className="flex items-center gap-3 px-3 py-2 hover:bg-muted/50 cursor-pointer"
@@ -53,13 +63,14 @@ export function BindingCheckboxList({ title, items, isLoading, value, onChange }
                   onCheckedChange={() => toggle(item.id)}
                 />
                 <div className="min-w-0 flex-1">
-                  <span className="text-sm">{item.displayName || item.name}</span>
-                  {item.description && (
-                    <p className="text-xs text-muted-foreground truncate">{item.description}</p>
+                  <span className="text-sm">{resolved.name}</span>
+                  {resolved.description && (
+                    <p className="text-xs text-muted-foreground truncate">{resolved.description}</p>
                   )}
                 </div>
               </label>
-            ))}
+              )
+            })}
           </div>
         )}
       </div>

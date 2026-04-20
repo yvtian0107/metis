@@ -15,19 +15,17 @@ TSCONFIG="web/tsconfig.app.json"
 # All known frontend app directories (excluding system which is kernel)
 ALL_APPS=(ai apm itsm license node observe org)
 
-# No APPS specified → restore full version
+# No APPS specified → restore full version (deterministic, no git checkout)
 if [ -z "${APPS:-}" ]; then
-  if ! git checkout -- "$BOOTSTRAP" 2>/dev/null; then
-    cat > "$BOOTSTRAP" << 'FULL'
-// App module side-effect imports.
-// gen-registry.sh replaces this file for filtered builds (APPS=...).
-import "./ai/module"
-import "./license/module"
-import "./node/module"
-FULL
-  fi
+  {
+    echo '// App module side-effect imports.'
+    echo '// gen-registry.sh replaces this file for filtered builds (APPS=...).'
+    for app in "${ALL_APPS[@]}"; do
+      echo "import \"./${app}/module\""
+    done
+  } > "$BOOTSTRAP"
   git checkout -- "$TSCONFIG" 2>/dev/null || true
-  echo "[gen-registry] restored full _bootstrap.ts"
+  echo "[gen-registry] restored full _bootstrap.ts (${ALL_APPS[*]})"
   exit 0
 fi
 

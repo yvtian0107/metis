@@ -105,7 +105,7 @@ export function AgentForm({ agent, onSubmit }: AgentFormProps) {
       type: agent.type,
       visibility: agent.visibility,
       strategy: agent.strategy || "react",
-      providerId: editProviderId,
+      providerId: "",
       modelId: agent.modelId ?? undefined,
       systemPrompt: agent.systemPrompt || "",
       temperature: agent.temperature,
@@ -121,7 +121,7 @@ export function AgentForm({ agent, onSubmit }: AgentFormProps) {
       mcpServerIds: agent.mcpServerIds ?? [],
       knowledgeBaseIds: agent.knowledgeBaseIds ?? [],
     }
-  }, [agent, editProviderId])
+  }, [agent])
 
   const form = useForm<AgentFormValues>({
     resolver: zodResolver(agentSchema),
@@ -131,6 +131,12 @@ export function AgentForm({ agent, onSubmit }: AgentFormProps) {
   useEffect(() => {
     form.reset(resetValues)
   }, [resetValues, form])
+
+  useEffect(() => {
+    if (!agent?.modelId || !editProviderId) return
+    if (form.getValues("providerId") !== "") return
+    form.setValue("providerId", editProviderId, { shouldDirty: false, shouldTouch: false })
+  }, [agent?.modelId, editProviderId, form])
 
   const watchType = useWatch({ control: form.control, name: "type" })
   const watchExecMode = useWatch({ control: form.control, name: "execMode" })
@@ -154,7 +160,7 @@ export function AgentForm({ agent, onSubmit }: AgentFormProps) {
   // Fetch binding lists
   // Tools API returns grouped: { items: [{ toolkit, tools: [] }] }
   const { data: toolItems = [], isLoading: toolsLoading } = useQuery({
-    queryKey: ["ai-binding-tools"],
+    queryKey: ["ai-agent-binding-tools"],
     queryFn: () =>
       api.get<{ items: ToolkitGroup[] }>("/api/v1/ai/tools").then((r) =>
         (r?.items ?? []).flatMap((g) => g.tools)

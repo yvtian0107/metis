@@ -42,6 +42,7 @@ export interface ProviderItem {
   status: string
   healthCheckedAt: string | null
   modelCount: number
+  modelTypeCounts: Record<string, number>
   createdAt: string
   updatedAt: string
 }

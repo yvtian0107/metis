@@ -18,13 +18,13 @@ import (
 
 // AgentGateway orchestrates the full agent execution flow.
 type AgentGateway struct {
-	agentSvc   *AgentService
-	sessionSvc *SessionService
-	memorySvc  *MemoryService
-	agentRepo  *AgentRepo
-	modelRepo  *ModelRepo
+	agentSvc     *AgentService
+	sessionSvc   *SessionService
+	memorySvc    *MemoryService
+	agentRepo    *AgentRepo
+	modelRepo    *ModelRepo
 	providerRepo *ProviderRepo
-	encKey     crypto.EncryptionKey
+	encKey       crypto.EncryptionKey
 
 	// Tool registries for building CompositeToolExecutor per session
 	toolRegistries []ToolHandlerRegistry
@@ -35,6 +35,7 @@ type AgentGateway struct {
 
 	// testLLMClientOverride is used in tests to inject a mock LLM client.
 	testLLMClientOverride llm.Client
+	streamEncoderFactory  StreamEncoderFactory
 }
 
 func NewAgentGateway(i do.Injector) (*AgentGateway, error) {
@@ -48,12 +49,15 @@ func NewAgentGateway(i do.Injector) (*AgentGateway, error) {
 		encKey:         do.MustInvoke[crypto.EncryptionKey](i),
 		toolRegistries: collectToolRegistries(i),
 		executions:     make(map[uint]context.CancelFunc),
+		streamEncoderFactory: func(w io.Writer) StreamEncoder {
+			return NewUIMessageStreamEncoder(w)
+		},
 	}, nil
 }
 
 // Run executes an agent for a given session. Returns a UI Message Stream reader.
-func (gw *AgentGateway) Run(ctx context.Context, sessionID uint) (io.ReadCloser, error) {
-	session, err := gw.sessionSvc.Get(sessionID)
+func (gw *AgentGateway) Run(ctx context.Context, sessionID, userID uint) (io.ReadCloser, error) {
+	session, err := gw.sessionSvc.GetOwned(sessionID, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -74,8 +78,7 @@ func (gw *AgentGateway) Run(ctx context.Context, sessionID uint) (io.ReadCloser,
 	}
 
 	// Build system prompt with memory injection
-	userID := session.UserID
-	memoryBlock, _ := gw.memorySvc.FormatForPrompt(agent.ID, userID)
+	memoryBlock, _ := gw.memorySvc.FormatForPrompt(agent.ID, session.UserID)
 	systemPrompt := buildSystemPrompt(agent, memoryBlock)
 
 	// Convert messages to ExecuteMessage format
@@ -168,7 +171,7 @@ func (gw *AgentGateway) Run(ctx context.Context, sessionID uint) (io.ReadCloser,
 
 	// Set up UI Message Stream pipe
 	pr, pw := io.Pipe()
-	encoder := NewUIMessageStreamEncoder(pw)
+	encoder := gw.streamEncoderFactory(pw)
 
 	go func() {
 		defer func() {
@@ -214,7 +217,7 @@ func (gw *AgentGateway) Run(ctx context.Context, sessionID uint) (io.ReadCloser,
 				case EventTypeMemoryUpdate:
 					_ = gw.memorySvc.Upsert(&AgentMemory{
 						AgentID: session.AgentID,
-						UserID:  userID,
+						UserID:  session.UserID,
 						Key:     evt.MemoryKey,
 						Content: evt.MemoryContent,
 						Source:  MemorySourceAgentGenerated,
@@ -254,7 +257,10 @@ func (gw *AgentGateway) Run(ctx context.Context, sessionID uint) (io.ReadCloser,
 }
 
 // Cancel cancels an active execution for the given session.
-func (gw *AgentGateway) Cancel(sessionID uint) {
+func (gw *AgentGateway) Cancel(sessionID, userID uint) {
+	if _, err := gw.sessionSvc.GetOwned(sessionID, userID); err != nil {
+		return
+	}
 	gw.mu.Lock()
 	cancel, ok := gw.executions[sessionID]
 	gw.mu.Unlock()

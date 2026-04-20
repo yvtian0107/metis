@@ -13,30 +13,41 @@ BUILD_TIME := $(shell date -u '+%Y-%m-%dT%H:%M:%SZ')
 LDFLAGS   := -X metis/internal/version.Version=$(VERSION) -X metis/internal/version.GitCommit=$(GIT_COMMIT) -X metis/internal/version.BuildTime=$(BUILD_TIME)
 SIDECAR_LDFLAGS := -X metis/internal/sidecar.Version=$(VERSION)
 
+# --- Frontend registry ---
+
+# Restore full frontend app registry (all modules, idempotent)
+web-full-registry:
+	./scripts/gen-registry.sh
+
+# Build frontend (respects APPS filter, restores full registry after filtered build)
 web-build:
 ifdef APPS
 	APPS=$(APPS) ./scripts/gen-registry.sh
-endif
 	cd ./web && bun run build
-ifdef APPS
-	APPS= ./scripts/gen-registry.sh
+	./scripts/gen-registry.sh
+else
+	$(MAKE) web-full-registry
+	cd ./web && bun run build
 endif
 
 web-install:
 	cd ./web && bun install
-	
-web-dev:
-	cd ./web && \
-	bun run dev
 
-refer-clone:
-	cd ./support-files/refer
+# --- Development ---
 
-dev:
+dev: web-full-registry
 	go run -tags dev -ldflags '$(LDFLAGS)' ./cmd/server
+
+web-dev: web-full-registry
+	cd ./web && bun run dev
+
+# --- Build & Release ---
 
 build: web-build
 	CGO_ENABLED=0 go build $(GO_TAGS) -ldflags '$(LDFLAGS)' -o server ./cmd/server
+
+run: build
+	./server
 
 release: web-build
 	@mkdir -p dist
@@ -46,6 +57,12 @@ release: web-build
 	CGO_ENABLED=0 GOOS=darwin  GOARCH=arm64 go build $(GO_TAGS) -ldflags '$(LDFLAGS)' -o dist/server-darwin-arm64  ./cmd/server
 	CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build $(GO_TAGS) -ldflags '$(LDFLAGS)' -o dist/server-windows-amd64.exe ./cmd/server
 	@ls -lh dist/
+
+# --- Edition builds ---
+
+build-license:
+	APPS=system,license $(MAKE) web-build
+	CGO_ENABLED=0 go build -tags edition_license -ldflags '$(LDFLAGS)' -o license ./cmd/server
 
 release-license:
 	EDITION=edition_license APPS=system,license $(MAKE) web-build
@@ -57,9 +74,7 @@ release-license:
 	CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -tags edition_license -ldflags '$(LDFLAGS)' -o dist/license-windows-amd64.exe ./cmd/server
 	@ls -lh dist/license-*
 
-build-license:
-	APPS=system,license $(MAKE) web-build
-	CGO_ENABLED=0 go build -tags edition_license -ldflags '$(LDFLAGS)' -o license ./cmd/server
+# --- Sidecar ---
 
 build-sidecar:
 	CGO_ENABLED=0 go build -ldflags '$(SIDECAR_LDFLAGS)' -o sidecar ./cmd/sidecar
@@ -73,11 +88,23 @@ release-sidecar:
 	CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -ldflags '$(SIDECAR_LDFLAGS)' -o dist/sidecar-windows-amd64.exe ./cmd/sidecar
 	@ls -lh dist/sidecar-*
 
-run: build
-	./server
+# --- Misc ---
+
+refer-clone:
+	cd ./support-files/refer
 
 seed:
 	go run -tags dev -ldflags '$(LDFLAGS)' ./cmd/server seed
+
+push:
+	git add .
+	git commit -m "Update"
+	git push
+
+# --- Tests ---
+
+# gotestsum detection (fallback to go test if not installed)
+GOTESTSUM := $(shell command -v gotestsum 2>/dev/null)
 
 test:
 	go test ./...
@@ -89,14 +116,6 @@ test-fuzz:
 	go test ./internal/app/license -fuzz=FuzzCanonicalizeDeterminism -fuzztime=30s
 	go test ./internal/app/license -fuzz=FuzzEncryptDecryptRoundTrip -fuzztime=30s
 	go test ./internal/app/license -fuzz=FuzzValidateConstraintSchemaNoPanic -fuzztime=30s
-
-push:
-	git add .
-	git commit -m "Update"
-	git push
-
-# gotestsum detection (fallback to go test if not installed)
-GOTESTSUM := $(shell command -v gotestsum 2>/dev/null)
 
 test-llm:
 	@test -f .env.test || (echo "Missing .env.test — copy .env.test.example and fill in values" && exit 1)
@@ -140,7 +159,7 @@ endif
 test-bdd:
 	go test ./internal/app/itsm/ -run TestBDD -v
 
-.PHONY: web-build web-dev refer-clone dev build release release-license build-license build-sidecar release-sidecar run seed push test test-license test-fuzz test-llm test-pretty test-cover test-report test-llm-report test-bdd
+.PHONY: web-full-registry web-build web-install web-dev dev build run release release-license build-license build-sidecar release-sidecar refer-clone seed push test test-license test-fuzz test-llm test-pretty test-cover test-report test-llm-report test-bdd
 
 # Backward-compat aliases
 license: build-license

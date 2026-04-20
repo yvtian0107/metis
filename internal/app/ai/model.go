@@ -82,20 +82,25 @@ type Provider struct {
 func (Provider) TableName() string { return "ai_providers" }
 
 type ProviderResponse struct {
-	ID              uint       `json:"id"`
-	Name            string     `json:"name"`
-	Type            string     `json:"type"`
-	Protocol        string     `json:"protocol"`
-	BaseURL         string     `json:"baseUrl"`
-	APIKeyMasked    string     `json:"apiKeyMasked"`
-	Status          string     `json:"status"`
-	HealthCheckedAt *time.Time `json:"healthCheckedAt"`
-	ModelCount      int        `json:"modelCount"`
-	CreatedAt       time.Time  `json:"createdAt"`
-	UpdatedAt       time.Time  `json:"updatedAt"`
+	ID              uint           `json:"id"`
+	Name            string         `json:"name"`
+	Type            string         `json:"type"`
+	Protocol        string         `json:"protocol"`
+	BaseURL         string         `json:"baseUrl"`
+	APIKeyMasked    string         `json:"apiKeyMasked"`
+	Status          string         `json:"status"`
+	HealthCheckedAt *time.Time     `json:"healthCheckedAt"`
+	ModelCount      int            `json:"modelCount"`
+	ModelTypeCounts map[string]int `json:"modelTypeCounts"`
+	CreatedAt       time.Time      `json:"createdAt"`
+	UpdatedAt       time.Time      `json:"updatedAt"`
 }
 
-func (p *Provider) ToResponse(apiKeyMasked string, modelCount int) ProviderResponse {
+func (p *Provider) ToResponse(apiKeyMasked string, modelCount int, modelTypeCounts map[string]int) ProviderResponse {
+	if modelTypeCounts == nil {
+		modelTypeCounts = map[string]int{}
+	}
+
 	return ProviderResponse{
 		ID:              p.ID,
 		Name:            p.Name,
@@ -106,6 +111,7 @@ func (p *Provider) ToResponse(apiKeyMasked string, modelCount int) ProviderRespo
 		Status:          p.Status,
 		HealthCheckedAt: p.HealthCheckedAt,
 		ModelCount:      modelCount,
+		ModelTypeCounts: modelTypeCounts,
 		CreatedAt:       p.CreatedAt,
 		UpdatedAt:       p.UpdatedAt,
 	}
@@ -115,18 +121,18 @@ func (p *Provider) ToResponse(apiKeyMasked string, modelCount int) ProviderRespo
 
 type AIModel struct {
 	model.BaseModel
-	ModelID        string          `json:"modelId" gorm:"size:128;not null"`
-	DisplayName    string          `json:"displayName" gorm:"size:128;not null"`
-	ProviderID     uint            `json:"providerId" gorm:"not null;index"`
-	Type           string          `json:"type" gorm:"size:16;not null;index"`
-	Capabilities   model.JSONText `json:"capabilities" gorm:"type:text"`
-	ContextWindow  int             `json:"contextWindow"`
+	ModelID         string         `json:"modelId" gorm:"size:128;not null"`
+	DisplayName     string         `json:"displayName" gorm:"size:128;not null"`
+	ProviderID      uint           `json:"providerId" gorm:"not null;index"`
+	Type            string         `json:"type" gorm:"size:16;not null;index"`
+	Capabilities    model.JSONText `json:"capabilities" gorm:"type:text"`
+	ContextWindow   int            `json:"contextWindow"`
 	MaxOutputTokens int            `json:"maxOutputTokens"`
-	InputPrice     float64         `json:"inputPrice"`
-	OutputPrice    float64         `json:"outputPrice"`
-	IsDefault      bool            `json:"isDefault" gorm:"not null;default:false"`
-	Status         string          `json:"status" gorm:"size:16;not null;default:active"`
-	Provider       *Provider       `json:"provider,omitempty" gorm:"foreignKey:ProviderID"`
+	InputPrice      float64        `json:"inputPrice"`
+	OutputPrice     float64        `json:"outputPrice"`
+	IsDefault       bool           `json:"isDefault" gorm:"not null;default:false"`
+	Status          string         `json:"status" gorm:"size:16;not null;default:active"`
+	Provider        *Provider      `json:"provider,omitempty" gorm:"foreignKey:ProviderID"`
 }
 
 func (AIModel) TableName() string { return "ai_models" }

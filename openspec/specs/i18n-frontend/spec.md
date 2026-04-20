@@ -26,6 +26,10 @@ The system SHALL organize kernel translations under `web/src/i18n/locales/{local
 ### Requirement: App module translation registration
 Each App module SHALL be able to register its own translations via a `registerTranslations(namespace, resources)` function. App translations are co-located at `web/src/apps/<name>/locales/{locale}/<name>.json`. Registration MUST happen in the App's `module.ts` alongside route registration.
 
+The AI app's locale files (`web/src/apps/ai/locales/{zh-CN,en}.json`) SHALL contain i18n entries for **all** builtin tools registered in the `ai_tools` table, including those seeded by non-AI apps (ITSM, org, etc.). The required key patterns are:
+- `tools.toolkits.<toolkit>.name` / `.description` — one entry per distinct `toolkit` value
+- `tools.toolDefs.<tool.name>.name` / `.description` — one entry per tool
+
 #### Scenario: AI app registers its translations
 - **WHEN** the AI app module is imported via registry
 - **THEN** its translations are added to i18next under the `ai` namespace
@@ -34,6 +38,14 @@ Each App module SHALL be able to register its own translations via a `registerTr
 #### Scenario: App excluded by build does not register translations
 - **WHEN** `APPS=system` is used (AI app excluded from registry)
 - **THEN** the AI app's translations are not bundled or registered
+
+#### Scenario: All builtin toolkit groups display translated names
+- **WHEN** the builtin tools tab renders a toolkit group whose `toolkit` value is `general`, `itsm`, `decision`, or `organization`
+- **THEN** the toolkit name and description SHALL display the translated text from `tools.toolkits.<toolkit>.{name,description}`, not the raw i18n key
+
+#### Scenario: All builtin tool definitions display translated names
+- **WHEN** the builtin tools tab renders a tool whose `name` is any of the 24 registered builtin tools
+- **THEN** the tool name and description SHALL display translated text from `tools.toolDefs.<name>.{name,description}` or fall back to the backend `displayName`/`description` field
 
 ### Requirement: Locale resolution priority
 The system SHALL resolve the active locale in this order: (1) user's `locale` preference from auth store, (2) system default `system.locale` from site info API, (3) browser's `navigator.language`, (4) `zh-CN` as hardcoded fallback. If a resolved locale is not in the supported list, the system MUST fall to the next level.

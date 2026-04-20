@@ -32,10 +32,10 @@ const (
 
 // Assignment status constants
 const (
-	AssignmentPending       = "pending"
-	AssignmentCompleted     = "completed"
-	AssignmentTransferred   = "transferred"
-	AssignmentDelegated     = "delegated"
+	AssignmentPending        = "pending"
+	AssignmentCompleted      = "completed"
+	AssignmentTransferred    = "transferred"
+	AssignmentDelegated      = "delegated"
 	AssignmentClaimedByOther = "claimed_by_other"
 )
 
@@ -146,6 +146,7 @@ type TicketActivity struct {
 	AIConfidence      float64    `json:"aiConfidence" gorm:"column:ai_confidence;default:0"`
 	OverriddenBy      *uint      `json:"overriddenBy" gorm:"column:overridden_by"`
 	DecisionReasoning string     `json:"decisionReasoning" gorm:"column:decision_reasoning;type:text"`
+	CanAct            bool       `json:"canAct" gorm:"-"`
 	StartedAt         *time.Time `json:"startedAt" gorm:"column:started_at"`
 	FinishedAt        *time.Time `json:"finishedAt" gorm:"column:finished_at"`
 }
@@ -165,8 +166,8 @@ type TicketAssignment struct {
 	Status          string     `json:"status" gorm:"size:16;default:pending"`
 	Sequence        int        `json:"sequence" gorm:"default:0"`
 	IsCurrent       bool       `json:"isCurrent" gorm:"default:false"`
-	DelegatedFrom   *uint      `json:"delegatedFrom" gorm:"index"`   // original assignment ID when delegated
-	TransferFrom    *uint      `json:"transferFrom" gorm:"index"`    // original assignment ID when transferred
+	DelegatedFrom   *uint      `json:"delegatedFrom" gorm:"index"` // original assignment ID when delegated
+	TransferFrom    *uint      `json:"transferFrom" gorm:"index"`  // original assignment ID when transferred
 	ClaimedAt       *time.Time `json:"claimedAt"`
 	FinishedAt      *time.Time `json:"finishedAt"`
 }

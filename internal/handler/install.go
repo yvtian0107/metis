@@ -3,10 +3,12 @@ package handler
 import (
 	"context"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/casbin/casbin/v2"
 	"github.com/gin-gonic/gin"
@@ -278,10 +280,16 @@ func (h *InstallHandler) Execute(c *gin.Context) {
 		return
 	}
 	if _, err := userSvc.Create(req.AdminUsername, req.AdminPassword, req.AdminEmail, "", adminRole.ID); err != nil {
-		Fail(c, http.StatusInternalServerError, "failed to create admin: "+err.Error())
-		return
+		if errors.Is(err, service.ErrUsernameExists) {
+			if err := upsertInstallAdmin(db.DB, req.AdminUsername, req.AdminPassword, req.AdminEmail, adminRole.ID); err != nil {
+				Fail(c, http.StatusInternalServerError, "failed to reuse existing admin: "+err.Error())
+				return
+			}
+		} else {
+			Fail(c, http.StatusInternalServerError, "failed to create admin: "+err.Error())
+			return
+		}
 	}
-
 	// 9. Mark installed
 	if err := seed.SetInstalled(db.DB); err != nil {
 		Fail(c, http.StatusInternalServerError, "failed to mark installed: "+err.Error())
@@ -298,7 +306,7 @@ func (h *InstallHandler) Execute(c *gin.Context) {
 	h.installed = true
 
 	// 11. Hot switch: register all business services and routes
-	if err := h.hotSwitch(cfg, db, enforcer); err != nil {
+	if err := h.hotSwitch(cfg, db, enforcer, req.AdminUsername); err != nil {
 		slog.Error("install: hot switch failed", "error", err)
 		// Installation is complete but hot switch failed — user needs to restart
 		OK(c, gin.H{"restart_required": true})
@@ -308,7 +316,70 @@ func (h *InstallHandler) Execute(c *gin.Context) {
 	OK(c, nil)
 }
 
-func (h *InstallHandler) hotSwitch(cfg *config.MetisConfig, db *database.DB, enforcer *casbin.Enforcer) error {
+func assignInstallAdminOrgIdentity(db *gorm.DB, username string) error {
+	var user struct{ ID uint }
+	if err := db.Table("users").Where("username = ?", username).Select("id").First(&user).Error; err != nil {
+		return err
+	}
+
+	type departmentRow struct{ ID uint }
+	var dept departmentRow
+	if err := db.Table("departments").Where("code = ?", "it").Select("id").First(&dept).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil
+		}
+		return err
+	}
+
+	type positionRow struct{ ID uint }
+	var pos positionRow
+	if err := db.Table("positions").Where("code = ?", "it_admin").Select("id").First(&pos).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil
+		}
+		return err
+	}
+
+	type userPositionRow struct{ ID uint }
+	var existing userPositionRow
+	if err := db.Table("user_positions").Where("user_id = ? AND department_id = ? AND position_id = ?", user.ID, dept.ID, pos.ID).Select("id").First(&existing).Error; err == nil {
+		return nil
+	}
+
+	return db.Table("user_positions").Create(map[string]any{
+		"user_id":       user.ID,
+		"department_id": dept.ID,
+		"position_id":   pos.ID,
+		"is_primary":    true,
+	}).Error
+}
+
+func upsertInstallAdmin(db *gorm.DB, username, password, email string, roleID uint) error {
+	hashed, err := token.HashPassword(password)
+	if err != nil {
+		return err
+	}
+
+	now := time.Now()
+	updates := map[string]any{
+		"password":            hashed,
+		"email":               email,
+		"role_id":             roleID,
+		"is_active":           true,
+		"password_changed_at": &now,
+	}
+
+	result := db.Model(&model.User{}).Where("username = ?", username).Updates(updates)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return gorm.ErrRecordNotFound
+	}
+	return nil
+}
+
+func (h *InstallHandler) hotSwitch(cfg *config.MetisConfig, db *database.DB, enforcer *casbin.Enforcer, adminUsername string) error {
 	injector := h.injector
 
 	// Config, DB, and kernel providers already registered in Execute
@@ -331,6 +402,10 @@ func (h *InstallHandler) hotSwitch(cfg *config.MetisConfig, db *database.DB, enf
 		if err := a.Seed(db.DB, enforcer, true); err != nil {
 			slog.Error("install: app seed failed", "app", a.Name(), "error", err)
 		}
+	}
+
+	if err := assignInstallAdminOrgIdentity(db.DB, adminUsername); err != nil {
+		return fmt.Errorf("assign install admin org identity: %w", err)
 	}
 
 	// Resolve handler

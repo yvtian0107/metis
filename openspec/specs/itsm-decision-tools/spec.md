@@ -185,16 +185,47 @@ SmartEngine SHALL 提供一组决策域工具，供决策 Agent 在 ReAct 循环
 - **WHEN** Agent 调用 `decision.list_actions` 且服务未配置任何 ServiceAction
 - **THEN** 返回结果 SHALL 为 `{"actions": [], "count": 0}`
 
+### Requirement: Decision tools data access layer
+All 8 decision tools SHALL access data through Repository interfaces or dedicated query methods instead of raw `tx.Table()` queries. The `decisionToolContext` struct SHALL hold Repository references instead of a bare `*gorm.DB`.
+
+#### Scenario: ticket_context tool uses Repository
+- **WHEN** `decision.ticket_context` is called
+- **THEN** it SHALL use `TicketRepo` and `ActivityRepo` methods instead of raw table queries for ticket data, activity history, executed actions, assignments, and parallel groups
+
+#### Scenario: resolve_participant tool uses Repository
+- **WHEN** `decision.resolve_participant` is called
+- **THEN** it SHALL use `ParticipantResolver` and user lookup via Repository instead of `tx.Table("users")`
+
+#### Scenario: similar_history tool uses Repository
+- **WHEN** `decision.similar_history` is called
+- **THEN** it SHALL use `TicketRepo.ListCompleted()` or equivalent instead of raw table queries
+
+#### Scenario: Missing Repository methods added
+- **WHEN** a decision tool requires a query not currently on the Repository
+- **THEN** a new method SHALL be added to the appropriate Repository (e.g., `TicketRepo.GetContextForDecision`, `ActivityRepo.ListCompletedByTicket`)
+
 ### Requirement: 工具执行的事务一致性
-所有决策工具 SHALL 在 SmartEngine 的决策事务（`tx *gorm.DB`）中执行查询，确保决策期间的数据一致性。
+所有决策工具 SHALL 通过 SmartEngine 在当前决策事务内构建的 Repository 或查询接口执行查询，确保决策期间的数据一致性。
 
 #### Scenario: 工具查询在事务内
 - **WHEN** ReAct 循环中 Agent 连续调用多个工具
-- **THEN** 所有工具查询 SHALL 使用同一个 `tx`，保证读取到一致的数据快照
+- **THEN** 所有工具查询 SHALL 使用同一个决策事务上下文，保证读取到一致的数据快照
+
+### Requirement: Decision tools receive context via ToolHandler closure
+Decision tools SHALL receive ticket-specific context (ticketID, serviceID, repositories) through the `ToolHandler` closure provided by SmartEngine, rather than through a shared mutable `decisionToolContext` struct.
+
+#### Scenario: Tool handler closure captures ticket context
+- **WHEN** SmartEngine builds the `ToolHandler` for a `DecisionRequest`
+- **THEN** the closure SHALL capture the current ticket's repositories and IDs, and dispatch to the appropriate tool handler function
 
 ### Requirement: 工具错误返回格式
-工具执行失败时 SHALL 返回结构化错误 JSON 而非抛出异常，让 Agent 能够理解错误并继续推理。
+工具执行失败时 SHALL 返回结构化错误 JSON 而非抛出异常，让 Agent 能够理解错误并继续推理。工具参数解析失败时 SHALL 返回明确的参数错误信息。
 
 #### Scenario: 工具执行失败
 - **WHEN** 工具查询数据库出错
 - **THEN** 工具 SHALL 返回 `{"error": true, "message": "具体错误描述"}`，ReAct 循环将此作为 tool result 追加到消息中
+
+#### Scenario: 工具参数 JSON 解析失败
+- **WHEN** Agent 传入的参数 JSON 格式错误（无法 unmarshal）
+- **THEN** 工具 SHALL 返回 `{"error": true, "message": "参数格式错误: <具体解析错误>"}`
+- **AND** 不得静默使用零值参数

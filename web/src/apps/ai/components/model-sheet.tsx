@@ -78,9 +78,10 @@ interface ModelSheetProps {
   onOpenChange: (open: boolean) => void
   model: ModelItem | null
   defaultProviderId?: number
+  defaultType?: string
 }
 
-export function ModelSheet({ open, onOpenChange, model, defaultProviderId }: ModelSheetProps) {
+export function ModelSheet({ open, onOpenChange, model, defaultProviderId, defaultType }: ModelSheetProps) {
   const { t } = useTranslation(["ai", "common"])
   const queryClient = useQueryClient()
   const isEditing = model !== null
@@ -131,7 +132,7 @@ export function ModelSheet({ open, onOpenChange, model, defaultProviderId }: Mod
           modelId: "",
           displayName: "",
           providerId: defaultProviderId ?? 0,
-          type: "llm",
+          type: defaultType ?? "llm",
           capabilities: [],
           contextWindow: 0,
           maxOutputTokens: 0,
@@ -141,7 +142,7 @@ export function ModelSheet({ open, onOpenChange, model, defaultProviderId }: Mod
         })
       }
     }
-  }, [open, model, form])
+  }, [open, model, form, defaultProviderId, defaultType])
 
   const createMutation = useMutation({
     mutationFn: (values: FormValues) =>

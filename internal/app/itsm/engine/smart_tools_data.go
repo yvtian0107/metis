@@ -79,8 +79,8 @@ type DecisionDataProvider interface {
 	// GetTicketContext returns the full ticket context for the given ticket ID.
 	GetTicketContext(ticketID uint) (*DecisionTicketData, error)
 
-	// GetCompletedActivities returns all completed activities for a ticket, ordered by ID ascending.
-	GetCompletedActivities(ticketID uint) ([]activityModel, error)
+	// GetDecisionHistory returns completed and rejected activities for a ticket, ordered by ID ascending.
+	GetDecisionHistory(ticketID uint) ([]activityModel, error)
 
 	// GetExecutedActions returns successfully executed actions for a ticket.
 	GetExecutedActions(ticketID uint) ([]ExecutedActionInfo, error)
@@ -148,9 +148,9 @@ func (s *decisionDataStore) GetTicketContext(ticketID uint) (*DecisionTicketData
 	return &row, nil
 }
 
-func (s *decisionDataStore) GetCompletedActivities(ticketID uint) ([]activityModel, error) {
+func (s *decisionDataStore) GetDecisionHistory(ticketID uint) ([]activityModel, error) {
 	var activities []activityModel
-	err := s.db.Where("ticket_id = ? AND status = ?", ticketID, ActivityCompleted).
+	err := s.db.Where("ticket_id = ? AND status IN ?", ticketID, []string{ActivityCompleted, ActivityRejected}).
 		Order("id ASC").Find(&activities).Error
 	return activities, err
 }

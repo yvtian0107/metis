@@ -20,6 +20,7 @@ const STATUS_COLORS: Record<string, string> = {
   pending: "bg-gray-400",
   pending_approval: "bg-yellow-500",
   cancelled: "bg-gray-300",
+  failed: "bg-red-500",
   rejected: "bg-red-500",
 }
 
@@ -111,7 +112,8 @@ export function SmartFlowVisualization({ activities, currentActivityId }: SmartF
                       {activity.overriddenBy != null && (
                         <div className="flex justify-between text-xs">
                           <span className="text-muted-foreground">{t("smart.overriddenBy")}</span>
-                          <span>#{activity.overriddenBy}</span>
+                          {/* TODO: API should return overriderName field for display */}
+                          <span>{t("smart.overridden", { defaultValue: "已覆盖" })}</span>
                         </div>
                       )}
                       {activity.finishedAt && (

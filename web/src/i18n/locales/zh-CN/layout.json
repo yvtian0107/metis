@@ -22,6 +22,7 @@
     "daysAgo": "{{count}} 天前"
   },
   "menu": {
+    "ai": "AI 管理",
     "system": "系统管理",
     "system:user:list": "用户管理",
     "system:role:list": "角色管理",

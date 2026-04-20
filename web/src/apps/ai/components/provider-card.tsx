@@ -1,7 +1,6 @@
 import { useTranslation } from "react-i18next"
 import { useNavigate } from "react-router"
 import { Pencil, Trash2, Zap, MoreHorizontal, Plus } from "lucide-react"
-import { cn } from "@/lib/utils"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -12,8 +11,11 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { getProviderBrand } from "../lib/provider-brand"
+import { ProviderLogo } from "./provider-logo"
 import { StatusDot } from "./status-dot"
 import type { ProviderItem } from "./provider-sheet"
+
+const MODEL_TYPE_ORDER = ["llm", "embed", "rerank", "tts", "stt", "image"] as const
 
 interface ProviderCardProps {
   provider: ProviderItem
@@ -37,16 +39,28 @@ function formatRelativeTime(dateStr: string | null): string | null {
   return `${days}d`
 }
 
-function ModelChips({ provider, t }: { provider: ProviderItem; t: (key: string) => string }) {
-  if (provider.modelCount === 0) return null
+function ModelChips({ provider }: { provider: ProviderItem }) {
+  const { t } = useTranslation("ai")
+  const entries = MODEL_TYPE_ORDER
+    .map((type) => ({ type, count: provider.modelTypeCounts?.[type] ?? 0 }))
+    .filter((entry) => entry.count > 0)
 
-  // We only have the total count from the list API, not per-type breakdown.
-  // Show total count badge. Per-type breakdown shows on detail page.
+  if (entries.length === 0) return null
+
   return (
-    <div className="flex flex-wrap gap-1.5">
-      <Badge variant="secondary" className="text-xs font-normal">
-        {provider.modelCount} {t("ai:providers.modelCount")}
-      </Badge>
+    <div className="flex flex-wrap justify-end gap-1.5">
+      {entries.map(({ type, count }) => (
+        <Badge
+          key={type}
+          variant="outline"
+          className="h-6 gap-1 rounded-full border-border/60 bg-muted/20 px-2 text-[11px] font-normal text-muted-foreground"
+        >
+          <span>{t(`ai:modelTypes.${type}`, type)}</span>
+          <span className="rounded-full bg-background px-1.5 py-0.5 font-medium tabular-nums text-foreground">
+            {count}
+          </span>
+        </Badge>
+      ))}
     </div>
   )
 }
@@ -75,25 +89,26 @@ export function ProviderCard({
 
   return (
     <div
-      className="group relative flex cursor-pointer flex-col rounded-xl border bg-card transition-all hover:border-primary/20 hover:shadow-md hover:-translate-y-0.5"
+      className="group relative flex min-h-[176px] cursor-pointer flex-col overflow-hidden rounded-xl border bg-card p-4 transition-all duration-200 hover:border-border/90 hover:shadow-sm"
       onClick={handleCardClick}
     >
-      {/* Brand color stripe */}
-      <div className={cn("h-1 w-full rounded-t-xl", brand.stripe)} />
-
-      {/* Header */}
-      <div className="flex items-start gap-3 px-4 pt-3 pb-2">
+      <div className="flex items-start gap-3">
         <div
-          className={cn(
-            "flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-sm font-bold",
-            brand.avatarBg,
-          )}
+          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border bg-muted/35 p-2"
         >
-          {brand.avatarText}
+          <ProviderLogo type={provider.type} label={brand.label} className="h-full w-full object-contain" />
         </div>
         <div className="min-w-0 flex-1">
-          <div className="flex items-center justify-between gap-2">
-            <h3 className="truncate text-sm font-semibold">{provider.name}</h3>
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <h3 className="truncate text-base font-semibold leading-tight">{provider.name}</h3>
+                <Badge variant="outline" className="shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
+                  {t(`ai:types.${provider.type}`, provider.type)}
+                </Badge>
+              </div>
+              <p className="mt-1.5 truncate text-sm leading-5 text-muted-foreground">{provider.baseUrl}</p>
+            </div>
             {(canUpdate || canDelete) && (
               <div data-action-zone>
                 <DropdownMenu>
@@ -101,7 +116,7 @@ export function ProviderCard({
                     <Button
                       variant="ghost"
                       size="icon"
-                      className="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity"
+                      className="h-8 w-8 shrink-0 opacity-0 transition-opacity group-hover:opacity-100"
                     >
                       <MoreHorizontal className="h-4 w-4" />
                     </Button>
@@ -130,37 +145,31 @@ export function ProviderCard({
               </div>
             )}
           </div>
-          <p className="truncate text-xs text-muted-foreground">{provider.baseUrl}</p>
-          <p className="text-xs text-muted-foreground font-mono">
-            {provider.apiKeyMasked || "—"}
-          </p>
         </div>
       </div>
 
-      {/* Model chips */}
-      <div className="px-4 pb-2">
-        <ModelChips provider={provider} t={t} />
+      <div className="flex justify-end py-2.5">
+        <ModelChips provider={provider} />
       </div>
 
-      {/* Footer */}
-      <div className="mt-auto flex items-center justify-between border-t px-4 py-2.5">
-        <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+      <div className="mt-auto flex items-center justify-between border-t pt-3">
+        <div className="flex min-h-7 items-center gap-1.5 text-xs text-muted-foreground">
           <StatusDot status={provider.status} loading={isTesting} />
           <span>
             {t(`ai:statusLabels.${provider.status}`, provider.status)}
             {relTime && ` · ${relTime}`}
           </span>
         </div>
-        <div className="flex items-center gap-1" data-action-zone>
+        <div className="flex min-h-7 items-center gap-1" data-action-zone>
           {canTest && (
             <Button
               variant="ghost"
               size="sm"
-              className="h-7 px-2 text-xs"
+              className="h-8 px-2.5 text-xs font-medium"
               disabled={isTesting}
               onClick={() => onTest(provider.id)}
             >
-              <Zap className="mr-1 h-3 w-3" />
+              <Zap className="mr-1 h-3.5 w-3.5" />
               {isTesting ? t("ai:providers.testing") : t("ai:providers.testConnection")}
             </Button>
           )}
@@ -182,13 +191,13 @@ export function ProviderGuideCard({ onClick }: GuideCardProps) {
   return (
     <button
       type="button"
-      className="flex min-h-[180px] cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-muted-foreground/20 bg-muted/20 transition-colors hover:border-primary/30 hover:bg-muted/40"
+      className="flex min-h-[164px] cursor-pointer flex-col items-center justify-center gap-3 rounded-xl border-2 border-dashed border-muted-foreground/20 bg-muted/15 p-4 transition-colors hover:border-border/80 hover:bg-muted/30"
       onClick={onClick}
     >
-      <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-muted">
-        <Plus className="h-5 w-5 text-muted-foreground" />
+      <div className="flex h-11 w-11 items-center justify-center rounded-xl border bg-muted/35">
+        <Plus className="h-4.5 w-4.5 text-muted-foreground" />
       </div>
-      <span className="text-sm text-muted-foreground">{t("providers.create")}</span>
+      <span className="text-sm font-medium text-muted-foreground">{t("providers.create")}</span>
     </button>
   )
 }
