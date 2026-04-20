@@ -464,14 +464,14 @@ func seedAI(db *gorm.DB, enforcer *casbin.Enforcer) error {
 			Toolkit:     "knowledge",
 			Name:        "search_knowledge",
 			DisplayName: "Search Knowledge",
-			Description: "Search for relevant documents in a knowledge base using full-text search.",
+			Description: "Search for relevant content across knowledge bases and knowledge graphs.",
 			ParametersSchema: model.JSONText(`{
 				"type": "object",
 				"properties": {
-					"knowledge_base_id": {"type": "integer", "description": "The ID of the knowledge base to search"},
+					"asset_ids": {"type": "array", "items": {"type": "integer"}, "description": "The IDs of knowledge assets (bases or graphs) to search"},
 					"query": {"type": "string", "description": "The search query"}
 				},
-				"required": ["knowledge_base_id", "query"]
+				"required": ["asset_ids", "query"]
 			}`),
 			IsActive: true,
 		},
@@ -579,27 +579,6 @@ func seedAI(db *gorm.DB, enforcer *casbin.Enforcer) error {
 		{"admin", "/api/v1/ai/models/:id", "PUT"},
 		{"admin", "/api/v1/ai/models/:id", "DELETE"},
 		{"admin", "/api/v1/ai/models/:id/default", "PATCH"},
-		// Knowledge bases
-		{"admin", "/api/v1/ai/knowledge-bases", "GET"},
-		{"admin", "/api/v1/ai/knowledge-bases", "POST"},
-		{"admin", "/api/v1/ai/knowledge-bases/:id", "GET"},
-		{"admin", "/api/v1/ai/knowledge-bases/:id", "PUT"},
-		{"admin", "/api/v1/ai/knowledge-bases/:id", "DELETE"},
-		{"admin", "/api/v1/ai/knowledge-bases/:id/compile", "POST"},
-		{"admin", "/api/v1/ai/knowledge-bases/:id/recompile", "POST"},
-		{"admin", "/api/v1/ai/knowledge-bases/:id/progress", "GET"},
-		// Knowledge sources
-		{"admin", "/api/v1/ai/knowledge-bases/:id/sources", "GET"},
-		{"admin", "/api/v1/ai/knowledge-bases/:id/sources", "POST"},
-		{"admin", "/api/v1/ai/knowledge-bases/:id/sources/:sid", "GET"},
-		{"admin", "/api/v1/ai/knowledge-bases/:id/sources/:sid", "DELETE"},
-		// Knowledge nodes & logs
-		{"admin", "/api/v1/ai/knowledge-bases/:id/nodes", "GET"},
-		{"admin", "/api/v1/ai/knowledge-bases/:id/nodes/:nid", "GET"},
-		{"admin", "/api/v1/ai/knowledge-bases/:id/nodes/:nid/graph", "GET"},
-		{"admin", "/api/v1/ai/knowledge-bases/:id/logs", "GET"},
-		{"admin", "/api/v1/ai/knowledge-bases/:id/graph", "GET"},
-		{"admin", "/api/v1/ai/knowledge-bases/:id/search", "GET"},
 		// Knowledge — new source pool
 		{"admin", "/api/v1/ai/knowledge/sources", "GET"},
 		{"admin", "/api/v1/ai/knowledge/sources/upload", "POST"},

@@ -108,6 +108,7 @@ func (a *AIApp) Providers(i do.Injector) {
 	do.Provide(i, NewMemoryService)
 	do.Provide(i, NewMemoryHandler)
 	do.Provide(i, NewAgentGateway)
+	do.Provide(i, NewKnowledgeQueryHandler)
 
 	// DecisionExecutor for smart workflow engine decision cycles
 	do.Provide(i, func(i do.Injector) (app.AIDecisionExecutor, error) {
@@ -317,11 +318,14 @@ func (a *AIApp) Routes(api *gin.RouterGroup) {
 	}
 
 	// Agent knowledge query API (Sidecar token auth, bypasses JWT+Casbin)
-	// TODO: Re-enable after Phase 4/5 provide the new query handler
 	r := do.MustInvoke[*gin.Engine](a.injector)
 	nodeRepo := do.MustInvoke[*node.NodeRepo](a.injector)
-	_ = r
-	_ = nodeRepo
+	queryH := do.MustInvoke[*KnowledgeQueryHandler](a.injector)
+
+	sidecarAPI := r.Group("/api/v1/ai/sidecar", node.NodeTokenMiddleware(nodeRepo))
+	{
+		sidecarAPI.POST("/knowledge/search", queryH.Search)
+	}
 
 	// Internal API for Agent to download skill packages (Node token auth)
 	internal := r.Group("/api/v1/ai/internal", node.NodeTokenMiddleware(nodeRepo))

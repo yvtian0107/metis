@@ -141,6 +141,22 @@
     @apply mt-1 max-w-2xl text-sm leading-6 text-muted-foreground;
   }
 
+  .workspace-chrome-brand {
+    @apply text-[15px] font-semibold tracking-[-0.025em] text-foreground;
+  }
+
+  .workspace-chrome-trigger {
+    @apply text-[13px] font-medium tracking-[-0.01em];
+  }
+
+  .workspace-nav-section-title {
+    @apply text-[10px] font-semibold tracking-[0.18em] text-muted-foreground/58 uppercase;
+  }
+
+  .workspace-nav-item {
+    @apply text-[13px] font-medium tracking-[-0.01em];
+  }
+
   .install-step-shell {
     @apply space-y-5;
   }

@@ -99,7 +99,7 @@ function OverviewTab({ kb, progress }: { kb: KnowledgeAsset; progress: BuildProg
             <Button
               size="sm"
               variant="outline"
-              disabled={rebuildMutation.isPending || kb.status === "building"}
+              disabled={rebuildMutation.isPending}
               onClick={() => rebuildMutation.mutate()}
             >
               <RefreshCw className="mr-1.5 h-4 w-4" />

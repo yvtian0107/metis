@@ -263,7 +263,7 @@ export function Sidebar() {
         {sections.map((section, si) => (
           <div key={section.key} className={section.label && si > 0 ? "pt-2" : undefined}>
             {section.label && (
-              <div className="px-3 pb-1 text-[11px] font-semibold tracking-wider text-muted-foreground/60 uppercase">
+              <div className="workspace-nav-section-title px-3 pb-1">
                 {t(`menuGroup.${section.label}`, { ns: activeApp?.permission, defaultValue: section.label, nsSeparator: false })}
               </div>
             )}
@@ -275,7 +275,7 @@ export function Sidebar() {
                   key={item.id}
                   onClick={() => navigate(item.path || "/")}
                   className={cn(
-                    "flex w-full items-center gap-2 rounded-xl px-3 py-2 text-sm transition-colors duration-200",
+                    "workspace-nav-item flex w-full items-center gap-2 rounded-xl px-3 py-2 transition-colors duration-200",
                     isActive
                       ? "bg-sidebar-accent/82 text-sidebar-accent-foreground font-medium shadow-[0_12px_24px_-18px_hsl(var(--primary)/0.45)]"
                       : "text-sidebar-foreground hover:bg-white/58",

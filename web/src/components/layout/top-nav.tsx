@@ -121,7 +121,7 @@ export function TopNav() {
               className="h-7 w-7 rounded object-contain"
             />
           )}
-          <span className="text-base font-semibold tracking-tight text-foreground">
+          <span className="workspace-chrome-brand">
             {siteInfo?.appName ?? "Metis"}
           </span>
         </div>
@@ -131,7 +131,7 @@ export function TopNav() {
           {user && (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <button className="flex items-center gap-1.5 rounded-full border border-transparent px-2.5 py-1.5 text-sm text-muted-foreground transition-colors hover:border-border/70 hover:bg-white/80 hover:text-foreground">
+                <button className="workspace-chrome-trigger flex items-center gap-1.5 rounded-full border border-transparent px-2.5 py-1.5 text-muted-foreground transition-colors hover:border-border/70 hover:bg-white/80 hover:text-foreground">
                   <span>{user.username}</span>
                   <ChevronDown className="h-3.5 w-3.5" />
                 </button>
