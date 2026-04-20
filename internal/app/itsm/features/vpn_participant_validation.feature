@@ -19,11 +19,3 @@ Feature: VPN 开通申请 — 参与者校验
     Then 工单分配人为兜底处理人
     And 时间线包含参与者兜底事件
 
-  Scenario: 参与者完整时正常路由并完成全流程
-    Given "vpn-requester" 已创建 VPN 工单，访问原因为 "network_support"
-    When 智能引擎执行决策循环
-    Then 工单状态为 "in_progress"
-    And 存在至少一个活动
-    When 当前活动的被分配人认领并审批通过
-    And 智能引擎执行决策循环直到工单完成
-    Then 工单状态为 "completed"

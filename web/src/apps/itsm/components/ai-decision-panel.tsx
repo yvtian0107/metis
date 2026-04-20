@@ -1,13 +1,18 @@
 "use client"
 
+import { useState } from "react"
 import { useTranslation } from "react-i18next"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
-import { Bot, ThumbsUp, ThumbsDown } from "lucide-react"
+import { Bot, ThumbsUp, ThumbsDown, Loader2 } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Progress } from "@/components/ui/progress"
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { type ActivityItem, confirmActivity, rejectActivity } from "../api"
 
 interface AIDecisionPanelProps {
@@ -27,6 +32,7 @@ interface DecisionPlan {
 export function AIDecisionPanel({ ticketId, activity }: AIDecisionPanelProps) {
   const { t } = useTranslation("itsm")
   const queryClient = useQueryClient()
+  const [rejectDialogOpen, setRejectDialogOpen] = useState(false)
 
   const confidencePercent = (activity.confidence ?? 0) * 100
   const isPendingApproval = activity.status === "pending_approval"
@@ -128,21 +134,47 @@ export function AIDecisionPanel({ ticketId, activity }: AIDecisionPanelProps) {
               onClick={() => confirmMut.mutate()}
               disabled={confirmMut.isPending || rejectMut.isPending}
             >
-              <ThumbsUp className="mr-1 h-3.5 w-3.5" />
+              {confirmMut.isPending ? (
+                <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <ThumbsUp className="mr-1 h-3.5 w-3.5" />
+              )}
               {t("smart.confirm")}
             </Button>
             <Button
               size="sm"
               variant="outline"
-              onClick={() => rejectMut.mutate()}
+              onClick={() => setRejectDialogOpen(true)}
               disabled={confirmMut.isPending || rejectMut.isPending}
             >
-              <ThumbsDown className="mr-1 h-3.5 w-3.5" />
+              {rejectMut.isPending ? (
+                <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <ThumbsDown className="mr-1 h-3.5 w-3.5" />
+              )}
               {t("smart.reject")}
             </Button>
           </div>
         )}
       </CardContent>
+
+      {/* Reject Confirmation Dialog */}
+      <AlertDialog open={rejectDialogOpen} onOpenChange={setRejectDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t("smart.rejectConfirmTitle")}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {activity.name && <>{t("smart.nextStep")}: {activity.name}<br /></>}
+              {activity.confidence != null && <>{t("smart.confidence")}: {(activity.confidence * 100).toFixed(0)}%<br /></>}
+              {t("smart.rejectConfirmDesc")}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t("common:cancel")}</AlertDialogCancel>
+            <AlertDialogAction onClick={() => rejectMut.mutate()}>{t("smart.confirmReject")}</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Card>
   )
 }

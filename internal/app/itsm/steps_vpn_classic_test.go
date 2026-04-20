@@ -158,16 +158,18 @@ func buildFormDataFromWorkflow(workflowJSON json.RawMessage, requestKind string)
 			})
 		}
 	}
-	if len(condEdges) < 2 {
-		return nil, fmt.Errorf("expected at least 2 condition edges from gateway, got %d", len(condEdges))
-	}
-
 	// Select branch: first edge for network_support, second for external_collaboration.
 	var selected condEdge
 	switch requestKind {
 	case "network_support":
+		if len(condEdges) < 1 {
+			return nil, fmt.Errorf("expected at least 1 condition edge from gateway, got %d", len(condEdges))
+		}
 		selected = condEdges[0]
 	case "external_collaboration":
+		if len(condEdges) < 2 {
+			return nil, fmt.Errorf("expected at least 2 condition edges from gateway, got %d", len(condEdges))
+		}
 		selected = condEdges[1]
 	default:
 		return nil, fmt.Errorf("unknown request kind %q", requestKind)

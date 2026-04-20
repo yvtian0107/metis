@@ -22,6 +22,10 @@ import {
 import {
   Form, FormControl, FormField, FormItem, FormLabel, FormMessage,
 } from "@/components/ui/form"
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { overrideJump, overrideReassign, retryAI, fetchUsers } from "../api"
 
 const STEP_TYPES = ["form", "approve", "process", "action", "notify", "wait"]
@@ -37,6 +41,7 @@ export function OverrideActions({ ticketId, currentActivityId, aiFailureCount }:
   const queryClient = useQueryClient()
   const [jumpOpen, setJumpOpen] = useState(false)
   const [reassignOpen, setReassignOpen] = useState(false)
+  const [retryDialogOpen, setRetryDialogOpen] = useState(false)
 
   const { data: users = [] } = useQuery({
     queryKey: ["users-for-override"],
@@ -113,7 +118,7 @@ export function OverrideActions({ ticketId, currentActivityId, aiFailureCount }:
             {t("smart.reassign")}
           </DropdownMenuItem>
           {(aiFailureCount ?? 0) > 0 && (
-            <DropdownMenuItem onClick={() => retryMut.mutate()} disabled={retryMut.isPending}>
+            <DropdownMenuItem onClick={() => setRetryDialogOpen(true)} disabled={retryMut.isPending}>
               <RotateCcw className="mr-2 h-4 w-4" />
               {t("smart.retryAI")}
             </DropdownMenuItem>
@@ -137,7 +142,7 @@ export function OverrideActions({ ticketId, currentActivityId, aiFailureCount }:
                     <FormControl><SelectTrigger><SelectValue placeholder={t("smart.stepTypePlaceholder")} /></SelectTrigger></FormControl>
                     <SelectContent>
                       {STEP_TYPES.map((st) => (
-                        <SelectItem key={st} value={st}>{st}</SelectItem>
+                        <SelectItem key={st} value={st}>{t(`smart.stepType_${st}`, { defaultValue: st })}</SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
@@ -214,6 +219,22 @@ export function OverrideActions({ ticketId, currentActivityId, aiFailureCount }:
           </Form>
         </SheetContent>
       </Sheet>
+
+      {/* Retry AI Confirmation Dialog */}
+      <AlertDialog open={retryDialogOpen} onOpenChange={setRetryDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t("smart.retryAI")}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t("smart.retryAIConfirmDesc", { defaultValue: "将重置 AI 失败计数并重新触发决策" })}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t("common:cancel")}</AlertDialogCancel>
+            <AlertDialogAction onClick={() => retryMut.mutate()}>{t("smart.retryAI")}</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   )
 }

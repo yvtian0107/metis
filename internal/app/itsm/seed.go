@@ -219,6 +219,7 @@ func seedMenus(db *gorm.DB) error {
 		{Name: "指派工单", Type: model.MenuTypeButton, Permission: "itsm:ticket:assign", Sort: 1},
 		{Name: "完结工单", Type: model.MenuTypeButton, Permission: "itsm:ticket:complete", Sort: 2},
 		{Name: "取消工单", Type: model.MenuTypeButton, Permission: "itsm:ticket:cancel", Sort: 3},
+		{Name: "工单覆写", Type: model.MenuTypeButton, Permission: "itsm:ticket:override", Sort: 4},
 	})
 
 	// 我的工单
@@ -389,6 +390,7 @@ func seedPolicies(enforcer *casbin.Enforcer) error {
 		{"admin", "itsm:ticket:assign", "read"},
 		{"admin", "itsm:ticket:complete", "read"},
 		{"admin", "itsm:ticket:cancel", "read"},
+		{"admin", "itsm:ticket:override", "read"},
 		{"admin", "itsm:ticket:mine", "read"},
 		{"admin", "itsm:ticket:todo", "read"},
 		{"admin", "itsm:ticket:history", "read"},

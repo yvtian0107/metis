@@ -316,7 +316,7 @@ func (a *ITSMApp) Tasks() []scheduler.TaskDef {
 			Name:        "itsm-action-execute",
 			Type:        scheduler.TypeAsync,
 			Description: "Execute HTTP webhook for ITSM action nodes",
-			Handler:     engine.HandleActionExecute(db.DB, classicEngine),
+			Handler:     engine.HandleActionExecute(db.DB, classicEngine, smartEngine),
 		},
 		{
 			Name:        "itsm-wait-timer",
@@ -378,7 +378,7 @@ var _ engine.TaskSubmitter = (*schedulerSubmitter)(nil)
 
 // notificationAdapter adapts service.MessageChannelService to engine.NotificationSender.
 type notificationAdapter struct {
-	svc     *service.MessageChannelService
+	svc *service.MessageChannelService
 }
 
 func (n *notificationAdapter) Send(ctx context.Context, channelID uint, subject, body string, recipientIDs []uint) error {
@@ -466,4 +466,3 @@ func (a *userProviderAdapter) ListActiveUsers() ([]engine.ParticipantCandidate, 
 	}
 	return candidates, nil
 }
-

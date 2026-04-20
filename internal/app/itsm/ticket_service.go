@@ -17,13 +17,13 @@ import (
 )
 
 var (
-	ErrTicketNotFound   = errors.New("ticket not found")
-	ErrTicketTerminal   = errors.New("ticket is in a terminal state and cannot be modified")
-	ErrServiceNotActive = errors.New("service is not active")
-	ErrActivityNotOwner = errors.New("only the assignee or admin can progress this activity")
-	ErrActivityNotWait  = errors.New("signal is only allowed on wait nodes")
-	ErrNotApprover      = errors.New("you are not an assigned approver for this activity")
-	ErrActivityAlready  = errors.New("activity already completed")
+	ErrTicketNotFound       = errors.New("ticket not found")
+	ErrTicketTerminal       = errors.New("ticket is in a terminal state and cannot be modified")
+	ErrServiceNotActive     = errors.New("service is not active")
+	ErrActivityNotOwner     = errors.New("only the assignee or admin can progress this activity")
+	ErrActivityNotWait      = errors.New("signal is only allowed on wait nodes")
+	ErrNotApprover          = errors.New("you are not an assigned approver for this activity")
+	ErrActivityAlready      = errors.New("activity already completed")
 	ErrSLAAlreadyPaused     = errors.New("SLA is already paused")
 	ErrSLANotPaused         = errors.New("SLA is not paused")
 	ErrAssignmentNotFound   = errors.New("assignment not found")
@@ -34,14 +34,14 @@ var (
 )
 
 type TicketService struct {
-	ticketRepo      *TicketRepo
-	timelineRepo    *TimelineRepo
-	serviceRepo     *ServiceDefRepo
-	slaRepo         *SLATemplateRepo
-	priorityRepo    *PriorityRepo
-	classicEngine   *engine.ClassicEngine
-	smartEngine     *engine.SmartEngine
-	orgResolver app.OrgResolver // nil when Org App not installed
+	ticketRepo    *TicketRepo
+	timelineRepo  *TimelineRepo
+	serviceRepo   *ServiceDefRepo
+	slaRepo       *SLATemplateRepo
+	priorityRepo  *PriorityRepo
+	classicEngine *engine.ClassicEngine
+	smartEngine   *engine.SmartEngine
+	orgResolver   app.OrgResolver // nil when Org App not installed
 }
 
 func NewTicketService(i do.Injector) (*TicketService, error) {
@@ -278,7 +278,7 @@ func (s *TicketService) Signal(ticketID uint, activityID uint, outcome string, d
 	}
 
 	if err := s.ticketRepo.DB().Transaction(func(tx *gorm.DB) error {
-		return s.classicEngine.Progress(context.Background(), tx, engine.ProgressParams{
+		return s.engineFor(t.EngineType).Progress(context.Background(), tx, engine.ProgressParams{
 			TicketID:   ticketID,
 			ActivityID: activityID,
 			Outcome:    outcome,
@@ -595,7 +595,16 @@ func (s *TicketService) ConfirmActivity(ticketID uint, activityID uint, operator
 		}
 
 		// Execute the decision plan
-		return s.smartEngine.ExecuteConfirmedPlan(tx, ticketID, &plan)
+		if err := s.smartEngine.ExecuteConfirmedPlan(tx, ticketID, &plan); err != nil {
+			return err
+		}
+
+		// Trigger continuation after executing the confirmed plan
+		payload, _ := json.Marshal(map[string]any{
+			"ticket_id":             ticketID,
+			"completed_activity_id": nil,
+		})
+		return s.smartEngine.SubmitProgressTask(payload)
 	}); err != nil {
 		return nil, err
 	}
@@ -645,7 +654,16 @@ func (s *TicketService) RejectActivity(ticketID uint, activityID uint, reason st
 			EventType:  "ai_decision_rejected",
 			Message:    msg,
 		}
-		return tx.Create(tl).Error
+		if err := tx.Create(tl).Error; err != nil {
+			return err
+		}
+
+		// Trigger next decision cycle after rejection
+		payload, _ := json.Marshal(map[string]any{
+			"ticket_id":             ticketID,
+			"completed_activity_id": nil,
+		})
+		return s.smartEngine.SubmitProgressTask(payload)
 	}); err != nil {
 		return nil, err
 	}

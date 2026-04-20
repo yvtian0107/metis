@@ -120,6 +120,7 @@ export function Component() {
   const canAssign = usePermission("itsm:ticket:assign")
   const canComplete = usePermission("itsm:ticket:complete")
   const canCancel = usePermission("itsm:ticket:cancel")
+  const canOverride = usePermission("itsm:ticket:override")
   const currentUser = useAuthStore((s) => s.user)
   const currentUserId = currentUser?.id ?? 0
 
@@ -251,8 +252,8 @@ export function Component() {
                 <UserPlus className="mr-1 h-3.5 w-3.5" />{t("itsm:tickets.assign")}
               </Button>
             )}
-            {ticket.engineType === "smart" && (
-              <OverrideActions ticketId={ticketId} currentActivityId={ticket.currentActivityId} />
+            {ticket.engineType === "smart" && canOverride && (
+              <OverrideActions ticketId={ticketId} currentActivityId={ticket.currentActivityId} aiFailureCount={ticket.aiFailureCount} />
             )}
             {canComplete && (
               <AlertDialog>

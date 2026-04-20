@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"metis/internal/app"
 	"metis/internal/llm"
@@ -85,8 +86,8 @@ func ParseSmartServiceConfig(raw string) SmartServiceConfig {
 
 // DecisionPlan is the structured output from the AI agent.
 type DecisionPlan struct {
-	NextStepType  string             `json:"next_step_type"`  // approve|process|action|notify|form|complete|escalate
-	ExecutionMode string             `json:"execution_mode"`  // ""|"single"|"parallel"
+	NextStepType  string             `json:"next_step_type"` // approve|process|action|notify|form|complete|escalate
+	ExecutionMode string             `json:"execution_mode"` // ""|"single"|"parallel"
 	Activities    []DecisionActivity `json:"activities"`
 	Reasoning     string             `json:"reasoning"`
 	Confidence    float64            `json:"confidence"`
@@ -211,47 +212,14 @@ func (e *SmartEngine) Progress(ctx context.Context, tx *gorm.DB, params Progress
 	e.recordTimeline(tx, params.TicketID, &params.ActivityID, params.OperatorID, "activity_completed",
 		fmt.Sprintf("活动 [%s] 完成，结果: %s", activity.Name, params.Outcome), "")
 
-	// Convergence check: if this activity belongs to a parallel group,
-	// only proceed when all siblings are completed.
-	if activity.ActivityGroupID != "" {
-		var incompleteCount int64
-		tx.Model(&activityModel{}).
-			Where("activity_group_id = ? AND status NOT IN ?", activity.ActivityGroupID,
-				[]string{ActivityCompleted, ActivityCancelled}).
-			Count(&incompleteCount)
-
-		if incompleteCount > 0 {
-			slog.Info("parallel group not yet converged",
-				"ticketID", params.TicketID, "groupID", activity.ActivityGroupID,
-				"remaining", incompleteCount)
-			return nil
-		}
-
-		slog.Info("parallel group converged, triggering next decision",
-			"ticketID", params.TicketID, "groupID", activity.ActivityGroupID)
+	// Load ticket for ensureContinuation
+	var ticket ticketModel
+	if err := tx.First(&ticket, params.TicketID).Error; err != nil {
+		return fmt.Errorf("ticket not found: %w", err)
 	}
 
-	// Submit async task for next decision cycle
-	svcInfo, err := e.loadServiceForTicket(tx, params.TicketID)
-	if err != nil {
-		return fmt.Errorf("load service: %w", err)
-	}
-
-	if e.scheduler != nil {
-		payload, _ := json.Marshal(map[string]any{
-			"ticket_id":             params.TicketID,
-			"completed_activity_id": params.ActivityID,
-		})
-		if err := e.scheduler.SubmitTask("itsm-smart-progress", payload); err != nil {
-			slog.Error("failed to submit smart-progress task", "error", err, "ticketID", params.TicketID)
-			// Fallback: run decision cycle synchronously
-			return e.runDecisionCycle(ctx, tx, params.TicketID, &params.ActivityID, svcInfo)
-		}
-		return nil
-	}
-
-	// No scheduler available, run synchronously
-	return e.runDecisionCycle(ctx, tx, params.TicketID, &params.ActivityID, svcInfo)
+	e.ensureContinuation(tx, &ticket, params.ActivityID)
+	return nil
 }
 
 // Cancel terminates all active activities and marks the ticket cancelled.
@@ -463,6 +431,16 @@ func (e *SmartEngine) executeParallelPlan(tx *gorm.DB, ticketID uint, plan *Deci
 			e.tryFallbackAssignment(tx, ticketID, act.ID)
 		}
 
+		// Submit action task if applicable
+		if da.Type == "action" && da.ActionID != nil && e.scheduler != nil {
+			payload, _ := json.Marshal(map[string]any{
+				"ticket_id":   ticketID,
+				"activity_id": act.ID,
+				"action_id":   *da.ActionID,
+			})
+			e.scheduler.SubmitTask("itsm-action-execute", payload)
+		}
+
 		e.recordTimeline(tx, ticketID, &act.ID, 0, "ai_decision_executed",
 			fmt.Sprintf("AI 并签活动：%s（组 %s，信心 %.0f%%）", decisionActivityName(da), groupID[:8], plan.Confidence*100),
 			plan.Reasoning)
@@ -472,12 +450,14 @@ func (e *SmartEngine) executeParallelPlan(tx *gorm.DB, ticketID uint, plan *Deci
 	return nil
 }
 
-// executeSequentialPlan creates activities sequentially (original behavior).
+// executeSequentialPlan creates all activities from the plan but sets
+// current_activity_id to the first one (not the last).
 func (e *SmartEngine) executeSequentialPlan(tx *gorm.DB, ticketID uint, plan *DecisionPlan) error {
 	now := time.Now()
 	planJSON := mustJSON(plan)
+	var firstActID uint
 
-	for _, da := range plan.Activities {
+	for i, da := range plan.Activities {
 		status := ActivityInProgress
 		if da.Type == "approve" || da.Type == "form" || da.Type == "process" {
 			status = ActivityPending
@@ -497,7 +477,11 @@ func (e *SmartEngine) executeSequentialPlan(tx *gorm.DB, ticketID uint, plan *De
 			return err
 		}
 
-		tx.Model(&ticketModel{}).Where("id = ?", ticketID).Update("current_activity_id", act.ID)
+		// Set current_activity_id to the first activity only
+		if i == 0 {
+			firstActID = act.ID
+			tx.Model(&ticketModel{}).Where("id = ?", ticketID).Update("current_activity_id", firstActID)
+		}
 
 		// Create assignment if participant specified
 		if da.ParticipantID != nil && *da.ParticipantID > 0 {
@@ -794,6 +778,65 @@ type serviceModel struct {
 
 func (serviceModel) TableName() string { return "itsm_service_definitions" }
 
+// ensureContinuation checks whether the smart engine should trigger the next
+// decision cycle after an activity completes. It handles terminal states,
+// circuit-breaker, and parallel convergence (with SELECT FOR UPDATE).
+func (e *SmartEngine) ensureContinuation(tx *gorm.DB, ticket *ticketModel, completedActivityID uint) {
+	// 1. Terminal state → nothing to do
+	switch ticket.Status {
+	case "completed", "cancelled", "failed":
+		return
+	}
+
+	// 2. Circuit-breaker
+	if ticket.AIFailureCount >= MaxAIFailureCount {
+		slog.Warn("ensureContinuation: AI disabled, skipping", "ticketID", ticket.ID, "failures", ticket.AIFailureCount)
+		return
+	}
+
+	// 3. Parallel convergence check
+	if completedActivityID > 0 {
+		var groupID string
+		tx.Model(&activityModel{}).Where("id = ?", completedActivityID).Select("activity_group_id").Scan(&groupID)
+
+		if groupID != "" {
+			// Lock the group rows and check for incomplete siblings
+			var ids []uint
+			tx.Model(&activityModel{}).
+				Clauses(clause.Locking{Strength: "UPDATE"}).
+				Where("activity_group_id = ? AND status NOT IN (?, ?)", groupID, ActivityCompleted, ActivityCancelled).
+				Pluck("id", &ids)
+
+			if len(ids) > 0 {
+				slog.Info("ensureContinuation: parallel group not converged",
+					"ticketID", ticket.ID, "groupID", groupID, "remaining", len(ids))
+				return
+			}
+			slog.Info("ensureContinuation: parallel group converged",
+				"ticketID", ticket.ID, "groupID", groupID)
+		}
+	}
+
+	// 4. Submit async task for next decision cycle
+	if e.scheduler != nil {
+		payload, _ := json.Marshal(SmartProgressPayload{
+			TicketID:            ticket.ID,
+			CompletedActivityID: uintPtrIf(completedActivityID),
+		})
+		if err := e.scheduler.SubmitTask("itsm-smart-progress", payload); err != nil {
+			slog.Error("ensureContinuation: failed to submit smart-progress task", "error", err, "ticketID", ticket.ID)
+		}
+	}
+}
+
+// uintPtrIf returns a *uint if v > 0, else nil.
+func uintPtrIf(v uint) *uint {
+	if v == 0 {
+		return nil
+	}
+	return &v
+}
+
 // ExecuteConfirmedPlan executes a confirmed decision plan (after human approval).
 func (e *SmartEngine) ExecuteConfirmedPlan(tx *gorm.DB, ticketID uint, plan *DecisionPlan) error {
 	if plan.NextStepType == "complete" {
@@ -844,6 +887,7 @@ func (e *SmartEngine) agenticDecision(ctx context.Context, tx *gorm.DB, ticketID
 
 	// Prepare tool context
 	toolCtx := &decisionToolContext{
+		ctx:               ctx,
 		data:              NewDecisionDataStore(tx),
 		ticketID:          ticketID,
 		serviceID:         svc.ID,

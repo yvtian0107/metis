@@ -37,7 +37,6 @@ func setupApprovalTest(t *testing.T, mode string, numAssignees int) *approvalTes
 		&assignmentModel{},
 		&timelineModel{},
 		&executionTokenModel{},
-		&formDefModel{},
 	); err != nil {
 		t.Fatalf("failed to migrate: %v", err)
 	}

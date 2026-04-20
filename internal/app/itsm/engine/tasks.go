@@ -33,7 +33,7 @@ type WaitTimerPayload struct {
 // For smart engine tickets, it directly marks the activity as completed (no execution tokens).
 // If the action fails and a b_error boundary event is attached, it triggers
 // the boundary error path instead of calling Progress with "failed".
-func HandleActionExecute(db *gorm.DB, classicEngine *ClassicEngine) func(ctx context.Context, payload json.RawMessage) error {
+func HandleActionExecute(db *gorm.DB, classicEngine *ClassicEngine, smartEngine *SmartEngine) func(ctx context.Context, payload json.RawMessage) error {
 	executor := NewActionExecutor(db)
 
 	return func(ctx context.Context, payload json.RawMessage) error {
@@ -59,11 +59,25 @@ func HandleActionExecute(db *gorm.DB, classicEngine *ClassicEngine) func(ctx con
 		}
 		if ticket.EngineType == "smart" {
 			now := time.Now()
-			return db.Model(&activityModel{}).Where("id = ?", p.ActivityID).Updates(map[string]any{
+			if err := db.Model(&activityModel{}).Where("id = ?", p.ActivityID).Updates(map[string]any{
 				"status":             ActivityCompleted,
 				"transition_outcome": outcome,
 				"finished_at":        now,
-			}).Error
+			}).Error; err != nil {
+				return err
+			}
+
+			// Trigger next decision cycle
+			payload, _ := json.Marshal(SmartProgressPayload{
+				TicketID:            p.TicketID,
+				CompletedActivityID: &p.ActivityID,
+			})
+			if smartEngine != nil {
+				if err := smartEngine.SubmitProgressTask(payload); err != nil {
+					slog.Error("failed to submit smart-progress after action", "error", err, "ticketID", p.TicketID)
+				}
+			}
+			return nil
 		}
 
 		// Classic engine: on failure, check for b_error boundary event before calling Progress
@@ -304,15 +318,14 @@ func HandleSmartRecovery(db *gorm.DB, smartEngine *SmartEngine) func(ctx context
 	return func(ctx context.Context, _ json.RawMessage) error {
 		// Find all in_progress smart tickets
 		type ticketRow struct {
-			ID               uint
-			Code             string
-			AIFailureCount   int
-			AIDisabledReason string
+			ID             uint
+			Code           string
+			AIFailureCount int
 		}
 		var tickets []ticketRow
 		if err := db.Table("itsm_tickets").
 			Where("engine_type = ? AND status = ? AND deleted_at IS NULL", "smart", "in_progress").
-			Select("id, code, ai_failure_count, ai_disabled_reason").
+			Select("id, code, ai_failure_count").
 			Find(&tickets).Error; err != nil {
 			return fmt.Errorf("smart recovery: query tickets: %w", err)
 		}
@@ -325,7 +338,7 @@ func HandleSmartRecovery(db *gorm.DB, smartEngine *SmartEngine) func(ctx context
 		recovered := 0
 		for _, t := range tickets {
 			// Skip circuit-broken tickets
-			if t.AIDisabledReason != "" {
+			if t.AIFailureCount >= MaxAIFailureCount {
 				slog.Debug("smart recovery: skipping circuit-broken ticket", "ticketID", t.ID, "code", t.Code)
 				continue
 			}
@@ -333,7 +346,7 @@ func HandleSmartRecovery(db *gorm.DB, smartEngine *SmartEngine) func(ctx context
 			// Check if there are active (pending/in_progress) activities
 			var activeCount int64
 			db.Table("itsm_ticket_activities").
-				Where("ticket_id = ? AND status IN ?", t.ID, []string{ActivityPending, ActivityInProgress}).
+				Where("ticket_id = ? AND status IN ?", t.ID, []string{ActivityPending, ActivityInProgress, ActivityPendingApproval}).
 				Count(&activeCount)
 
 			if activeCount > 0 {
