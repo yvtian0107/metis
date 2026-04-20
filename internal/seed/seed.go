@@ -1,6 +1,7 @@
 package seed
 
 import (
+	"fmt"
 	"log/slog"
 
 	"github.com/casbin/casbin/v2"
@@ -23,19 +24,30 @@ func Install(db *gorm.DB, enforcer *casbin.Enforcer) (*Result, error) {
 	r := &Result{}
 
 	// 1. Seed roles
-	roleMap := seedRoles(db, r)
+	roleMap, err := seedRoles(db, r)
+	if err != nil {
+		return nil, err
+	}
 
 	// 2. Seed menus
-	seedMenuTree(db, BuiltinMenus, nil, r)
+	if err := seedMenuTree(db, BuiltinMenus, nil, r); err != nil {
+		return nil, err
+	}
 
 	// 3. Seed Casbin policies
-	seedPolicies(db, enforcer, roleMap, r)
+	if err := seedPolicies(db, enforcer, roleMap, r); err != nil {
+		return nil, err
+	}
 
 	// 4. Seed ALL default configs (server_port, otel.*, system.app_name, etc.)
-	seedDefaultConfigs(db)
+	if err := seedDefaultConfigs(db); err != nil {
+		return nil, err
+	}
 
 	// 5. Seed default auth providers
-	seedAuthProviders(db)
+	if err := seedAuthProviders(db); err != nil {
+		return nil, err
+	}
 
 	return r, nil
 }
@@ -47,10 +59,14 @@ func Sync(db *gorm.DB, enforcer *casbin.Enforcer) (*Result, error) {
 	r := &Result{}
 
 	// 1. Sync roles (add missing only)
-	seedRoles(db, r)
+	if _, err := seedRoles(db, r); err != nil {
+		return nil, err
+	}
 
 	// 2. Sync menus (add missing only)
-	seedMenuTree(db, BuiltinMenus, nil, r)
+	if err := seedMenuTree(db, BuiltinMenus, nil, r); err != nil {
+		return nil, err
+	}
 
 	// 3. Sync Casbin policies (re-apply all — idempotent)
 	roleMap := make(map[string]*model.Role)
@@ -58,14 +74,18 @@ func Sync(db *gorm.DB, enforcer *casbin.Enforcer) (*Result, error) {
 		var role model.Role
 		if err := db.Where("code = ?", seed.Code).First(&role).Error; err == nil {
 			roleMap[role.Code] = &role
+		} else if err != gorm.ErrRecordNotFound {
+			return nil, fmt.Errorf("load role %s for policy sync: %w", seed.Code, err)
 		}
 	}
-	seedPolicies(db, enforcer, roleMap, r)
+	if err := seedPolicies(db, enforcer, roleMap, r); err != nil {
+		return nil, err
+	}
 
 	return r, nil
 }
 
-func seedRoles(db *gorm.DB, r *Result) map[string]*model.Role {
+func seedRoles(db *gorm.DB, r *Result) (map[string]*model.Role, error) {
 	roleMap := make(map[string]*model.Role)
 	for _, seed := range BuiltinRoles {
 		var existing model.Role
@@ -73,46 +93,55 @@ func seedRoles(db *gorm.DB, r *Result) map[string]*model.Role {
 			r.RolesSkipped++
 			roleMap[existing.Code] = &existing
 			continue
+		} else if err != gorm.ErrRecordNotFound {
+			return nil, fmt.Errorf("lookup role %s: %w", seed.Code, err)
 		}
 		role := seed
 		if err := db.Create(&role).Error; err != nil {
-			slog.Error("seed: failed to create role", "code", seed.Code, "error", err)
-			continue
+			return nil, fmt.Errorf("create role %s: %w", seed.Code, err)
 		}
 		r.RolesCreated++
 		roleMap[role.Code] = &role
 		slog.Info("seed: created role", "code", role.Code)
 	}
-	return roleMap
+	return roleMap, nil
 }
 
-func seedMenuTree(db *gorm.DB, menus []MenuSeed, parentID *uint, r *Result) {
+func seedMenuTree(db *gorm.DB, menus []MenuSeed, parentID *uint, r *Result) error {
 	for _, seed := range menus {
 		var existing model.Menu
 		if seed.Permission != "" {
 			if err := db.Where("permission = ?", seed.Permission).First(&existing).Error; err == nil {
 				r.MenusSkipped++
-				seedMenuTree(db, seed.Children, &existing.ID, r)
+				if err := seedMenuTree(db, seed.Children, &existing.ID, r); err != nil {
+					return err
+				}
 				continue
+			} else if err != gorm.ErrRecordNotFound {
+				return fmt.Errorf("lookup menu %s: %w", seed.Name, err)
 			}
 		}
 
 		menu := seed.Menu
 		menu.ParentID = parentID
 		if err := db.Create(&menu).Error; err != nil {
-			slog.Error("seed: failed to create menu", "name", seed.Name, "error", err)
-			continue
+			return fmt.Errorf("create menu %s: %w", seed.Name, err)
 		}
 		r.MenusCreated++
 		slog.Info("seed: created menu", "name", menu.Name, "permission", menu.Permission)
 
-		seedMenuTree(db, seed.Children, &menu.ID, r)
+		if err := seedMenuTree(db, seed.Children, &menu.ID, r); err != nil {
+			return err
+		}
 	}
+	return nil
 }
 
-func seedPolicies(db *gorm.DB, enforcer *casbin.Enforcer, roleMap map[string]*model.Role, r *Result) {
+func seedPolicies(db *gorm.DB, enforcer *casbin.Enforcer, roleMap map[string]*model.Role, r *Result) error {
 	var allMenus []model.Menu
-	db.Find(&allMenus)
+	if err := db.Find(&allMenus).Error; err != nil {
+		return fmt.Errorf("load menus for policies: %w", err)
+	}
 
 	// Admin: all menu permissions + all API policies
 	var adminPolicies [][]string
@@ -125,9 +154,14 @@ func seedPolicies(db *gorm.DB, enforcer *casbin.Enforcer, roleMap map[string]*mo
 		adminPolicies = append(adminPolicies, []string{"admin", p[0], p[1]})
 	}
 
-	enforcer.RemoveFilteredPolicy(0, "admin")
+	if _, err := enforcer.RemoveFilteredPolicy(0, "admin"); err != nil {
+		return fmt.Errorf("clear admin policies: %w", err)
+	}
 	if len(adminPolicies) > 0 {
-		added, _ := enforcer.AddPolicies(adminPolicies)
+		added, err := enforcer.AddPolicies(adminPolicies)
+		if err != nil {
+			return fmt.Errorf("add admin policies: %w", err)
+		}
 		if added {
 			r.PoliciesAdded += len(adminPolicies)
 		}
@@ -139,13 +173,19 @@ func seedPolicies(db *gorm.DB, enforcer *casbin.Enforcer, roleMap map[string]*mo
 		userPolicies = append(userPolicies, []string{"user", p[0], p[1]})
 	}
 
-	enforcer.RemoveFilteredPolicy(0, "user")
+	if _, err := enforcer.RemoveFilteredPolicy(0, "user"); err != nil {
+		return fmt.Errorf("clear user policies: %w", err)
+	}
 	if len(userPolicies) > 0 {
-		added, _ := enforcer.AddPolicies(userPolicies)
+		added, err := enforcer.AddPolicies(userPolicies)
+		if err != nil {
+			return fmt.Errorf("add user policies: %w", err)
+		}
 		if added {
 			r.PoliciesAdded += len(userPolicies)
 		}
 	}
+	return nil
 }
 
 // defaultConfigs are seeded if they don't already exist.
@@ -184,18 +224,20 @@ var defaultConfigs = []model.SystemConfig{
 	{Key: "system.timezone", Value: "UTC", Remark: "系统默认时区"},
 }
 
-func seedDefaultConfigs(db *gorm.DB) {
+func seedDefaultConfigs(db *gorm.DB) error {
 	for _, cfg := range defaultConfigs {
 		var existing model.SystemConfig
 		if err := db.Where("\"key\" = ?", cfg.Key).First(&existing).Error; err == nil {
 			continue
+		} else if err != gorm.ErrRecordNotFound {
+			return fmt.Errorf("lookup config %s: %w", cfg.Key, err)
 		}
 		if err := db.Create(&cfg).Error; err != nil {
-			slog.Error("seed: failed to create config", "key", cfg.Key, "error", err)
-			continue
+			return fmt.Errorf("create config %s: %w", cfg.Key, err)
 		}
 		slog.Info("seed: created config", "key", cfg.Key)
 	}
+	return nil
 }
 
 var defaultAuthProviders = []model.AuthProvider{
@@ -203,18 +245,20 @@ var defaultAuthProviders = []model.AuthProvider{
 	{ProviderKey: "google", DisplayName: "Google", SortOrder: 2},
 }
 
-func seedAuthProviders(db *gorm.DB) {
+func seedAuthProviders(db *gorm.DB) error {
 	for _, p := range defaultAuthProviders {
 		var existing model.AuthProvider
 		if err := db.Where("provider_key = ?", p.ProviderKey).First(&existing).Error; err == nil {
 			continue
+		} else if err != gorm.ErrRecordNotFound {
+			return fmt.Errorf("lookup auth provider %s: %w", p.ProviderKey, err)
 		}
 		if err := db.Create(&p).Error; err != nil {
-			slog.Error("seed: failed to create auth provider", "key", p.ProviderKey, "error", err)
-			continue
+			return fmt.Errorf("create auth provider %s: %w", p.ProviderKey, err)
 		}
 		slog.Info("seed: created auth provider", "key", p.ProviderKey)
 	}
+	return nil
 }
 
 // SetSiteName updates the system.app_name config during installation.

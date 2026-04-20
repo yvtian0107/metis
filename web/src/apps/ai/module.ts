@@ -55,11 +55,10 @@ registerApp({
       children: [
         {
           index: true,
-          lazy: () => import("./pages/knowledge/index"),
-        },
-        {
-          path: ":id",
-          lazy: () => import("./pages/knowledge/[id]"),
+          lazy: async () => {
+            const { Navigate } = await import("react-router")
+            return { Component: () => Navigate({ to: "/ai/knowledge/sources", replace: true }) }
+          },
         },
         {
           path: "sources",
