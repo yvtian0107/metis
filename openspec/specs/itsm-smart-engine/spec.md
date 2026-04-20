@@ -53,7 +53,7 @@ DecisionPlan 结构 SHALL 新增 `ExecutionMode string` 字段（JSON key: `exec
 - **THEN** `parseDecisionPlan()` SHALL 将 `ExecutionMode` 默认为空字符串，等同 `"single"`
 
 ### Requirement: executeDecisionPlan 并签分支
-`executeDecisionPlan()` SHALL 在 `ExecutionMode == "parallel"` 时创建并签活动组，而非逐个覆盖 `current_activity_id`。
+`executeDecisionPlan()` SHALL 在 `ExecutionMode == "parallel"` 时创建并签活动组，而非逐个覆盖 `current_activity_id`。并行计划中的 action 类型活动 SHALL 被正确调度执行。
 
 #### Scenario: parallel 模式创建活动组
 - **WHEN** `executeDecisionPlan()` 处理 `ExecutionMode == "parallel"` 的 DecisionPlan
@@ -61,6 +61,23 @@ DecisionPlan 结构 SHALL 新增 `ExecutionMode string` 字段（JSON key: `exec
 - **AND** SHALL 为 activities 中的每个条目创建独立 TicketActivity，设置相同的 `activity_group_id`
 - **AND** SHALL 将工单 `current_activity_id` 设为组内第一个 activity ID
 
-#### Scenario: single 模式行为不变
-- **WHEN** `executeDecisionPlan()` 处理 `ExecutionMode` 为空或 `"single"` 的 DecisionPlan
-- **THEN** SHALL 按现有逻辑逐个创建 activity 并覆盖 `current_activity_id`
+#### Scenario: parallel 模式中的 action activity 被调度
+- **WHEN** `executeDecisionPlan()` 处理 parallel 计划且 activities 中包含 action 类型
+- **THEN** SHALL 为每个 action activity 提交 `itsm-action-execute` 异步任务
+- **AND** action activity 的初始状态 SHALL 为 `in_progress`
+
+#### Scenario: single 模式只创建第一个 activity
+- **WHEN** `executeDecisionPlan()` 处理 `ExecutionMode` 为空或 `"single"` 的 DecisionPlan 且 activities 包含多个条目
+- **THEN** SHALL 只创建第一个 activity 并设为 current
+- **AND** 后续 activity 的信息 SHALL 由下一轮决策循环根据最新上下文决定
+
+### Requirement: Signal 按引擎类型分派
+`ticket_service.Signal()` SHALL 根据工单的 `engine_type` 分派到正确的引擎，而非硬编码 classic engine。
+
+#### Scenario: Smart engine 工单收到 Signal
+- **WHEN** Signal 被调用且工单 `engine_type` 为 smart
+- **THEN** SHALL 调用 `smartEngine.Progress()` 而非 `classicEngine.Progress()`
+
+#### Scenario: Classic engine 工单收到 Signal
+- **WHEN** Signal 被调用且工单 `engine_type` 为 classic
+- **THEN** SHALL 调用 `classicEngine.Progress()`（保持现有行为）
