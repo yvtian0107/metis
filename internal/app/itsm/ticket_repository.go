@@ -241,7 +241,10 @@ type ApprovalItem struct {
 	TicketTitle           string     `json:"ticketTitle"`
 	TicketStatus          string     `json:"ticketStatus"`
 	ServiceID             uint       `json:"serviceId"`
+	ServiceName           string     `json:"serviceName"`
 	PriorityID            uint       `json:"priorityId"`
+	PriorityName          string     `json:"priorityName"`
+	PriorityColor         string     `json:"priorityColor"`
 	SLAStatus             string     `json:"slaStatus"`
 	SLAResponseDeadline   *time.Time `json:"slaResponseDeadline"`
 	SLAResolutionDeadline *time.Time `json:"slaResolutionDeadline"`
@@ -277,6 +280,7 @@ func (r *TicketRepo) ListApprovals(userID uint, positionIDs []uint, deptIDs []ui
 	// Single query with OR: workflow approvals via assignment OR AI confirmations via status
 	baseQuery := r.db.Table("itsm_ticket_activities AS act").
 		Joins("JOIN itsm_tickets AS t ON t.id = act.ticket_id").
+		Joins("LEFT JOIN itsm_service_definitions AS svc ON svc.id = t.service_id").
 		Joins("LEFT JOIN itsm_ticket_assignments AS a ON a.activity_id = act.id").
 		Joins("LEFT JOIN itsm_priorities AS p ON p.id = t.priority_id").
 		Where("t.deleted_at IS NULL AND act.deleted_at IS NULL").
@@ -310,7 +314,9 @@ func (r *TicketRepo) ListApprovals(userID uint, positionIDs []uint, deptIDs []ui
 	offset := (page - 1) * pageSize
 	if err := baseQuery.
 		Select(`t.id AS ticket_id, t.code AS ticket_code, t.title AS ticket_title, t.status AS ticket_status,
-			t.service_id, t.priority_id, t.sla_status, t.sla_response_deadline, t.sla_resolution_deadline,
+			t.service_id, COALESCE(svc.name, '') AS service_name,
+			t.priority_id, COALESCE(p.name, '') AS priority_name, COALESCE(p.color, '') AS priority_color,
+			t.sla_status, t.sla_response_deadline, t.sla_resolution_deadline,
 			act.id AS activity_id, act.name AS activity_name, act.activity_type, act.status AS activity_status,
 			act.form_schema, act.ai_confidence, act.ai_reasoning, act.started_at, act.created_at,
 			COALESCE(a.id, 0) AS assignment_id, COALESCE(a.participant_type, '') AS participant_type,

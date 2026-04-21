@@ -157,29 +157,24 @@ async function authorizedFetch(
 }
 
 async function handleErrorResponse(res: Response): Promise<never> {
-  // Password expired — redirect to change password
-  if (res.status === 409) {
-    let message = 'Password has expired';
-    try {
-      const body = (await res.json()) as ApiResponse<unknown>;
-      message = body.message || message;
-    } catch {
-      // ignore
-    }
-    window.dispatchEvent(
-      new CustomEvent('password-expired', { detail: { message } }),
-    );
-    throw new ApiError(message, 409, -1);
-  }
-
   let message = res.statusText;
+  let code = -1;
   try {
     const body = (await res.json()) as ApiResponse<unknown>;
     message = body.message || message;
+    code = body.code ?? code;
   } catch {
     // ignore parse errors
   }
-  throw new ApiError(message, res.status, -1);
+
+  // Password expired — redirect to change password. Other 409 responses are
+  // regular domain conflicts and must be surfaced to the caller.
+  if (res.status === 409 && message === 'password expired') {
+    window.dispatchEvent(
+      new CustomEvent('password-expired', { detail: { message } }),
+    );
+  }
+  throw new ApiError(message, res.status, code);
 }
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {

@@ -1,15 +1,22 @@
 import { useState } from "react"
 import { useTranslation } from "react-i18next"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
-import { Wrench, BookOpen, Globe, Code } from "lucide-react"
+import { Wrench, BookOpen, Globe, Code, CheckCircle2, CircleOff, Clock3, ShieldAlert } from "lucide-react"
 import { usePermission } from "@/hooks/use-permission"
 import { api } from "@/lib/api"
 import { toast } from "sonner"
 import { Switch } from "@/components/ui/switch"
 import { Badge } from "@/components/ui/badge"
 import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
+import {
   Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription,
 } from "@/components/ui/sheet"
+import { cn } from "@/lib/utils"
+
+type AvailabilityStatus = "available" | "inactive" | "unimplemented" | "risk_disabled"
 
 interface ToolItem {
   id: number
@@ -19,6 +26,10 @@ interface ToolItem {
   description: string
   parametersSchema: Record<string, unknown>
   isActive: boolean
+  isExecutable: boolean
+  availabilityStatus: AvailabilityStatus
+  availabilityReason?: string
+  boundAgentCount: number
 }
 
 interface ToolkitGroup {
@@ -32,11 +43,23 @@ const TOOLKIT_ICONS: Record<string, React.ElementType> = {
   code: Code,
 }
 
+const STATUS_ICONS: Record<AvailabilityStatus, React.ElementType> = {
+  available: CheckCircle2,
+  inactive: CircleOff,
+  unimplemented: Clock3,
+  risk_disabled: ShieldAlert,
+}
+
+function canToggleTool(tool: ToolItem) {
+  return tool.availabilityStatus === "available" || tool.availabilityStatus === "inactive"
+}
+
 export function BuiltinToolsTab() {
   const { t } = useTranslation(["ai", "common"])
   const queryClient = useQueryClient()
   const canUpdate = usePermission("ai:tool:update")
   const [openToolkit, setOpenToolkit] = useState<ToolkitGroup | null>(null)
+  const [confirmTool, setConfirmTool] = useState<ToolItem | null>(null)
 
   const { data, isLoading } = useQuery({
     queryKey: ["ai-tools"],
@@ -45,10 +68,11 @@ export function BuiltinToolsTab() {
   const groups = data?.items ?? []
 
   const toggleMutation = useMutation({
-    mutationFn: ({ id, isActive }: { id: number; isActive: boolean }) =>
-      api.put(`/api/v1/ai/tools/${id}`, { isActive }),
+    mutationFn: ({ id, isActive, confirmImpact }: { id: number; isActive: boolean; confirmImpact?: boolean }) =>
+      api.put(`/api/v1/ai/tools/${id}`, { isActive, confirmImpact }),
     onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: ["ai-tools"] })
+      setConfirmTool(null)
       toast.success(
         variables.isActive
           ? t("ai:tools.builtin.enableSuccess")
@@ -86,6 +110,7 @@ export function BuiltinToolsTab() {
         {groups.map((group) => {
           const Icon = TOOLKIT_ICONS[group.toolkit] ?? Wrench
           const activeCount = group.tools.filter((tool) => tool.isActive).length
+          const executableCount = group.tools.filter((tool) => tool.isExecutable).length
           const totalCount = group.tools.length
 
           return (
@@ -104,11 +129,11 @@ export function BuiltinToolsTab() {
                     {t(`ai:tools.toolkits.${group.toolkit}.name`)}
                   </h3>
                   <p className="text-xs text-muted-foreground">
-                    {activeCount}/{totalCount} {t("ai:tools.builtin.toolsEnabled")}
+                    {executableCount}/{totalCount} {t("ai:tools.builtin.toolsAvailable")}
                   </p>
                 </div>
-                <Badge variant={activeCount > 0 ? "default" : "secondary"} className="shrink-0">
-                  {activeCount > 0 ? t("ai:statusLabels.active") : t("ai:statusLabels.inactive")}
+                <Badge variant={executableCount > 0 ? "default" : "secondary"} className="shrink-0">
+                  {activeCount}/{totalCount} {t("ai:tools.builtin.toolsEnabled")}
                 </Badge>
               </div>
               <p className="text-sm text-muted-foreground line-clamp-2">
@@ -127,10 +152,36 @@ export function BuiltinToolsTab() {
               group={activeDrawerGroup}
               canUpdate={canUpdate}
               toggleMutation={toggleMutation}
+              onRequestDisable={(tool) => setConfirmTool(tool)}
             />
           )}
         </SheetContent>
       </Sheet>
+      <AlertDialog open={confirmTool !== null} onOpenChange={(open) => { if (!open) setConfirmTool(null) }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t("ai:tools.builtin.disableConfirmTitle")}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t("ai:tools.builtin.disableConfirmDesc", {
+                name: confirmTool ? t(`ai:tools.toolDefs.${confirmTool.name}.name`, confirmTool.displayName) : "",
+                count: confirmTool?.boundAgentCount ?? 0,
+              })}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={toggleMutation.isPending}>{t("common:cancel")}</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={!confirmTool || toggleMutation.isPending}
+              onClick={() => {
+                if (!confirmTool) return
+                toggleMutation.mutate({ id: confirmTool.id, isActive: false, confirmImpact: true })
+              }}
+            >
+              {t("common:confirm")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   )
 }
@@ -139,10 +190,12 @@ function ToolkitDetail({
   group,
   canUpdate,
   toggleMutation,
+  onRequestDisable,
 }: {
   group: ToolkitGroup
   canUpdate: boolean
-  toggleMutation: ReturnType<typeof useMutation<unknown, Error, { id: number; isActive: boolean }>>
+  toggleMutation: ReturnType<typeof useMutation<unknown, Error, { id: number; isActive: boolean; confirmImpact?: boolean }>>
+  onRequestDisable: (tool: ToolItem) => void
 }) {
   const { t } = useTranslation(["ai", "common"])
   const Icon = TOOLKIT_ICONS[group.toolkit] ?? Wrench
@@ -165,24 +218,67 @@ function ToolkitDetail({
         {group.tools.map((tool) => (
           <div
             key={tool.id}
-            className="flex items-center gap-3 rounded-lg border p-3 transition-colors"
+            className="rounded-lg border p-3 transition-colors"
           >
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium">{t(`ai:tools.toolDefs.${tool.name}.name`, tool.displayName)}</p>
-              <p className="text-xs text-muted-foreground mt-0.5">
-                {t(`ai:tools.toolDefs.${tool.name}.description`, tool.description)}
-              </p>
+            <div className="flex items-start gap-3">
+              <ToolStatusBadge tool={tool} />
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <p className="text-sm font-medium">{t(`ai:tools.toolDefs.${tool.name}.name`, tool.displayName)}</p>
+                  {tool.boundAgentCount > 0 && (
+                    <Badge variant="outline" className="text-[11px]">
+                      {t("ai:tools.builtin.boundAgentCount", { count: tool.boundAgentCount })}
+                    </Badge>
+                  )}
+                </div>
+                <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                  {t(`ai:tools.toolDefs.${tool.name}.description`, tool.description)}
+                </p>
+                {tool.availabilityReason && (
+                  <p className="mt-2 rounded-md border border-border/55 bg-muted/35 px-2 py-1.5 text-xs leading-5 text-muted-foreground">
+                    {tool.availabilityReason}
+                  </p>
+                )}
+                <details className="mt-2 text-xs text-muted-foreground">
+                  <summary className="cursor-pointer select-none">{t("ai:tools.builtin.parameters")}</summary>
+                  <pre className="mt-2 max-h-48 overflow-auto rounded-md bg-muted/45 p-2 text-[11px] leading-5">
+                    {JSON.stringify(tool.parametersSchema ?? {}, null, 2)}
+                  </pre>
+                </details>
+              </div>
+              <Switch
+                checked={tool.isActive}
+                disabled={!canUpdate || toggleMutation.isPending || !canToggleTool(tool)}
+                onCheckedChange={(checked) => {
+                  if (!checked && tool.boundAgentCount > 0) {
+                    onRequestDisable(tool)
+                    return
+                  }
+                  toggleMutation.mutate({ id: tool.id, isActive: checked })
+                }}
+              />
             </div>
-            <Switch
-              checked={tool.isActive}
-              disabled={!canUpdate || toggleMutation.isPending}
-              onCheckedChange={(checked) =>
-                toggleMutation.mutate({ id: tool.id, isActive: checked })
-              }
-            />
           </div>
         ))}
       </div>
     </>
+  )
+}
+
+function ToolStatusBadge({ tool }: { tool: ToolItem }) {
+  const { t } = useTranslation("ai")
+  const Icon = STATUS_ICONS[tool.availabilityStatus] ?? CircleOff
+  return (
+    <Badge
+      variant={tool.availabilityStatus === "available" ? "default" : "outline"}
+      className={cn(
+        "mt-0.5 shrink-0 gap-1.5",
+        tool.availabilityStatus === "risk_disabled" && "border-amber-500/45 text-amber-700 dark:text-amber-300",
+        tool.availabilityStatus === "unimplemented" && "border-muted-foreground/35 text-muted-foreground"
+      )}
+    >
+      <Icon className="size-3" />
+      {t(`tools.builtin.availability.${tool.availabilityStatus}`)}
+    </Badge>
   )
 }

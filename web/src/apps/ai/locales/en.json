@@ -150,7 +150,18 @@
       "enableSuccess": "Tool enabled",
       "disableSuccess": "Tool disabled",
       "toolsEnabled": "enabled",
-      "drawerHint": "When enabled, Agents bound to this toolkit can use the corresponding capabilities."
+      "toolsAvailable": "executable",
+      "drawerHint": "Only executable tools enter an Agent's model tool list; unimplemented and risk-gated capabilities are shown as roadmap items.",
+      "parameters": "Parameter schema",
+      "boundAgentCount": "Affects {{count}} Agents",
+      "disableConfirmTitle": "Disable built-in tool?",
+      "disableConfirmDesc": "\"{{name}}\" is currently bound to {{count}} Agents. After disabling it, those Agents will no longer receive this tool at runtime.",
+      "availability": {
+        "available": "Available",
+        "inactive": "Disabled",
+        "unimplemented": "Unimplemented",
+        "risk_disabled": "Risk gated"
+      }
     },
     "toolkits": {
       "knowledge": {
@@ -185,7 +196,7 @@
     "toolDefs": {
       "search_knowledge": {
         "name": "Search Knowledge",
-        "description": "Search for relevant documents in a knowledge base by keyword."
+        "description": "Search relevant content from the current Agent's bound knowledge bases and knowledge graphs."
       },
       "read_document": {
         "name": "Read Document",
@@ -193,11 +204,11 @@
       },
       "http_request": {
         "name": "HTTP Request",
-        "description": "Make an HTTP request to an external URL and get the response."
+        "description": "Planned external HTTP request capability; requires allowlists, timeouts, audit, and data-leak prevention before enablement."
       },
       "execute_script": {
         "name": "Execute Script",
-        "description": "Run a Python or Bash script in a sandbox and return the output."
+        "description": "Planned code execution capability; requires sandboxing, resource limits, language allowlists, and result redaction before enablement."
       },
       "general.current_time": {
         "name": "Get Current Time",
@@ -205,7 +216,7 @@
       },
       "system.current_user_profile": {
         "name": "Get Current User Profile",
-        "description": "Read the current user's basic profile and organizational affiliations (department, position, role)."
+        "description": "Read the current user's minimal organizational context without contact or permission details."
       },
       "itsm.service_match": {
         "name": "Service Match",

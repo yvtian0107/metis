@@ -20,6 +20,9 @@ export interface BindingItem {
   name: string
   displayName?: string
   description?: string
+  isExecutable?: boolean
+  availabilityStatus?: string
+  availabilityReason?: string
 }
 
 export interface BindingGroup {
@@ -49,6 +52,9 @@ interface ResolvedBindingItem {
   id: number
   name: string
   description?: string
+  isDisabled?: boolean
+  disabledReason?: string
+  availabilityStatus?: string
 }
 
 interface ResolvedBindingGroup {
@@ -91,6 +97,9 @@ export function BindingSelectorSection({
       description: item.description
         ? t(`ai:tools.toolDefs.${item.name}.description`, { defaultValue: item.description })
         : undefined,
+      isDisabled: item.isExecutable === false,
+      disabledReason: item.availabilityReason,
+      availabilityStatus: item.availabilityStatus,
     }))
   }, [items, t])
 
@@ -106,6 +115,9 @@ export function BindingSelectorSection({
         description: item.description
           ? t(`ai:tools.toolDefs.${item.name}.description`, { defaultValue: item.description })
           : undefined,
+        isDisabled: item.isExecutable === false,
+        disabledReason: item.availabilityReason,
+        availabilityStatus: item.availabilityStatus,
       })),
     }))
   }, [groups, t])
@@ -151,6 +163,8 @@ export function BindingSelectorSection({
 
   function toggle(id: number) {
     if (activeResolvedGroup) {
+      const target = activeResolvedGroup.items.find((item) => item.id === id)
+      if (target?.isDisabled) return
       const current = selectedIDsForGroup(activeResolvedGroup)
       const next = current.includes(id) ? current.filter((itemId) => itemId !== id) : [...current, id]
       const groupItemIDs = activeResolvedGroup.items.map((item) => item.id)
@@ -161,6 +175,8 @@ export function BindingSelectorSection({
       }
       return
     }
+    const target = resolvedItems.find((item) => item.id === id)
+    if (target?.isDisabled) return
     if (value.includes(id)) {
       onChange(value.filter((itemId) => itemId !== id))
       return
@@ -365,23 +381,32 @@ export function BindingSelectorSection({
                       <div className="space-y-3">
                         {group.items.map((item) => {
                           const checked = selectedIDsForGroup(group).includes(item.id)
+                          const disabled = item.isDisabled
                           return (
                             <label
                               key={item.id}
                               className={cn(
-                                "flex cursor-pointer items-start gap-3 rounded-[1rem] border px-4 py-3 transition-colors hover:border-border/90 hover:bg-accent/24",
+                                "flex items-start gap-3 rounded-[1rem] border px-4 py-3 transition-colors",
+                                disabled ? "cursor-not-allowed border-border/40 bg-muted/20 opacity-70" : "cursor-pointer hover:border-border/90 hover:bg-accent/24",
                                 checked ? "border-primary/30 bg-primary/[0.06]" : "border-border/55 bg-background/42"
                               )}
                             >
-                              <Checkbox checked={checked} onCheckedChange={() => toggle(item.id)} className="mt-0.5" />
+                              <Checkbox checked={checked} disabled={disabled} onCheckedChange={() => toggle(item.id)} className="mt-0.5" />
                               <div className="min-w-0 flex-1 space-y-1">
                                 <div className="flex items-center justify-between gap-3">
                                   <span className="truncate text-sm font-medium text-foreground">{item.name}</span>
-                                  {checked && <Badge variant="default">{t("ai:agents.selected")}</Badge>}
+                                  {checked ? (
+                                    <Badge variant="default">{t("ai:agents.selected")}</Badge>
+                                  ) : disabled && item.availabilityStatus ? (
+                                    <Badge variant="outline">{t(`ai:tools.builtin.availability.${item.availabilityStatus}`)}</Badge>
+                                  ) : null}
                                 </div>
                                 <p className="line-clamp-2 text-xs leading-5 text-muted-foreground">
                                   {item.description || t("ai:agents.noItemDescription")}
                                 </p>
+                                {disabled && item.disabledReason && (
+                                  <p className="text-xs leading-5 text-muted-foreground">{item.disabledReason}</p>
+                                )}
                               </div>
                             </label>
                           )
@@ -399,23 +424,32 @@ export function BindingSelectorSection({
                 <div className="space-y-3">
                   {filteredItems.map((item) => {
                     const checked = value.includes(item.id)
+                    const disabled = item.isDisabled
                     return (
                       <label
                         key={item.id}
                         className={cn(
-                          "flex cursor-pointer items-start gap-3 rounded-[1rem] border px-4 py-3 transition-colors hover:border-border/90 hover:bg-accent/24",
+                          "flex items-start gap-3 rounded-[1rem] border px-4 py-3 transition-colors",
+                          disabled ? "cursor-not-allowed border-border/40 bg-muted/20 opacity-70" : "cursor-pointer hover:border-border/90 hover:bg-accent/24",
                           checked ? "border-primary/30 bg-primary/[0.06]" : "border-border/55 bg-background/42"
                         )}
                       >
-                        <Checkbox checked={checked} onCheckedChange={() => toggle(item.id)} className="mt-0.5" />
+                        <Checkbox checked={checked} disabled={disabled} onCheckedChange={() => toggle(item.id)} className="mt-0.5" />
                         <div className="min-w-0 flex-1 space-y-1">
                           <div className="flex items-center justify-between gap-3">
                             <span className="truncate text-sm font-medium text-foreground">{item.name}</span>
-                            {checked && <Badge variant="default">{t("ai:agents.selected")}</Badge>}
+                            {checked ? (
+                              <Badge variant="default">{t("ai:agents.selected")}</Badge>
+                            ) : disabled && item.availabilityStatus ? (
+                              <Badge variant="outline">{t(`ai:tools.builtin.availability.${item.availabilityStatus}`)}</Badge>
+                            ) : null}
                           </div>
                           <p className="line-clamp-2 text-xs leading-5 text-muted-foreground">
                             {item.description || t("ai:agents.noItemDescription")}
                           </p>
+                          {disabled && item.disabledReason && (
+                            <p className="text-xs leading-5 text-muted-foreground">{item.disabledReason}</p>
+                          )}
                         </div>
                       </label>
                     )

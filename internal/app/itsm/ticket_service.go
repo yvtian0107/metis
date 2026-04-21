@@ -323,6 +323,247 @@ func (s *TicketService) Get(id uint) (*Ticket, error) {
 	return t, nil
 }
 
+// BuildResponse returns a UI-ready ticket DTO with display names and smart-state
+// summary. The base Ticket model intentionally stores IDs only; this method is
+// the contract boundary used by handlers.
+func (s *TicketService) BuildResponse(t *Ticket, operatorID uint) (TicketResponse, error) {
+	responses, err := s.BuildResponses([]Ticket{*t}, operatorID)
+	if err != nil {
+		return t.ToResponse(), err
+	}
+	if len(responses) == 0 {
+		return t.ToResponse(), nil
+	}
+	return responses[0], nil
+}
+
+func (s *TicketService) BuildResponses(items []Ticket, operatorID uint) ([]TicketResponse, error) {
+	responses := make([]TicketResponse, len(items))
+	if len(items) == 0 {
+		return responses, nil
+	}
+
+	serviceIDs := make(map[uint]struct{})
+	priorityIDs := make(map[uint]struct{})
+	userIDs := make(map[uint]struct{})
+	activityIDs := make(map[uint]struct{})
+	for i := range items {
+		t := &items[i]
+		responses[i] = t.ToResponse()
+		serviceIDs[t.ServiceID] = struct{}{}
+		priorityIDs[t.PriorityID] = struct{}{}
+		userIDs[t.RequesterID] = struct{}{}
+		if t.AssigneeID != nil {
+			userIDs[*t.AssigneeID] = struct{}{}
+		}
+		if t.CurrentActivityID != nil {
+			activityIDs[*t.CurrentActivityID] = struct{}{}
+		}
+	}
+
+	db := s.ticketRepo.DB()
+	serviceNames := map[uint]string{}
+	if ids := keysOf(serviceIDs); len(ids) > 0 {
+		var rows []struct {
+			ID   uint
+			Name string
+		}
+		if err := db.Table("itsm_service_definitions").Where("id IN ?", ids).Select("id, name").Scan(&rows).Error; err != nil {
+			return responses, err
+		}
+		for _, r := range rows {
+			serviceNames[r.ID] = r.Name
+		}
+	}
+
+	type priorityDisplay struct {
+		Name  string
+		Color string
+	}
+	priorities := map[uint]priorityDisplay{}
+	if ids := keysOf(priorityIDs); len(ids) > 0 {
+		var rows []struct {
+			ID    uint
+			Name  string
+			Color string
+		}
+		if err := db.Table("itsm_priorities").Where("id IN ?", ids).Select("id, name, color").Scan(&rows).Error; err != nil {
+			return responses, err
+		}
+		for _, r := range rows {
+			priorities[r.ID] = priorityDisplay{Name: r.Name, Color: r.Color}
+		}
+	}
+
+	userNames := map[uint]string{}
+	if ids := keysOf(userIDs); len(ids) > 0 {
+		var rows []struct {
+			ID       uint
+			Username string
+		}
+		if err := db.Table("users").Where("id IN ?", ids).Select("id, username").Scan(&rows).Error; err != nil {
+			return responses, err
+		}
+		for _, r := range rows {
+			userNames[r.ID] = r.Username
+		}
+	}
+
+	activities := map[uint]TicketActivity{}
+	if ids := keysOf(activityIDs); len(ids) > 0 {
+		var rows []TicketActivity
+		if err := db.Where("id IN ?", ids).Find(&rows).Error; err != nil {
+			return responses, err
+		}
+		for _, a := range rows {
+			activities[a.ID] = a
+		}
+	}
+
+	assignments := map[uint]ticketAssignmentDisplay{}
+	if ids := keysOf(activityIDs); len(ids) > 0 {
+		var rows []ticketAssignmentDisplay
+		query := db.Table("itsm_ticket_assignments AS a").
+			Joins("LEFT JOIN users AS au ON au.id = a.assignee_id").
+			Joins("LEFT JOIN users AS uu ON uu.id = a.user_id").
+			Joins("LEFT JOIN positions AS p ON p.id = a.position_id").
+			Joins("LEFT JOIN departments AS d ON d.id = a.department_id").
+			Where("a.activity_id IN ? AND a.status = ?", ids, AssignmentPending).
+			Select(`a.activity_id, a.participant_type,
+				COALESCE(au.username, uu.username, '') AS owner_name,
+				COALESCE(p.name, '') AS position_name,
+				COALESCE(d.name, '') AS department_name`)
+		if err := query.Scan(&rows).Error; err != nil {
+			return responses, err
+		}
+		posIDs, deptIDs := s.resolveUserOrg(operatorID)
+		for _, r := range rows {
+			if r.OwnerName == "" {
+				switch {
+				case r.PositionName != "" && r.DepartmentName != "":
+					r.OwnerName = r.DepartmentName + " / " + r.PositionName
+				case r.PositionName != "":
+					r.OwnerName = r.PositionName
+				case r.DepartmentName != "":
+					r.OwnerName = r.DepartmentName
+				}
+			}
+			r.CanAct = s.assignmentCanAct(r.ActivityID, operatorID, posIDs, deptIDs)
+			assignments[r.ActivityID] = r
+		}
+	}
+
+	for i := range responses {
+		resp := &responses[i]
+		resp.ServiceName = serviceNames[resp.ServiceID]
+		if p, ok := priorities[resp.PriorityID]; ok {
+			resp.PriorityName = p.Name
+			resp.PriorityColor = p.Color
+		}
+		resp.RequesterName = userNames[resp.RequesterID]
+		if resp.AssigneeID != nil {
+			resp.AssigneeName = userNames[*resp.AssigneeID]
+		}
+		if resp.EngineType == "smart" {
+			s.populateSmartSummary(resp, activities, assignments)
+		}
+	}
+
+	return responses, nil
+}
+
+type ticketAssignmentDisplay struct {
+	ActivityID      uint
+	ParticipantType string
+	OwnerName       string
+	PositionName    string
+	DepartmentName  string
+	CanAct          bool
+}
+
+func (s *TicketService) populateSmartSummary(resp *TicketResponse, activities map[uint]TicketActivity, assignments map[uint]ticketAssignmentDisplay) {
+	if resp.Status == TicketStatusCompleted || resp.Status == TicketStatusCancelled || resp.Status == TicketStatusFailed {
+		resp.SmartState = "terminal"
+		resp.NextStepSummary = "流程已结束"
+		return
+	}
+	if resp.AIFailureCount >= engine.MaxAIFailureCount {
+		resp.SmartState = "ai_disabled"
+		resp.NextStepSummary = "AI 连续失败，等待人工接管"
+		return
+	}
+	if resp.CurrentActivityID == nil {
+		resp.SmartState = "ai_reasoning"
+		resp.CurrentOwnerType = "ai"
+		resp.CurrentOwnerName = "AI 智能引擎"
+		resp.NextStepSummary = "AI 正在分析下一步"
+		return
+	}
+	activity, ok := activities[*resp.CurrentActivityID]
+	if !ok {
+		resp.SmartState = "ai_reasoning"
+		resp.CurrentOwnerType = "ai"
+		resp.CurrentOwnerName = "AI 智能引擎"
+		resp.NextStepSummary = "AI 正在准备下一步"
+		return
+	}
+	resp.NextStepSummary = activity.Name
+	if resp.NextStepSummary == "" {
+		resp.NextStepSummary = activity.ActivityType
+	}
+	if assignment, ok := assignments[activity.ID]; ok {
+		resp.CurrentOwnerType = assignment.ParticipantType
+		resp.CurrentOwnerName = assignment.OwnerName
+		resp.CanAct = assignment.CanAct
+	}
+	switch {
+	case activity.Status == engine.ActivityPendingApproval:
+		resp.SmartState = "waiting_ai_confirmation"
+	case activity.ActivityType == engine.NodeAction && (activity.Status == engine.ActivityPending || activity.Status == engine.ActivityInProgress):
+		resp.SmartState = "action_running"
+		resp.CurrentOwnerType = "system"
+		resp.CurrentOwnerName = "自动化动作"
+	case engine.IsHumanNode(activity.ActivityType) && (activity.Status == engine.ActivityPending || activity.Status == engine.ActivityInProgress):
+		resp.SmartState = "waiting_human"
+		if resp.CurrentOwnerName == "" {
+			resp.CurrentOwnerName = "待分配"
+		}
+	default:
+		resp.SmartState = "ai_decided"
+		resp.CurrentOwnerType = "ai"
+		resp.CurrentOwnerName = "AI 智能引擎"
+	}
+}
+
+func (s *TicketService) assignmentCanAct(activityID uint, operatorID uint, positionIDs []uint, deptIDs []uint) bool {
+	if operatorID == 0 {
+		return false
+	}
+	conditions := s.ticketRepo.DB().Where("user_id = ? OR assignee_id = ?", operatorID, operatorID)
+	if len(positionIDs) > 0 {
+		conditions = conditions.Or("position_id IN ?", positionIDs)
+	}
+	if len(deptIDs) > 0 {
+		conditions = conditions.Or("department_id IN ?", deptIDs)
+	}
+	var count int64
+	s.ticketRepo.DB().Model(&TicketAssignment{}).
+		Where("activity_id = ? AND status = ?", activityID, AssignmentPending).
+		Where(conditions).
+		Count(&count)
+	return count > 0
+}
+
+func keysOf(set map[uint]struct{}) []uint {
+	keys := make([]uint, 0, len(set))
+	for id := range set {
+		if id > 0 {
+			keys = append(keys, id)
+		}
+	}
+	return keys
+}
+
 func (s *TicketService) List(params TicketListParams) ([]Ticket, int64, error) {
 	return s.ticketRepo.List(params)
 }

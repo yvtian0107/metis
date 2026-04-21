@@ -72,11 +72,16 @@ type TicketResponse struct {
 	Title                 string     `json:"title"`
 	Description           string     `json:"description"`
 	ServiceID             uint       `json:"serviceId"`
+	ServiceName           string     `json:"serviceName"`
 	EngineType            string     `json:"engineType"`
 	Status                string     `json:"status"`
 	PriorityID            uint       `json:"priorityId"`
+	PriorityName          string     `json:"priorityName"`
+	PriorityColor         string     `json:"priorityColor"`
 	RequesterID           uint       `json:"requesterId"`
+	RequesterName         string     `json:"requesterName"`
 	AssigneeID            *uint      `json:"assigneeId"`
+	AssigneeName          string     `json:"assigneeName"`
 	CurrentActivityID     *uint      `json:"currentActivityId"`
 	Source                string     `json:"source"`
 	AgentSessionID        *uint      `json:"agentSessionId"`
@@ -88,6 +93,12 @@ type TicketResponse struct {
 	SLAStatus             string     `json:"slaStatus"`
 	SLAPausedAt           *time.Time `json:"slaPausedAt"`
 	FinishedAt            *time.Time `json:"finishedAt"`
+	SmartState            string     `json:"smartState,omitempty"`
+	CurrentOwnerType      string     `json:"currentOwnerType,omitempty"`
+	CurrentOwnerName      string     `json:"currentOwnerName,omitempty"`
+	NextStepSummary       string     `json:"nextStepSummary,omitempty"`
+	CanAct                bool       `json:"canAct"`
+	CanOverride           bool       `json:"canOverride"`
 	CreatedAt             time.Time  `json:"createdAt"`
 	UpdatedAt             time.Time  `json:"updatedAt"`
 }
@@ -193,9 +204,12 @@ type TicketTimelineResponse struct {
 	TicketID   uint      `json:"ticketId"`
 	ActivityID *uint     `json:"activityId"`
 	OperatorID uint      `json:"operatorId"`
+	OperatorName string  `json:"operatorName"`
 	EventType  string    `json:"eventType"`
 	Message    string    `json:"message"`
+	Content    string    `json:"content"`
 	Details    JSONField `json:"details"`
+	Metadata   JSONField `json:"metadata"`
 	Reasoning  string    `json:"reasoning"`
 	CreatedAt  time.Time `json:"createdAt"`
 }
@@ -208,7 +222,9 @@ func (t *TicketTimeline) ToResponse() TicketTimelineResponse {
 		OperatorID: t.OperatorID,
 		EventType:  t.EventType,
 		Message:    t.Message,
+		Content:    t.Message,
 		Details:    t.Details,
+		Metadata:   t.Details,
 		Reasoning:  t.Reasoning,
 		CreatedAt:  t.CreatedAt,
 	}

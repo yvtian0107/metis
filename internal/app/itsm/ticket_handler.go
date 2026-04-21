@@ -25,6 +25,65 @@ func NewTicketHandler(i do.Injector) (*TicketHandler, error) {
 	return &TicketHandler{svc: svc, timelineSvc: timelineSvc}, nil
 }
 
+func currentUserID(c *gin.Context) uint {
+	userID, ok := c.Get("userId")
+	if !ok {
+		return 0
+	}
+	uid, _ := userID.(uint)
+	return uid
+}
+
+func (h *TicketHandler) respondTicket(c *gin.Context, ticket *Ticket) {
+	resp, err := h.svc.BuildResponse(ticket, currentUserID(c))
+	if err != nil {
+		handler.Fail(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+	handler.OK(c, resp)
+}
+
+func (h *TicketHandler) respondTicketList(c *gin.Context, items []Ticket, total int64) {
+	result, err := h.svc.BuildResponses(items, currentUserID(c))
+	if err != nil {
+		handler.Fail(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+	handler.OK(c, gin.H{"items": result, "total": total})
+}
+
+func (h *TicketHandler) buildTimelineResponses(items []TicketTimeline) ([]TicketTimelineResponse, error) {
+	result := make([]TicketTimelineResponse, len(items))
+	userIDs := make(map[uint]struct{})
+	for i, t := range items {
+		result[i] = t.ToResponse()
+		if t.OperatorID > 0 {
+			userIDs[t.OperatorID] = struct{}{}
+		}
+	}
+	userNames := make(map[uint]string)
+	if ids := keysOf(userIDs); len(ids) > 0 {
+		var rows []struct {
+			ID       uint
+			Username string
+		}
+		if err := h.svc.ticketRepo.DB().Table("users").Where("id IN ?", ids).Select("id, username").Scan(&rows).Error; err != nil {
+			return result, err
+		}
+		for _, r := range rows {
+			userNames[r.ID] = r.Username
+		}
+	}
+	for i := range result {
+		if result[i].OperatorID == 0 {
+			result[i].OperatorName = "系统"
+			continue
+		}
+		result[i].OperatorName = userNames[result[i].OperatorID]
+	}
+	return result, nil
+}
+
 type CreateTicketRequest struct {
 	Title       string    `json:"title" binding:"required,max=256"`
 	Description string    `json:"description"`
@@ -69,7 +128,7 @@ func (h *TicketHandler) Create(c *gin.Context) {
 
 	c.Set("audit_resource_id", strconv.Itoa(int(ticket.ID)))
 	c.Set("audit_summary", "created ticket: "+ticket.Code)
-	handler.OK(c, ticket.ToResponse())
+	h.respondTicket(c, ticket)
 }
 
 func (h *TicketHandler) List(c *gin.Context) {
@@ -117,12 +176,7 @@ func (h *TicketHandler) List(c *gin.Context) {
 		handler.Fail(c, http.StatusInternalServerError, err.Error())
 		return
 	}
-
-	result := make([]TicketResponse, len(items))
-	for i, t := range items {
-		result[i] = t.ToResponse()
-	}
-	handler.OK(c, gin.H{"items": result, "total": total})
+	h.respondTicketList(c, items, total)
 }
 
 func (h *TicketHandler) Get(c *gin.Context) {
@@ -141,7 +195,7 @@ func (h *TicketHandler) Get(c *gin.Context) {
 		handler.Fail(c, http.StatusInternalServerError, err.Error())
 		return
 	}
-	handler.OK(c, ticket.ToResponse())
+	h.respondTicket(c, ticket)
 }
 
 type AssignTicketRequest struct {
@@ -182,7 +236,7 @@ func (h *TicketHandler) Assign(c *gin.Context) {
 	}
 
 	c.Set("audit_summary", "assigned ticket: "+ticket.Code)
-	handler.OK(c, ticket.ToResponse())
+	h.respondTicket(c, ticket)
 }
 
 func (h *TicketHandler) Complete(c *gin.Context) {
@@ -213,7 +267,7 @@ func (h *TicketHandler) Complete(c *gin.Context) {
 	}
 
 	c.Set("audit_summary", "completed ticket: "+ticket.Code)
-	handler.OK(c, ticket.ToResponse())
+	h.respondTicket(c, ticket)
 }
 
 func (h *TicketHandler) Cancel(c *gin.Context) {
@@ -250,7 +304,7 @@ func (h *TicketHandler) Cancel(c *gin.Context) {
 	}
 
 	c.Set("audit_summary", "cancelled ticket: "+ticket.Code)
-	handler.OK(c, ticket.ToResponse())
+	h.respondTicket(c, ticket)
 }
 
 type WithdrawTicketInput struct {
@@ -295,7 +349,7 @@ func (h *TicketHandler) Withdraw(c *gin.Context) {
 	}
 
 	c.Set("audit_summary", "withdrew ticket: "+ticket.Code)
-	handler.OK(c, ticket.ToResponse())
+	h.respondTicket(c, ticket)
 }
 
 func (h *TicketHandler) Mine(c *gin.Context) {
@@ -311,12 +365,7 @@ func (h *TicketHandler) Mine(c *gin.Context) {
 		handler.Fail(c, http.StatusInternalServerError, err.Error())
 		return
 	}
-
-	result := make([]TicketResponse, len(items))
-	for i, t := range items {
-		result[i] = t.ToResponse()
-	}
-	handler.OK(c, gin.H{"items": result, "total": total})
+	h.respondTicketList(c, items, total)
 }
 
 func (h *TicketHandler) Todo(c *gin.Context) {
@@ -333,12 +382,7 @@ func (h *TicketHandler) Todo(c *gin.Context) {
 		handler.Fail(c, http.StatusInternalServerError, err.Error())
 		return
 	}
-
-	result := make([]TicketResponse, len(items))
-	for i, t := range items {
-		result[i] = t.ToResponse()
-	}
-	handler.OK(c, gin.H{"items": result, "total": total})
+	h.respondTicketList(c, items, total)
 }
 
 func (h *TicketHandler) History(c *gin.Context) {
@@ -378,12 +422,7 @@ func (h *TicketHandler) History(c *gin.Context) {
 		handler.Fail(c, http.StatusInternalServerError, err.Error())
 		return
 	}
-
-	result := make([]TicketResponse, len(items))
-	for i, t := range items {
-		result[i] = t.ToResponse()
-	}
-	handler.OK(c, gin.H{"items": result, "total": total})
+	h.respondTicketList(c, items, total)
 }
 
 func (h *TicketHandler) Timeline(c *gin.Context) {
@@ -398,10 +437,10 @@ func (h *TicketHandler) Timeline(c *gin.Context) {
 		handler.Fail(c, http.StatusInternalServerError, err.Error())
 		return
 	}
-
-	result := make([]TicketTimelineResponse, len(items))
-	for i, t := range items {
-		result[i] = t.ToResponse()
+	result, err := h.buildTimelineResponses(items)
+	if err != nil {
+		handler.Fail(c, http.StatusInternalServerError, err.Error())
+		return
 	}
 	handler.OK(c, result)
 }
@@ -448,7 +487,7 @@ func (h *TicketHandler) Progress(c *gin.Context) {
 	}
 
 	c.Set("audit_summary", "progressed ticket: "+ticket.Code+" outcome="+req.Outcome)
-	handler.OK(c, ticket.ToResponse())
+	h.respondTicket(c, ticket)
 }
 
 type SignalTicketRequest struct {
@@ -493,7 +532,7 @@ func (h *TicketHandler) Signal(c *gin.Context) {
 	}
 
 	c.Set("audit_summary", "signalled ticket: "+ticket.Code)
-	handler.OK(c, ticket.ToResponse())
+	h.respondTicket(c, ticket)
 }
 
 func (h *TicketHandler) Activities(c *gin.Context) {
@@ -555,7 +594,7 @@ func (h *TicketHandler) ConfirmActivity(c *gin.Context) {
 	}
 
 	c.Set("audit_summary", "confirmed AI decision for ticket: "+ticket.Code)
-	handler.OK(c, ticket.ToResponse())
+	h.respondTicket(c, ticket)
 }
 
 type RejectActivityRequest struct {
@@ -607,7 +646,7 @@ func (h *TicketHandler) RejectActivity(c *gin.Context) {
 	}
 
 	c.Set("audit_summary", "rejected AI decision for ticket: "+ticket.Code)
-	handler.OK(c, ticket.ToResponse())
+	h.respondTicket(c, ticket)
 }
 
 type OverrideJumpRequest struct {
@@ -650,7 +689,7 @@ func (h *TicketHandler) OverrideJump(c *gin.Context) {
 	}
 
 	c.Set("audit_summary", "override jump for ticket: "+ticket.Code)
-	handler.OK(c, ticket.ToResponse())
+	h.respondTicket(c, ticket)
 }
 
 type OverrideReassignRequest struct {
@@ -693,7 +732,7 @@ func (h *TicketHandler) OverrideReassign(c *gin.Context) {
 	}
 
 	c.Set("audit_summary", "override reassign for ticket: "+ticket.Code)
-	handler.OK(c, ticket.ToResponse())
+	h.respondTicket(c, ticket)
 }
 
 func (h *TicketHandler) RetryAI(c *gin.Context) {
@@ -724,7 +763,7 @@ func (h *TicketHandler) RetryAI(c *gin.Context) {
 	}
 
 	c.Set("audit_summary", "retry AI for ticket: "+ticket.Code)
-	handler.OK(c, ticket.ToResponse())
+	h.respondTicket(c, ticket)
 }
 
 // --- Approval handlers ---
@@ -799,7 +838,7 @@ func (h *TicketHandler) ApproveActivity(c *gin.Context) {
 	}
 
 	c.Set("audit_summary", "approved activity for ticket: "+ticket.Code)
-	handler.OK(c, ticket.ToResponse())
+	h.respondTicket(c, ticket)
 }
 
 type DenyActivityRequest struct {
@@ -848,7 +887,7 @@ func (h *TicketHandler) DenyActivity(c *gin.Context) {
 	}
 
 	c.Set("audit_summary", "denied activity for ticket: "+ticket.Code)
-	handler.OK(c, ticket.ToResponse())
+	h.respondTicket(c, ticket)
 }
 
 // SLAPause handles PUT /api/v1/itsm/tickets/:id/sla/pause
@@ -882,7 +921,7 @@ func (h *TicketHandler) SLAPause(c *gin.Context) {
 	}
 
 	c.Set("audit_summary", "paused SLA for ticket: "+ticket.Code)
-	handler.OK(c, ticket.ToResponse())
+	h.respondTicket(c, ticket)
 }
 
 // SLAResume handles PUT /api/v1/itsm/tickets/:id/sla/resume
@@ -916,7 +955,7 @@ func (h *TicketHandler) SLAResume(c *gin.Context) {
 	}
 
 	c.Set("audit_summary", "resumed SLA for ticket: "+ticket.Code)
-	handler.OK(c, ticket.ToResponse())
+	h.respondTicket(c, ticket)
 }
 
 // Transfer handles POST /api/v1/itsm/tickets/:id/transfer
@@ -956,7 +995,7 @@ func (h *TicketHandler) Transfer(c *gin.Context) {
 	}
 
 	c.Set("audit_summary", "transferred task for ticket: "+ticket.Code)
-	handler.OK(c, ticket.ToResponse())
+	h.respondTicket(c, ticket)
 }
 
 // Delegate handles POST /api/v1/itsm/tickets/:id/delegate
@@ -996,7 +1035,7 @@ func (h *TicketHandler) Delegate(c *gin.Context) {
 	}
 
 	c.Set("audit_summary", "delegated task for ticket: "+ticket.Code)
-	handler.OK(c, ticket.ToResponse())
+	h.respondTicket(c, ticket)
 }
 
 // Claim handles POST /api/v1/itsm/tickets/:id/claim
@@ -1036,5 +1075,5 @@ func (h *TicketHandler) Claim(c *gin.Context) {
 	}
 
 	c.Set("audit_summary", "claimed task for ticket: "+ticket.Code)
-	handler.OK(c, ticket.ToResponse())
+	h.respondTicket(c, ticket)
 }
