@@ -12,6 +12,13 @@ const (
 	ToolTypeBuiltin = "builtin"
 )
 
+const (
+	ToolAvailabilityAvailable     = "available"
+	ToolAvailabilityInactive      = "inactive"
+	ToolAvailabilityUnimplemented = "unimplemented"
+	ToolAvailabilityRiskDisabled  = "risk_disabled"
+)
+
 // MCP transport types
 const (
 	MCPTransportSSE   = "sse"
@@ -55,6 +62,10 @@ type ToolResponse struct {
 	Description      string          `json:"description"`
 	ParametersSchema json.RawMessage `json:"parametersSchema"`
 	IsActive         bool            `json:"isActive"`
+	IsExecutable     bool            `json:"isExecutable"`
+	AvailabilityStatus string        `json:"availabilityStatus"`
+	AvailabilityReason string        `json:"availabilityReason,omitempty"`
+	BoundAgentCount    int64         `json:"boundAgentCount"`
 	CreatedAt        time.Time       `json:"createdAt"`
 	UpdatedAt        time.Time       `json:"updatedAt"`
 }
@@ -72,6 +83,8 @@ func (t *Tool) ToResponse() ToolResponse {
 		Description:      t.Description,
 		ParametersSchema: params,
 		IsActive:         t.IsActive,
+		IsExecutable:     t.IsActive,
+		AvailabilityStatus: ToolAvailabilityAvailable,
 		CreatedAt:        t.CreatedAt,
 		UpdatedAt:        t.UpdatedAt,
 	}

@@ -36,13 +36,12 @@ func (h *ToolHandler) List(c *gin.Context) {
 	// Group by toolkit, preserve insertion order
 	orderMap := map[string]int{}
 	var groups []toolkitGroup
-	for _, t := range tools {
-		resp := t.ToResponse()
-		idx, ok := orderMap[t.Toolkit]
+	for _, resp := range tools {
+		idx, ok := orderMap[resp.Toolkit]
 		if !ok {
 			idx = len(groups)
-			orderMap[t.Toolkit] = idx
-			groups = append(groups, toolkitGroup{Toolkit: t.Toolkit})
+			orderMap[resp.Toolkit] = idx
+			groups = append(groups, toolkitGroup{Toolkit: resp.Toolkit})
 		}
 		groups[idx].Tools = append(groups[idx].Tools, resp)
 	}
@@ -50,7 +49,8 @@ func (h *ToolHandler) List(c *gin.Context) {
 }
 
 type toggleToolReq struct {
-	IsActive bool `json:"isActive"`
+	IsActive      bool `json:"isActive"`
+	ConfirmImpact bool `json:"confirmImpact"`
 }
 
 func (h *ToolHandler) Update(c *gin.Context) {
@@ -61,10 +61,26 @@ func (h *ToolHandler) Update(c *gin.Context) {
 		return
 	}
 
-	t, err := h.svc.ToggleActive(uint(id), req.IsActive)
+	t, err := h.svc.ToggleActive(uint(id), req.IsActive, ToggleToolOptions{ConfirmImpact: req.ConfirmImpact})
 	if err != nil {
 		if errors.Is(err, ErrToolNotFound) {
 			handler.Fail(c, http.StatusNotFound, err.Error())
+			return
+		}
+		if errors.Is(err, ErrToolNotExecutable) {
+			handler.Fail(c, http.StatusConflict, err.Error())
+			return
+		}
+		var impactErr *ToolImpactError
+		if errors.As(err, &impactErr) {
+			c.JSON(http.StatusConflict, handler.R{
+				Code:    -1,
+				Message: "tool is bound to agents; confirmation required",
+				Data: gin.H{
+					"toolName":        impactErr.ToolName,
+					"boundAgentCount": impactErr.BoundAgentCount,
+				},
+			})
 			return
 		}
 		handler.Fail(c, http.StatusInternalServerError, err.Error())
@@ -76,5 +92,5 @@ func (h *ToolHandler) Update(c *gin.Context) {
 	c.Set("audit_resource_id", strconv.Itoa(int(t.ID)))
 	c.Set("audit_summary", "Toggled tool: "+t.Name)
 
-	handler.OK(c, t.ToResponse())
+	handler.OK(c, t)
 }

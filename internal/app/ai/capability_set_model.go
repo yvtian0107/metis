@@ -56,11 +56,14 @@ type AgentCapabilitySetBinding struct {
 }
 
 type CapabilitySetItemResponse struct {
-	ID          uint   `json:"id"`
-	Name        string `json:"name"`
-	DisplayName string `json:"displayName,omitempty"`
-	Description string `json:"description,omitempty"`
-	IsActive    bool   `json:"isActive"`
+	ID                 uint   `json:"id"`
+	Name               string `json:"name"`
+	DisplayName        string `json:"displayName,omitempty"`
+	Description        string `json:"description,omitempty"`
+	IsActive           bool   `json:"isActive"`
+	IsExecutable       bool   `json:"isExecutable,omitempty"`
+	AvailabilityStatus string `json:"availabilityStatus,omitempty"`
+	AvailabilityReason string `json:"availabilityReason,omitempty"`
 }
 
 type CapabilitySetResponse struct {

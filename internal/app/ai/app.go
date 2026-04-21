@@ -120,6 +120,7 @@ func (a *AIApp) Providers(i do.Injector) {
 	do.Provide(i, NewMemoryHandler)
 	do.Provide(i, NewAgentGateway)
 	do.Provide(i, NewKnowledgeQueryHandler)
+	do.Provide(i, NewKnowledgeToolRegistry)
 
 	// DecisionExecutor for smart workflow engine decision cycles
 	do.Provide(i, func(i do.Injector) (app.AIDecisionExecutor, error) {
@@ -365,9 +366,11 @@ func (a *AIApp) Tasks() []scheduler.TaskDef {
 // app.ToolRegistryProvider (e.g. ITSM).
 func collectToolRegistries(i do.Injector) []ToolHandlerRegistry {
 	generalReg := do.MustInvoke[*GeneralToolRegistry](i)
+	knowledgeReg := do.MustInvoke[*KnowledgeToolRegistry](i)
 
 	var registries []ToolHandlerRegistry
 	registries = append(registries, generalReg)
+	registries = append(registries, knowledgeReg)
 
 	// Discover registries from other Apps.
 	for _, a := range app.All() {

@@ -45,3 +45,18 @@ func (r *ToolRepo) Create(t *Tool) error {
 func (r *ToolRepo) Update(t *Tool) error {
 	return r.db.Save(t).Error
 }
+
+func (r *ToolRepo) CountBoundAgents(toolID uint) (int64, error) {
+	var count int64
+	err := r.db.Raw(`
+		SELECT COUNT(DISTINCT agent_id) FROM (
+			SELECT agent_id FROM ai_agent_tools WHERE tool_id = ?
+			UNION
+			SELECT ai_agent_capability_set_items.agent_id
+			FROM ai_agent_capability_set_items
+			JOIN ai_capability_sets ON ai_capability_sets.id = ai_agent_capability_set_items.set_id
+			WHERE ai_capability_sets.type = ? AND ai_agent_capability_set_items.item_id = ? AND ai_agent_capability_set_items.enabled = ?
+		) AS bound_agents
+	`, toolID, CapabilityTypeTool, toolID, true).Scan(&count).Error
+	return count, err
+}

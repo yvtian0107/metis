@@ -55,8 +55,13 @@ func (gw *AgentGateway) addBuiltinRuntimeTools(agentID uint, assembly *assistant
 		if !tool.IsActive {
 			continue
 		}
-		if !hasToolHandler(gw.toolRegistries, tool.Name) {
+		hasHandler := hasToolHandler(gw.toolRegistries, tool.Name)
+		if !hasHandler {
 			slog.Warn("skipping builtin tool without executable handler", "tool", tool.Name)
+			continue
+		}
+		if availability := classifyToolAvailability(tool, hasHandler); !availability.IsExecutable {
+			slog.Warn("skipping builtin tool unavailable at runtime", "tool", tool.Name, "status", availability.Status)
 			continue
 		}
 		params := json.RawMessage(tool.ParametersSchema)
@@ -196,8 +201,7 @@ func (gw *AgentGateway) buildKnowledgeContext(ctx context.Context, agentID uint,
 	if len(assetIDs) == 0 {
 		return ""
 	}
-	_ = ctx
-	results, err := gw.knowledgeSearcher.SearchKnowledge(assetIDs, query, knowledgeRecallLimit)
+	results, err := gw.knowledgeSearcher.SearchKnowledgeWithContext(ctx, assetIDs, query, knowledgeRecallLimit)
 	if err != nil {
 		slog.Warn("knowledge recall failed", "agentID", agentID, "error", err)
 		return ""

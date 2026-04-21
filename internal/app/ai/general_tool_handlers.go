@@ -122,10 +122,28 @@ func (r *GeneralToolRegistry) handleCurrentTime(_ context.Context, _ uint, args 
 // --- Handler: system.current_user_profile ---
 
 type userProfileResult struct {
-	User          *GeneralUserInfo   `json:"user"`
-	Department    *app.OrgDepartment `json:"department,omitempty"`
-	Positions     []app.OrgPosition  `json:"positions,omitempty"`
+	User          safeUserProfile    `json:"user"`
+	Department    *safeOrgDepartment `json:"department,omitempty"`
+	Positions     []safeOrgPosition  `json:"positions,omitempty"`
 	MissingFields []string           `json:"missing_fields,omitempty"`
+}
+
+type safeUserProfile struct {
+	ID              uint   `json:"id"`
+	Username        string `json:"username"`
+	RoleName        string `json:"roleName,omitempty"`
+	ManagerUsername string `json:"managerUsername,omitempty"`
+}
+
+type safeOrgDepartment struct {
+	Name string `json:"name"`
+	Code string `json:"code,omitempty"`
+}
+
+type safeOrgPosition struct {
+	Name      string `json:"name"`
+	Code      string `json:"code,omitempty"`
+	IsPrimary bool   `json:"is_primary,omitempty"`
 }
 
 func (r *GeneralToolRegistry) handleCurrentUserProfile(_ context.Context, userID uint, _ json.RawMessage) (json.RawMessage, error) {
@@ -135,7 +153,12 @@ func (r *GeneralToolRegistry) handleCurrentUserProfile(_ context.Context, userID
 	}
 
 	result := userProfileResult{
-		User: user,
+		User: safeUserProfile{
+			ID:              user.ID,
+			Username:        user.Username,
+			RoleName:        user.RoleName,
+			ManagerUsername: user.ManagerUsername,
+		},
 	}
 
 	if r.orgResolver != nil {
@@ -143,14 +166,21 @@ func (r *GeneralToolRegistry) handleCurrentUserProfile(_ context.Context, userID
 
 		dept, err := r.orgResolver.GetUserDepartment(userID)
 		if err == nil && dept != nil {
-			result.Department = dept
+			result.Department = &safeOrgDepartment{Name: dept.Name, Code: dept.Code}
 		} else {
 			missingFields = append(missingFields, "department")
 		}
 
 		positions, err := r.orgResolver.GetUserPositions(userID)
 		if err == nil && len(positions) > 0 {
-			result.Positions = positions
+			result.Positions = make([]safeOrgPosition, 0, len(positions))
+			for _, position := range positions {
+				result.Positions = append(result.Positions, safeOrgPosition{
+					Name:      position.Name,
+					Code:      position.Code,
+					IsPrimary: position.IsPrimary,
+				})
+			}
 		} else {
 			missingFields = append(missingFields, "positions")
 		}

@@ -464,14 +464,14 @@ func seedAI(db *gorm.DB, enforcer *casbin.Enforcer) error {
 			Toolkit:     "knowledge",
 			Name:        "search_knowledge",
 			DisplayName: "Search Knowledge",
-			Description: "Search for relevant content across knowledge bases and knowledge graphs.",
+			Description: "Search relevant content from the current Agent's bound knowledge bases and knowledge graphs. The asset scope is controlled by the server, not by model-provided asset IDs.",
 			ParametersSchema: model.JSONText(`{
 				"type": "object",
 				"properties": {
-					"asset_ids": {"type": "array", "items": {"type": "integer"}, "description": "The IDs of knowledge assets (bases or graphs) to search"},
-					"query": {"type": "string", "description": "The search query"}
+					"query": {"type": "string", "description": "The search query"},
+					"limit": {"type": "integer", "description": "Maximum number of results to return, default 5 and max 10"}
 				},
-				"required": ["asset_ids", "query"]
+				"required": ["query"]
 			}`),
 			IsActive: true,
 		},
@@ -479,7 +479,7 @@ func seedAI(db *gorm.DB, enforcer *casbin.Enforcer) error {
 			Toolkit:     "knowledge",
 			Name:        "read_document",
 			DisplayName: "Read Document",
-			Description: "Read the full content of a specific document from a knowledge base.",
+			Description: "Planned capability for reading a specific document node. Disabled until document node permission and reading APIs are stable.",
 			ParametersSchema: model.JSONText(`{
 				"type": "object",
 				"properties": {
@@ -488,13 +488,13 @@ func seedAI(db *gorm.DB, enforcer *casbin.Enforcer) error {
 				},
 				"required": ["knowledge_base_id", "node_id"]
 			}`),
-			IsActive: true,
+			IsActive: false,
 		},
 		{
 			Toolkit:     "network",
 			Name:        "http_request",
 			DisplayName: "HTTP Request",
-			Description: "Make an HTTP request to an external URL and return the response.",
+			Description: "Risk-gated capability for external HTTP requests. Requires domain allowlists, timeout controls, auditing, and data-leak prevention before enablement.",
 			ParametersSchema: model.JSONText(`{
 				"type": "object",
 				"properties": {
@@ -511,7 +511,7 @@ func seedAI(db *gorm.DB, enforcer *casbin.Enforcer) error {
 			Toolkit:     "code",
 			Name:        "execute_script",
 			DisplayName: "Execute Script",
-			Description: "Execute a script in a sandboxed environment and return stdout/stderr.",
+			Description: "Risk-gated capability for code execution. Requires sandboxing, resource limits, language allowlists, auditing, and result redaction before enablement.",
 			ParametersSchema: model.JSONText(`{
 				"type": "object",
 				"properties": {
@@ -540,7 +540,7 @@ func seedAI(db *gorm.DB, enforcer *casbin.Enforcer) error {
 			Toolkit:     "general",
 			Name:        "system.current_user_profile",
 			DisplayName: "获取当前用户信息",
-			Description: "读取当前提单用户的基础资料和组织归属（部门、岗位、角色），帮助服务台用已有信息补齐提单上下文。",
+			Description: "读取当前用户的最小必要组织上下文（用户名、角色名称、部门、岗位、直属上级），用于个性化和工作流语境；不返回联系方式或权限细节。",
 			ParametersSchema: model.JSONText(`{
 				"type": "object",
 				"properties": {}
@@ -556,9 +556,24 @@ func seedAI(db *gorm.DB, enforcer *casbin.Enforcer) error {
 				continue
 			}
 			slog.Info("seed: created builtin tool", "name", tool.Name)
-		} else if existing.Toolkit != tool.Toolkit {
-			db.Model(&existing).Update("toolkit", tool.Toolkit)
-			slog.Info("seed: updated toolkit for builtin tool", "name", tool.Name, "toolkit", tool.Toolkit)
+		} else {
+			updates := map[string]any{}
+			if existing.Toolkit != tool.Toolkit {
+				updates["toolkit"] = tool.Toolkit
+			}
+			if existing.DisplayName != tool.DisplayName {
+				updates["display_name"] = tool.DisplayName
+			}
+			if existing.Description != tool.Description {
+				updates["description"] = tool.Description
+			}
+			if string(existing.ParametersSchema) != string(tool.ParametersSchema) {
+				updates["parameters_schema"] = tool.ParametersSchema
+			}
+			if len(updates) > 0 {
+				db.Model(&existing).Updates(updates)
+				slog.Info("seed: updated builtin tool metadata", "name", tool.Name)
+			}
 		}
 	}
 	if err := ensureDefaultCapabilitySets(db); err != nil {

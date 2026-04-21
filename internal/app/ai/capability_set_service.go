@@ -245,7 +245,17 @@ func capabilityItemResponse(db *gorm.DB, typ string, itemID uint) (CapabilitySet
 		if err := db.First(&item, itemID).Error; err != nil {
 			return CapabilitySetItemResponse{}, false, ignoreNotFound(err)
 		}
-		return CapabilitySetItemResponse{ID: item.ID, Name: item.Name, DisplayName: item.DisplayName, Description: item.Description, IsActive: item.IsActive}, true, nil
+		availability := classifyToolAvailability(item, true)
+		return CapabilitySetItemResponse{
+			ID:                 item.ID,
+			Name:               item.Name,
+			DisplayName:        item.DisplayName,
+			Description:        item.Description,
+			IsActive:           item.IsActive,
+			IsExecutable:       availability.IsExecutable,
+			AvailabilityStatus: availability.Status,
+			AvailabilityReason: availability.Reason,
+		}, true, nil
 	case CapabilityTypeMCP:
 		var item MCPServer
 		if err := db.First(&item, itemID).Error; err != nil {
@@ -366,7 +376,19 @@ func validateCapabilitySetItems(db *gorm.DB, set CapabilitySet, itemIDs []uint) 
 	}
 	switch set.Type {
 	case CapabilityTypeTool:
-		return ensureIDsExist(db, &Tool{}, itemIDs, "")
+		if err := ensureIDsExist(db, &Tool{}, itemIDs, ""); err != nil {
+			return err
+		}
+		var tools []Tool
+		if err := db.Where("id IN ?", itemIDs).Find(&tools).Error; err != nil {
+			return err
+		}
+		for _, tool := range tools {
+			if !classifyToolAvailability(tool, true).IsExecutable {
+				return ErrInvalidBinding
+			}
+		}
+		return nil
 	case CapabilityTypeMCP:
 		return ensureIDsExist(db, &MCPServer{}, itemIDs, "")
 	case CapabilityTypeSkill:
