@@ -574,7 +574,7 @@ func (bc *bddContext) givenSystemInitialized() error {
 //
 //	| 身份 | 用户名 | 部门 | 岗位 |
 //	| 申请人 | vpn-requester | - | - |
-//	| 网络管理员审批人 | network-operator | it | network_admin |
+//	| 网络管理员处理人 | network-operator | it | network_admin |
 func (bc *bddContext) givenParticipants(table *godog.Table) error {
 	if len(table.Rows) < 2 {
 		return fmt.Errorf("participants table must have a header row and at least one data row")
@@ -685,10 +685,10 @@ func registerCommonSteps(sc *godog.ScenarioContext, bc *bddContext) {
 	sc.Given(`^已定义 VPN 开通申请协作规范$`, bc.givenVPNCollaborationSpec)
 	sc.Then(`^工单状态为 "([^"]*)"$`, bc.thenTicketStatusIs)
 	sc.Then(`^工单状态不为 "([^"]*)"$`, bc.thenTicketStatusIsNot)
-	sc.Then(`^当前审批分配到岗位 "([^"]*)"$`, bc.thenCurrentApprovalAssignedToPosition)
-	sc.Then(`^当前审批仅对 "([^"]*)" 可见$`, bc.thenCurrentApprovalOnlyVisibleTo)
+	sc.Then(`^当前处理任务分配到岗位 "([^"]*)"$`, bc.thenCurrentProcessAssignedToPosition)
+	sc.Then(`^当前处理任务仅对 "([^"]*)" 可见$`, bc.thenCurrentProcessOnlyVisibleTo)
 	sc.Then(`^"([^"]*)" 认领当前工单应失败$`, bc.thenClaimShouldFail)
-	sc.Then(`^"([^"]*)" 审批当前工单应失败$`, bc.thenApproveShouldFail)
+	sc.Then(`^"([^"]*)" 处理当前工单应失败$`, bc.thenProcessShouldFail)
 
 	sc.When(`^智能引擎执行决策循环直到工单完成$`, bc.whenSmartEngineDecisionCycleUntilComplete)
 }
@@ -697,10 +697,10 @@ func registerCommonSteps(sc *godog.ScenarioContext, bc *bddContext) {
 // Responsibility boundary step definitions
 // ---------------------------------------------------------------------------
 
-// thenCurrentApprovalAssignedToPosition asserts the current activity's assignment
+// thenCurrentProcessAssignedToPosition asserts the current activity's assignment
 // targets the expected position — either via PositionID on the assignment,
 // or via the assigned user belonging to that position+department.
-func (bc *bddContext) thenCurrentApprovalAssignedToPosition(positionCode string) error {
+func (bc *bddContext) thenCurrentProcessAssignedToPosition(positionCode string) error {
 	activity, err := bc.getCurrentActivity()
 	if err != nil {
 		return err
@@ -752,9 +752,9 @@ func (bc *bddContext) thenCurrentApprovalAssignedToPosition(positionCode string)
 	return fmt.Errorf("no assignment for activity %d targets position %q", activity.ID, positionCode)
 }
 
-// thenCurrentApprovalOnlyVisibleTo asserts that only the specified user is the assignee
+// thenCurrentProcessOnlyVisibleTo asserts that only the specified user is the assignee
 // or is eligible for the current activity's assignment.
-func (bc *bddContext) thenCurrentApprovalOnlyVisibleTo(username string) error {
+func (bc *bddContext) thenCurrentProcessOnlyVisibleTo(username string) error {
 	expectedUser, ok := bc.usersByName[username]
 	if !ok {
 		return fmt.Errorf("user %q not found in context", username)
@@ -912,10 +912,10 @@ func (bc *bddContext) thenClaimShouldFail(username string) error {
 	return nil
 }
 
-// thenApproveShouldFail asserts that the specified user cannot directly approve the current activity
+// thenProcessShouldFail asserts that the specified user cannot directly process the current activity
 // because they are not in the assignment's position+department.
-func (bc *bddContext) thenApproveShouldFail(username string) error {
-	// Same eligibility check — if user can't claim, they can't approve either.
+func (bc *bddContext) thenProcessShouldFail(username string) error {
+	// Same eligibility check — if user can't claim, they can't process either.
 	return bc.thenClaimShouldFail(username)
 }
 
@@ -925,7 +925,7 @@ func (bc *bddContext) thenApproveShouldFail(username string) error {
 
 // whenSmartEngineDecisionCycleUntilComplete runs the decision cycle up to 8 times,
 // stopping early once the ticket reaches a terminal state ("completed", "cancelled", "failed").
-// Between attempts it auto-approves any pending/in_progress activities the LLM may have
+// Between attempts it auto-completes any pending/in_progress activities the LLM may have
 // created, clearing the path for a completion decision on the next cycle.
 func (bc *bddContext) whenSmartEngineDecisionCycleUntilComplete() error {
 	if bc.ticket == nil {
@@ -933,10 +933,6 @@ func (bc *bddContext) whenSmartEngineDecisionCycleUntilComplete() error {
 	}
 
 	const maxAttempts = 8
-	const maxPendingApprovalConfirms = 2 // cap to prevent infinite loop
-
-	pendingApprovalConfirms := 0
-
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		// Refresh ticket status.
 		bc.db.First(bc.ticket, bc.ticket.ID)
@@ -944,35 +940,11 @@ func (bc *bddContext) whenSmartEngineDecisionCycleUntilComplete() error {
 			return nil
 		}
 
-		// Between retries (attempt > 1): auto-approve any pending activities the LLM created
-		// on previous cycles, so they don't block the completion decision.
-		if attempt > 1 {
-			bc.autoApproveBlockingActivities()
-
-			// Also handle pending_approval activities (with cap to avoid infinite loop).
-			if pendingApprovalConfirms < maxPendingApprovalConfirms {
-				var paActivities []TicketActivity
-				bc.db.Where("ticket_id = ? AND status = ?", bc.ticket.ID, "pending_approval").
-					Find(&paActivities)
-				for _, act := range paActivities {
-					if pendingApprovalConfirms >= maxPendingApprovalConfirms {
-						break
-					}
-					log.Printf("[retry-approve] confirming pending_approval activity %d (confirm %d/%d)",
-						act.ID, pendingApprovalConfirms+1, maxPendingApprovalConfirms)
-					var plan engine.DecisionPlan
-					if err := json.Unmarshal([]byte(act.AIDecision), &plan); err != nil {
-						continue
-					}
-					bc.smartEngine.ExecuteConfirmedPlan(bc.db, bc.ticket.ID, &plan)
-					bc.db.Model(&TicketActivity{}).Where("id = ?", act.ID).
-						Updates(map[string]any{"status": "completed", "finished_at": time.Now()})
-					pendingApprovalConfirms++
-					// Auto-approve the newly created activities from the confirmed plan.
-					bc.autoApproveBlockingActivities()
-				}
+			// Between retries (attempt > 1): auto-complete any pending activities the LLM created
+			// on previous cycles, so they don't block the completion decision.
+			if attempt > 1 {
+				bc.autoProcessBlockingActivities()
 			}
-		}
 
 		ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 		var completedID *uint
@@ -1007,26 +979,22 @@ func isTerminal(status string) bool {
 	return status == "completed" || status == "cancelled" || status == "failed"
 }
 
-// autoApproveBlockingActivities finds any pending/in_progress activities (non-parallel)
-// for the current ticket and auto-approves them via SmartEngine.Progress so the next
+// autoProcessBlockingActivities finds any pending/in_progress activities (non-parallel)
+// for the current ticket and auto-completes them via SmartEngine.Progress so the next
 // decision cycle can produce a "complete" decision.
-//
-// Note: pending_approval activities are intentionally NOT auto-confirmed here. Confirming
-// them creates new activities that the AI sees as "more work to do", triggering an infinite
-// loop. Only the explicit whenAssigneeClaimsAndApproves step handles pending_approval.
-func (bc *bddContext) autoApproveBlockingActivities() {
+func (bc *bddContext) autoProcessBlockingActivities() {
 	var activities []TicketActivity
 	bc.db.Where("ticket_id = ? AND status IN ?",
 		bc.ticket.ID, []string{"pending", "in_progress"}).
 		Find(&activities)
 
 	for _, act := range activities {
-		bc.autoApproveSingleActivity(act)
+		bc.autoProcessSingleActivity(act)
 	}
 }
 
-// autoApproveSingleActivity approves a single pending/in_progress activity.
-func (bc *bddContext) autoApproveSingleActivity(act TicketActivity) {
+// autoProcessSingleActivity completes a single pending/in_progress activity.
+func (bc *bddContext) autoProcessSingleActivity(act TicketActivity) {
 	// Determine operator from assignment.
 	var assignment TicketAssignment
 	if err := bc.db.Where("activity_id = ?", act.ID).First(&assignment).Error; err != nil {
@@ -1074,12 +1042,12 @@ func (bc *bddContext) autoApproveSingleActivity(act TicketActivity) {
 	err := bc.smartEngine.Progress(ctx, bc.db, engine.ProgressParams{
 		TicketID:   bc.ticket.ID,
 		ActivityID: act.ID,
-		Outcome:    "approved",
+		Outcome:    "completed",
 		OperatorID: operatorID,
 	})
 	cancel()
 	if err != nil {
-		log.Printf("[auto-approve] activity %d: %v", act.ID, err)
+		log.Printf("[auto-complete] activity %d: %v", act.ID, err)
 	}
 }
 

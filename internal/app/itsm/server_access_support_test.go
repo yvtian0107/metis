@@ -19,11 +19,11 @@ import (
 // serverAccessCollaborationSpec is the collaboration spec for the production server temporary access service.
 const serverAccessCollaborationSpec = `这是一个生产服务器临时访问申请服务。
 用户来找服务台时，先把访问账号、目标主机、来源 IP、访问时段和访问目的这些信息问清楚，再整理成可以确认的申请摘要。
-常见的应用排障、主机巡检、日志查看、进程处理、磁盘清理和一般生产运维访问，交给信息部的运维管理员岗位审批，审批参与者类型必须使用 position_department，部门编码使用 it，岗位编码使用 ops_admin。
-网络抓包、链路诊断、ACL 调整、负载均衡检查、防火墙策略核对和其他网络侧访问，交给信息部的网络管理员岗位审批，审批参与者类型必须使用 position_department，部门编码使用 it，岗位编码使用 network_admin。
-安全审计、取证分析、漏洞修复验证、入侵排查、合规核查和其他高敏访问，交给信息部的安全管理员岗位审批，审批参与者类型必须使用 position_department，部门编码使用 it，岗位编码使用 security_admin。
-不要让申请人在表单里自己选择审批类别，流程决策智能体应根据访问目的和访问原因在运行时判断应该流转到哪个审批岗位。
-审批通过后直接结束流程，不需要额外生成驳回分支。`
+常见的应用排障、主机巡检、日志查看、进程处理、磁盘清理和一般生产运维访问，交给信息部的运维管理员岗位处理，处理参与者类型必须使用 position_department，部门编码使用 it，岗位编码使用 ops_admin。
+网络抓包、链路诊断、ACL 调整、负载均衡检查、防火墙策略核对和其他网络侧访问，交给信息部的网络管理员岗位处理，处理参与者类型必须使用 position_department，部门编码使用 it，岗位编码使用 network_admin。
+安全审计、取证分析、漏洞修复验证、入侵排查、合规核查和其他高敏访问，交给信息部的安全管理员岗位处理，处理参与者类型必须使用 position_department，部门编码使用 it，岗位编码使用 security_admin。
+不要让申请人在表单里自己选择处理类别，流程决策智能体应根据访问目的和访问原因在运行时判断应该流转到哪个处理岗位。
+处理完成后直接结束流程，不需要额外生成取消分支。`
 
 // serverAccessCasePayload defines test data for a single server access BDD scenario.
 type serverAccessCasePayload struct {

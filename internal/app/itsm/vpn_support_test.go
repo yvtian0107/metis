@@ -20,7 +20,7 @@ import (
 
 // vpnCollaborationSpec is the collaboration spec for the VPN activation service.
 // Mirrors the seed data in seed.go.
-const vpnCollaborationSpec = `用户通过 IT 服务台提交 VPN 开通申请。服务台需要收集 VPN 账号、设备与用途说明、访问原因。如果访问原因属于线上支持、故障排查、生产应急或网络接入问题，则交给信息部的网络管理员岗位审批，审批参与者类型必须使用 position_department，部门编码使用 it，岗位编码使用 network_admin。如果访问原因属于外部协作、长期远程办公、跨境访问或安全合规事项，则交给信息部的信息安全管理员岗位审批，审批参与者类型必须使用 position_department，部门编码使用 it，岗位编码使用 security_admin。审批通过后直接结束流程，不要生成驳回分支。`
+const vpnCollaborationSpec = `用户在 IT 服务台提交 VPN 开通申请。服务台需要收集 VPN 账号、设备与用途说明、访问原因。如果访问原因属于线上支持、故障排查、生产应急或网络接入问题，则交给信息部的网络管理员岗位处理，处理参与者类型必须使用 position_department，部门编码使用 it，岗位编码使用 network_admin。如果访问原因属于外部协作、长期远程办公、跨境访问或安全合规事项，则交给信息部的信息安全管理员岗位处理，处理参与者类型必须使用 position_department，部门编码使用 it，岗位编码使用 security_admin。处理完成后直接结束流程，不要生成取消分支。`
 
 // vpnSampleFormData provides typical VPN request form values for BDD tests.
 // The "request_kind" field drives the exclusive gateway routing.
@@ -188,14 +188,14 @@ const decisionAgentSystemPrompt = `你是流程决策智能体，负责为 ITSM 
 决策原则：
 1. 优先遵循明确规则，其次才是保守推断；不能为了让流程继续而编造参与者、节点或条件
 2. 信息不足时，优先做保守决策：宁可指出需要人工介入，也不要输出高风险猜测
-3. 审批节点仅支持通过/驳回，处理节点仅支持提交结果
+3. 处理节点仅支持使用/取消，处理节点仅支持提交结果
 4. 如果动作执行失败，要明确指出流程被阻塞且需要人工处理
 
 严格约束：
 1. 不要跳过工具或上下文校验直接编造结论
 2. 不允许输出未在流程或策略中出现的参与方式
 3. 不允许把姓名当作 username，不允许把岗位名称当作岗位 code，不允许把部门名称当作部门 code
-4. 不允许为了"看起来完整"而补全不存在的审批链
+4. 不允许为了"看起来完整"而补全不存在的处理链
 
 请始终输出结构化、保守且可审计的判断。`
 
@@ -267,16 +267,16 @@ func publishVPNSmartService(bc *bddContext) error {
 	return nil
 }
 
-// missingParticipantWorkflowJSON is a static workflow fixture where the approval node
+// missingParticipantWorkflowJSON is a static workflow fixture where the process node
 // has no participant_type, used to test smart engine's graceful fallback.
 var missingParticipantWorkflowJSON = json.RawMessage(`{
 	"nodes": [
 		{"id": "start", "type": "start", "label": "开始"},
-		{"id": "approval", "type": "approve", "label": "审批", "config": {}},
+		{"id": "process", "type": "process", "label": "处理", "config": {}},
 		{"id": "end", "type": "end", "label": "结束"}
 	],
 	"edges": [
-		{"source": "start", "target": "approval"},
-		{"source": "approval", "target": "end", "condition": "approved"}
+		{"source": "start", "target": "process"},
+		{"source": "process", "target": "end", "condition": "completed"}
 	]
 }`)

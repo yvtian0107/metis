@@ -20,7 +20,7 @@ func registerClassicSteps(sc *godog.ScenarioContext, bc *bddContext) {
 	sc.Then(`^当前活动类型为 "([^"]*)"$`, bc.thenCurrentActivityTypeIs)
 	sc.Then(`^当前活动分配给 "([^"]*)" 所属的 ([^/]+)/([^"]+)$`, bc.thenCurrentActivityAssignedTo)
 	sc.Then(`^当前活动未分配给 "([^"]*)"$`, bc.thenCurrentActivityNotAssignedTo)
-	sc.When(`^"([^"]*)" 认领并审批通过当前工单$`, bc.whenClaimAndApprove)
+	sc.When(`^"([^"]*)" 认领并处理完成当前工单$`, bc.whenClaimAndProcess)
 }
 
 // givenClassicServicePublished generates a VPN workflow via LLM and publishes a classic service definition.
@@ -29,7 +29,7 @@ func (bc *bddContext) givenClassicServicePublished() error {
 }
 
 // whenSubmitVPNRequest creates a ticket in the DB, starts the classic engine,
-// and auto-submits the initial form activity to advance to the approval step.
+// and auto-submits the initial form activity to advance to the process step.
 //
 // requestKind is mapped to the gateway routing field:
 //   - "network_support" → first condition branch (network admin)
@@ -295,8 +295,8 @@ func (bc *bddContext) thenCurrentActivityNotAssignedTo(username string) error {
 	return nil
 }
 
-// whenClaimAndApprove finds the current activity, claims it for the user, and progresses with "approved".
-func (bc *bddContext) whenClaimAndApprove(username string) error {
+// whenClaimAndProcess finds the current activity, claims it for the user, and progresses with "completed".
+func (bc *bddContext) whenClaimAndProcess(username string) error {
 	user, ok := bc.usersByName[username]
 	if !ok {
 		return fmt.Errorf("user %q not found in context", username)
@@ -339,7 +339,7 @@ func (bc *bddContext) getCurrentActivity() (*TicketActivity, error) {
 	}
 
 	var activity TicketActivity
-	err := bc.db.Where("ticket_id = ? AND status IN ?", bc.ticket.ID, []string{"pending", "in_progress", "pending_approval"}).
+	err := bc.db.Where("ticket_id = ? AND status IN ?", bc.ticket.ID, []string{"pending", "in_progress", "pending"}).
 		Order("id DESC").First(&activity).Error
 	if err != nil {
 		return nil, fmt.Errorf("no active activity found for ticket %d: %w", bc.ticket.ID, err)

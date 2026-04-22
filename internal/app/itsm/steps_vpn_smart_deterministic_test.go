@@ -28,8 +28,8 @@ func registerDeterministicSteps(sc *godog.ScenarioContext, bc *bddContext) {
 	sc.When(`^执行确定性 complete 决策$`, bc.whenDeterministicCompletePlan)
 	sc.When(`^工单 AI 失败次数设为上限并尝试决策$`, bc.whenAICircuitBreaker)
 	sc.When(`^取消智能工单，原因为 "([^"]*)"$`, bc.whenCancelSmartTicket)
-	sc.When(`^创建确定性待确认决策 type="([^"]*)"$`, bc.whenCreatePendingApprovalDecision)
-	sc.When(`^管理员拒绝当前待确认决策$`, bc.whenAdminRejectsDecision)
+		sc.When(`^创建确定性人工处置决策 type="([^"]*)"$`, bc.whenCreatePendingProcessDecision)
+		sc.When(`^管理员取消当前人工处置决策$`, bc.whenAdminRejectsDecision)
 
 	// Then
 	sc.Then(`^最新活动类型为 "([^"]*)" 且状态为 "([^"]*)"$`, bc.thenLatestActivityTypeAndStatus)
@@ -43,19 +43,19 @@ func registerDeterministicSteps(sc *godog.ScenarioContext, bc *bddContext) {
 // --- Given steps ---
 
 // givenStaticSmartServicePublished creates a smart service with a static workflow JSON,
-// bypassing LLM generation. Deterministic tests only use ExecuteConfirmedPlan, so the
+// bypassing LLM generation. Deterministic tests only use ExecuteDecisionPlan, so the
 // workflow content doesn't matter — we just need valid service + ticket records.
 func (bc *bddContext) givenStaticSmartServicePublished() error {
 	// Static workflow — minimal but valid structure.
 	staticWorkflow := json.RawMessage(`{
 		"nodes": [
 			{"id": "start", "type": "start", "label": "开始"},
-			{"id": "approval", "type": "approve", "label": "审批", "config": {"participant_type": "position_department", "position_code": "network_admin", "department_code": "it"}},
+				{"id": "process", "type": "process", "label": "处理", "config": {"participant_type": "position_department", "position_code": "network_admin", "department_code": "it"}},
 			{"id": "end", "type": "end", "label": "结束"}
 		],
 		"edges": [
-			{"source": "start", "target": "approval"},
-			{"source": "approval", "target": "end", "condition": "approved"}
+				{"source": "start", "target": "process"},
+				{"source": "process", "target": "end", "condition": "completed"}
 		]
 	}`)
 
@@ -165,7 +165,7 @@ func (bc *bddContext) whenDeterministicPlanWithParticipant(actType, username str
 		Confidence: 0.9,
 	}
 
-	if err := bc.smartEngine.ExecuteConfirmedPlan(bc.db, bc.ticket.ID, plan); err != nil {
+	if err := bc.smartEngine.ExecuteDecisionPlan(bc.db, bc.ticket.ID, plan); err != nil {
 		return fmt.Errorf("execute confirmed plan: %w", err)
 	}
 	return bc.db.First(bc.ticket, bc.ticket.ID).Error
@@ -193,7 +193,7 @@ func (bc *bddContext) whenDeterministicPlanWithoutParticipant(actType string) er
 		Confidence: 0.9,
 	}
 
-	if err := bc.smartEngine.ExecuteConfirmedPlan(bc.db, bc.ticket.ID, plan); err != nil {
+	if err := bc.smartEngine.ExecuteDecisionPlan(bc.db, bc.ticket.ID, plan); err != nil {
 		return fmt.Errorf("execute confirmed plan: %w", err)
 	}
 	return bc.db.First(bc.ticket, bc.ticket.ID).Error
@@ -216,7 +216,7 @@ func (bc *bddContext) whenDeterministicCompletePlan() error {
 		Confidence:   0.95,
 	}
 
-	if err := bc.smartEngine.ExecuteConfirmedPlan(bc.db, bc.ticket.ID, plan); err != nil {
+	if err := bc.smartEngine.ExecuteDecisionPlan(bc.db, bc.ticket.ID, plan); err != nil {
 		return fmt.Errorf("execute confirmed plan: %w", err)
 	}
 	return bc.db.First(bc.ticket, bc.ticket.ID).Error
@@ -260,7 +260,7 @@ func (bc *bddContext) whenCancelSmartTicket(reason string) error {
 	return bc.db.First(bc.ticket, bc.ticket.ID).Error
 }
 
-func (bc *bddContext) whenCreatePendingApprovalDecision(actType string) error {
+func (bc *bddContext) whenCreatePendingProcessDecision(actType string) error {
 	if bc.ticket == nil {
 		return fmt.Errorf("no ticket in context")
 	}
@@ -273,15 +273,15 @@ func (bc *bddContext) whenCreatePendingApprovalDecision(actType string) error {
 	now := time.Now()
 	activity := &TicketActivity{
 		TicketID:     bc.ticket.ID,
-		Name:         "AI 决策待确认",
-		ActivityType: actType,
-		Status:       engine.ActivityPendingApproval,
+			Name:         "AI 决策待人工处置",
+			ActivityType: actType,
+			Status:       engine.ActivityPending,
 		AIReasoning:  "确定性测试：低置信度决策",
 		AIConfidence: 0.5,
 		StartedAt:    &now,
 	}
 	if err := bc.db.Create(activity).Error; err != nil {
-		return fmt.Errorf("create pending_approval activity: %w", err)
+		return fmt.Errorf("create manual handling activity: %w", err)
 	}
 
 	bc.db.Model(&Ticket{}).Where("id = ?", bc.ticket.ID).Update("current_activity_id", activity.ID)
@@ -293,14 +293,14 @@ func (bc *bddContext) whenAdminRejectsDecision() error {
 	if err != nil {
 		return err
 	}
-	if activity.Status != engine.ActivityPendingApproval {
-		return fmt.Errorf("expected pending_approval, got %q", activity.Status)
+	if activity.Status != engine.ActivityPending {
+		return fmt.Errorf("expected pending, got %q", activity.Status)
 	}
 
 	now := time.Now()
 	if err := bc.db.Model(&TicketActivity{}).Where("id = ?", activity.ID).
 		Updates(map[string]any{
-			"status":      engine.ActivityRejected,
+				"status":      engine.ActivityCancelled,
 			"finished_at": now,
 		}).Error; err != nil {
 		return fmt.Errorf("reject activity: %w", err)
@@ -309,8 +309,8 @@ func (bc *bddContext) whenAdminRejectsDecision() error {
 	return bc.db.Create(&TicketTimeline{
 		TicketID:   bc.ticket.ID,
 		ActivityID: &activity.ID,
-		EventType:  "ai_decision_rejected",
-		Message:    "管理员拒绝了 AI 决策",
+			EventType:  "ai_decision_cancelled",
+			Message:    "管理员取消了 AI 人工处置任务",
 	}).Error
 }
 

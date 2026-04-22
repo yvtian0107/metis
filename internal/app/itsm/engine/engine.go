@@ -149,7 +149,6 @@ const (
 	ActivityInProgress      = "in_progress"
 	ActivityCompleted       = "completed"
 	ActivityCancelled       = "cancelled"
-	ActivityRejected        = "rejected" // smart engine: AI decision rejected by human
 )
 
 // Smart engine errors

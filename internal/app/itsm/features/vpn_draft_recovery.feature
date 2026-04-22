@@ -9,8 +9,8 @@ Feature: VPN 开通申请 — 草稿字段变更后 Agent 自愈重试
     And 已准备好以下参与人、岗位与职责
       | 身份               | 用户名             | 部门 | 岗位           |
       | 申请人             | vpn-requester      | -    | -              |
-      | 网络管理员审批人   | network-operator   | it   | network_admin  |
-      | 安全管理员审批人   | security-operator  | it   | security_admin |
+      | 网络管理员处理人   | network-operator   | it   | network_admin  |
+      | 安全管理员处理人   | security-operator  | it   | security_admin |
     And 已发布 VPN 对话测试服务
 
   Scenario: 草稿版本校验 — 字段变更后 Agent 自动重试

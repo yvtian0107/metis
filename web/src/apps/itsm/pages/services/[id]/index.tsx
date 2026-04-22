@@ -393,18 +393,17 @@ function healthStatusText(status: ServiceHealthItem["status"] | "empty") {
   if (status === "empty") return "暂无结果"
   if (status === "pass") return "可发布"
   if (status === "fail") return "需修复"
-  return "有风险"
+  return "存在歧义"
 }
 
 function healthItemStatusText(status: ServiceHealthItem["status"]) {
   if (status === "pass") return "正常"
   if (status === "fail") return "失败"
-  return "警告"
+  return "需确认"
 }
 
 function ServiceHealthSection({ health }: { health: ServiceHealthCheck | null }) {
-  const hasHealthItems = (health?.items?.length ?? 0) > 0
-  const displayStatus: ServiceHealthItem["status"] | "empty" = !health || !hasHealthItems ? "empty" : health.status
+  const displayStatus: ServiceHealthItem["status"] | "empty" = !health ? "empty" : health.status
   const overall = healthTone(displayStatus)
   const OverallIcon = overall.icon
 
@@ -427,10 +426,12 @@ function ServiceHealthSection({ health }: { health: ServiceHealthCheck | null })
               {displayStatus === "empty"
                   ? "暂无检查结果"
                   : displayStatus === "pass"
-                    ? "关键配置正常"
-                    : "请处理运行安全项"}
+                    ? "未发现运行风险"
+                    : displayStatus === "warn"
+                      ? "存在歧义，需确认"
+                      : "请处理运行阻塞项"}
             </p>
-            <p className="text-xs leading-5 text-muted-foreground">Agent、协作规范、参考路径、知识/动作、兜底人与权限都会纳入检查。</p>
+            <p className="text-xs leading-5 text-muted-foreground">仅检查智能引擎运行前的阻塞项、歧义和失效引用。</p>
           </div>
         </div>
         <div className="divide-y divide-border/45">
@@ -449,7 +450,9 @@ function ServiceHealthSection({ health }: { health: ServiceHealthCheck | null })
             )
           })}
           {!health?.items?.length && (
-            <div className="px-4 py-5 text-sm text-muted-foreground">暂无检查结果。</div>
+            <div className="px-4 py-5 text-sm text-muted-foreground">
+              {health ? "未发现需要处理的运行风险。" : "暂无检查结果。"}
+            </div>
           )}
         </div>
       </div>

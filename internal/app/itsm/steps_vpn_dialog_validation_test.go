@@ -138,7 +138,7 @@ const serviceDeskTestPrompt = `你是 IT 服务台智能体，帮助用户完成
 - service_load 返回 prefill_suggestions 时，必须优先采用这些建议补齐同名表单字段，再判断必填缺失。用户给出的邮箱可作为 VPN 账号；"线上支持用/远程办公/故障排查"等用途短语可同时填入设备与用途说明和访问原因
 - 设备与用途说明不是单独的设备型号字段，用户已给出用途时不要再追问设备型号；用户已给出访问原因时不要再问"是否还有其他具体原因"
 - 当用户提到多个访问原因且映射到同一路由分支时，合并为该分支对应的单个结构化值（取第一个匹配的 option value）填入路由字段，同时将用户原始的多个原因完整写入 summary 和 reason 字段
-- 在调用 itsm.draft_prepare 之前，必须先根据 service_load 返回的 routing_field_hint 中的 option_route_map 判断用户的诉求是否跨越了多条路由分支。如果用户同时提到了映射到不同审批路径的多种需求，你必须主动向用户说明这些需求分属不同审批路径，请用户明确选择当前要办理哪一个，而不是替用户做选择或直接提交
+- 在调用 itsm.draft_prepare 之前，必须先根据 service_load 返回的 routing_field_hint 中的 option_route_map 判断用户的诉求是否跨越了多条路由分支。如果用户同时提到了映射到不同处理路径的多种需求，你必须主动向用户说明这些需求分属不同处理路径，请用户明确选择当前要办理哪一个，而不是替用户做选择或直接提交
 - 在调用 itsm.draft_prepare 前，先对照 service_load 返回的字段定义检查所有必填字段是否已收集；如果有必填字段缺失，必须先向用户追问缺失字段
 - 如果 itsm.draft_prepare 返回的 warnings 中包含 multivalue_on_single_field，根据 resolved_values 判断这些值是否属于同一路由分支：若跨路由，向用户说明并请用户选择；若同路由，修正为单值后重新调用
 - 不需要调用 system.current_user_profile 或 general.current_time，直接使用用户消息中的信息`
@@ -280,9 +280,9 @@ func toolCallCount(calls []toolCallRecord, name string) int {
 // ---------------------------------------------------------------------------
 
 // vpnDialogWorkflowJSON provides a static workflow with an exclusive_gateway
-// routing on request_kind → network_support/remote_maintenance → 网络管理审批,
+// routing on request_kind → network_support/remote_maintenance → 网络管理处理,
 //
-//	→ security → 安全管理审批.
+//	→ security → 安全管理处理.
 var vpnDialogWorkflowJSON = json.RawMessage(`{
 	"nodes": [
 		{"id": "start", "type": "start", "label": "开始"},
@@ -292,23 +292,23 @@ var vpnDialogWorkflowJSON = json.RawMessage(`{
 			"label": "路由网关",
 			"data": {
 				"conditions": [
-					{"field": "request_kind", "value": "network_support", "label": "网络管理审批"},
-					{"field": "request_kind", "value": "remote_maintenance", "label": "网络管理审批"},
-					{"field": "request_kind", "value": "security", "label": "安全管理审批"}
+					{"field": "request_kind", "value": "network_support", "label": "网络管理处理"},
+					{"field": "request_kind", "value": "remote_maintenance", "label": "网络管理处理"},
+					{"field": "request_kind", "value": "security", "label": "安全管理处理"}
 				]
 			}
 		},
-		{"id": "approve_net", "type": "approve", "label": "网络管理审批", "data": {"participantType": "position_department", "positionCode": "network_admin", "departmentCode": "it"}},
-		{"id": "approve_sec", "type": "approve", "label": "安全管理审批", "data": {"participantType": "position_department", "positionCode": "security_admin", "departmentCode": "it"}},
+		{"id": "process_net", "type": "process", "label": "网络管理处理", "data": {"participantType": "position_department", "positionCode": "network_admin", "departmentCode": "it"}},
+		{"id": "process_sec", "type": "process", "label": "安全管理处理", "data": {"participantType": "position_department", "positionCode": "security_admin", "departmentCode": "it"}},
 		{"id": "end", "type": "end", "label": "结束"}
 	],
 	"edges": [
 		{"source": "start", "target": "gateway1"},
-		{"source": "gateway1", "target": "approve_net", "condition": "network_support"},
-		{"source": "gateway1", "target": "approve_net", "condition": "remote_maintenance"},
-		{"source": "gateway1", "target": "approve_sec", "condition": "security"},
-		{"source": "approve_net", "target": "end", "condition": "approved"},
-		{"source": "approve_sec", "target": "end", "condition": "approved"}
+		{"source": "gateway1", "target": "process_net", "condition": "network_support"},
+		{"source": "gateway1", "target": "process_net", "condition": "remote_maintenance"},
+		{"source": "gateway1", "target": "process_sec", "condition": "security"},
+		{"source": "process_net", "target": "end", "condition": "completed"},
+		{"source": "process_sec", "target": "end", "condition": "completed"}
 	]
 }`)
 

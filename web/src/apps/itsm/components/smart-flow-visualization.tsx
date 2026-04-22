@@ -20,7 +20,6 @@ const STATUS_COLORS: Record<string, string> = {
   pending: "bg-gray-400",
   cancelled: "bg-gray-300",
   failed: "bg-red-500",
-  rejected: "bg-red-500",
 }
 
 function ConfidenceBadge({ confidence }: { confidence: number | null }) {
@@ -74,7 +73,7 @@ export function SmartFlowVisualization({ activities, currentActivityId }: SmartF
                           ? "ring-2 ring-blue-500 ring-offset-2 animate-pulse border-blue-300"
                           : activity.status === "completed"
                             ? "border-green-200 bg-green-50/50"
-                            : activity.status === "cancelled" || activity.status === "rejected"
+                            : activity.status === "cancelled"
                               ? "border-gray-200 opacity-60"
                               : "border-border"
                       }`}

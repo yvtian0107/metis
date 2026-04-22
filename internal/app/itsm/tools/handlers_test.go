@@ -468,7 +468,7 @@ func TestSubmitDraft_RejectsNonSmartService(t *testing.T) {
 	}
 
 	if _, err := SubmitDraft(op, store, 1, 7, DraftSubmitRequest{DraftVersion: 1}); err == nil {
-		t.Fatal("expected non-smart service submit to be rejected")
+		t.Fatal("expected non-smart service submit to be cancelled")
 	}
 	if op.createdServiceID != 0 {
 		t.Fatalf("ticket should not be created for non-smart service, got service %d", op.createdServiceID)
@@ -486,7 +486,7 @@ func TestSubmitDraft_RejectsStaleDraftVersion(t *testing.T) {
 	}
 
 	if _, err := SubmitDraft(op, store, 1, 7, DraftSubmitRequest{DraftVersion: 2}); err == nil {
-		t.Fatal("expected stale draft version to be rejected")
+		t.Fatal("expected stale draft version to be cancelled")
 	}
 }
 
@@ -503,7 +503,7 @@ func TestSubmitDraft_RejectsChangedFieldsHash(t *testing.T) {
 	}
 
 	if _, err := SubmitDraft(op, store, 1, 7, DraftSubmitRequest{DraftVersion: 1}); err == nil {
-		t.Fatal("expected changed fields hash to be rejected")
+		t.Fatal("expected changed fields hash to be cancelled")
 	}
 }
 
@@ -511,7 +511,7 @@ func TestSubmitDraft_ParticipantPrecheckFailureDoesNotCreateTicket(t *testing.T)
 	store := newMemStateStore()
 	op := &stubOperator{
 		detail:            smartVPNServiceDetail(5),
-		participantResult: &ParticipantValidation{OK: false, FailureReason: "no owner", NodeLabel: "审批人", Guidance: "补充负责人"},
+		participantResult: &ParticipantValidation{OK: false, FailureReason: "no owner", NodeLabel: "处理人", Guidance: "补充负责人"},
 	}
 	store.states[1] = &ServiceDeskState{
 		Stage:           "awaiting_confirmation",
@@ -936,9 +936,9 @@ func TestDraftPrepare_MultivalueRoutingField_ResolvedValues(t *testing.T) {
 			RoutingFieldHint: &RoutingFieldHint{
 				FieldKey: "request_kind",
 				OptionRouteMap: map[string]string{
-					"network_support":    "网络管理审批",
-					"security":           "安全管理审批",
-					"remote_maintenance": "网络管理审批",
+					"network_support":    "网络管理处理",
+					"security":           "安全管理处理",
+					"remote_maintenance": "网络管理处理",
 				},
 			},
 			FieldsHash: "abc123",
@@ -988,11 +988,11 @@ func TestDraftPrepare_MultivalueRoutingField_ResolvedValues(t *testing.T) {
 			if len(w.ResolvedValues) != 2 {
 				t.Fatalf("expected 2 resolved_values, got %d", len(w.ResolvedValues))
 			}
-			if w.ResolvedValues[0].Value != "network_support" || w.ResolvedValues[0].Route != "网络管理审批" {
-				t.Errorf("resolved_values[0] = %+v, want {network_support, 网络管理审批}", w.ResolvedValues[0])
+			if w.ResolvedValues[0].Value != "network_support" || w.ResolvedValues[0].Route != "网络管理处理" {
+				t.Errorf("resolved_values[0] = %+v, want {network_support, 网络管理处理}", w.ResolvedValues[0])
 			}
-			if w.ResolvedValues[1].Value != "security" || w.ResolvedValues[1].Route != "安全管理审批" {
-				t.Errorf("resolved_values[1] = %+v, want {security, 安全管理审批}", w.ResolvedValues[1])
+			if w.ResolvedValues[1].Value != "security" || w.ResolvedValues[1].Route != "安全管理处理" {
+				t.Errorf("resolved_values[1] = %+v, want {security, 安全管理处理}", w.ResolvedValues[1])
 			}
 		}
 	}
@@ -1012,7 +1012,7 @@ func TestDraftPrepare_MultivalueNonRoutingField_NoResolvedValues(t *testing.T) {
 			},
 			RoutingFieldHint: &RoutingFieldHint{
 				FieldKey:       "request_kind",
-				OptionRouteMap: map[string]string{"network_support": "网络管理审批"},
+				OptionRouteMap: map[string]string{"network_support": "网络管理处理"},
 			},
 			FieldsHash: "abc123",
 		},

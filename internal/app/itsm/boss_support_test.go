@@ -1,6 +1,6 @@
 package itsm
 
-// boss_support_test.go — Boss serial approval workflow LLM generation and service publish helpers for BDD tests.
+// boss_support_test.go — Boss serial process workflow LLM generation and service publish helpers for BDD tests.
 //
 // Uses the LLM (gated by LLM_TEST_* env vars) to generate the Boss workflow
 // from the collaboration spec, matching the VPN/DB Backup BDD approach.
@@ -17,16 +17,16 @@ import (
 )
 
 // bossCollaborationSpec is the collaboration spec for the Boss high-risk change request service.
-// Based on seed.go, with strengthened serial approval ordering and completion wording.
-const bossCollaborationSpec = `用户通过 IT 服务台提交高风险变更协同申请。服务台需要收集申请主题、申请类别、风险等级、期望完成时间、变更开始时间、变更结束时间、影响范围、回滚要求、影响模块以及变更明细表。
+// Based on seed.go, with strengthened serial process ordering and completion wording.
+const bossCollaborationSpec = `用户在 IT 服务台提交高风险变更协同申请。服务台需要收集申请主题、申请类别、风险等级、期望完成时间、变更开始时间、变更结束时间、影响范围、回滚要求、影响模块以及变更明细表。
 申请类别必须支持：生产变更(prod_change)、访问授权(access_grant)、应急支持(emergency_support)。
 风险等级必须支持：低(low)、中(medium)、高(high)。
 回滚要求必须支持：需要(required)、不需要(not_required)。
 影响模块必须支持多选：网关(gateway)、支付(payment)、监控(monitoring)、订单(order)。
 变更明细表至少包含系统、资源、权限级别、生效时段、变更理由。权限级别必须支持：只读(read)、读写(read_write)。
-申请提交后，先交给指定用户 serial-reviewer 审批，审批参与者类型必须使用 user。首级审批通过后才能安排二级审批。
-serial-reviewer 审批通过后，再交给信息部的运维管理员岗位审批，审批参与者类型必须使用 position_department，部门编码使用 it，岗位编码使用 ops_admin。
-运维管理员审批通过后，流程必须立即结束，不再创建任何新的审批、处理或通知活动。不要生成驳回分支。`
+申请提交后，先交给指定用户 serial-reviewer 处理，处理参与者类型必须使用 user。首级处理完成后才能安排二级处理。
+serial-reviewer 处理完成后，再交给信息部的运维管理员岗位处理，处理参与者类型必须使用 position_department，部门编码使用 it，岗位编码使用 ops_admin。
+运维管理员处理完成后，流程必须立即结束，不再创建任何新的处理、处理或通知活动。不要生成取消分支。`
 
 // bossCasePayload defines test data for a single Boss BDD scenario.
 type bossCasePayload struct {

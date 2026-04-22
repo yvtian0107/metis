@@ -63,9 +63,9 @@ func TestExtractJSON_Invalid(t *testing.T) {
 
 func TestBuildUserMessage_Basic(t *testing.T) {
 	svc := &WorkflowGenerateService{}
-	msg := svc.buildUserMessage("用户提交表单后经理审批", "", nil)
+	msg := svc.buildUserMessage("用户提交表单后经理处理", "", nil)
 
-	if !strings.Contains(msg, "用户提交表单后经理审批") {
+	if !strings.Contains(msg, "用户提交表单后经理处理") {
 		t.Fatal("message should contain the collaboration spec")
 	}
 	if strings.Contains(msg, "可用动作") {
@@ -81,9 +81,9 @@ func TestBuildUserMessage_WithActions(t *testing.T) {
 	actionsCtx := svc.buildActionsContext([]ServiceAction{
 		{Name: "发送邮件", Code: "send-email", Description: "发送通知邮件"},
 	})
-	msg := svc.buildUserMessage("审批流程", actionsCtx, nil)
+	msg := svc.buildUserMessage("处理流程", actionsCtx, nil)
 
-	if !strings.Contains(msg, "审批流程") {
+	if !strings.Contains(msg, "处理流程") {
 		t.Fatal("message should contain the collaboration spec")
 	}
 	if !strings.Contains(msg, "可用动作") {
@@ -100,7 +100,7 @@ func TestBuildUserMessage_WithPrevErrors(t *testing.T) {
 		{NodeID: "node-1", Level: "error", Message: "缺少出边"},
 		{EdgeID: "edge-2", Level: "error", Message: "引用了不存在的目标节点"},
 	}
-	msg := svc.buildUserMessage("审批流程", "", prevErrors)
+	msg := svc.buildUserMessage("处理流程", "", prevErrors)
 
 	if !strings.Contains(msg, "上一次生成的工作流存在以下问题") {
 		t.Fatal("message should contain previous error header")
@@ -155,7 +155,7 @@ func TestBuildGenerateResponse_PersistsWorkflowAndHealthSnapshot(t *testing.T) {
 	workflowJSON := json.RawMessage(`{"nodes":[],"edges":[]}`)
 	resp, err := svc.buildGenerateResponse(&GenerateRequest{
 		ServiceID:         service.ID,
-		CollaborationSpec: "用户提交申请后直属经理审批",
+		CollaborationSpec: "用户提交申请后直属经理处理",
 	}, workflowJSON, 0, nil)
 	if err != nil {
 		t.Fatalf("build response: %v", err)
@@ -166,7 +166,7 @@ func TestBuildGenerateResponse_PersistsWorkflowAndHealthSnapshot(t *testing.T) {
 	if string(resp.Service.WorkflowJSON) != string(workflowJSON) {
 		t.Fatalf("expected workflow json to be saved, got %s", resp.Service.WorkflowJSON)
 	}
-	if resp.Service.CollaborationSpec != "用户提交申请后直属经理审批" {
+	if resp.Service.CollaborationSpec != "用户提交申请后直属经理处理" {
 		t.Fatalf("expected collaboration spec to be saved, got %q", resp.Service.CollaborationSpec)
 	}
 	if resp.Service.PublishHealthCheck == nil {
@@ -203,7 +203,7 @@ JSON schema:
   "edges": [{"id": "string", "source": "string", "target": "string", "data": {}}]
 }
 
-节点类型: start, end, form, approve, process, action, notify, exclusive
+节点类型: start, end, form, process, process, action, notify, exclusive
 每个 node 必须有 id, type。data 字段包含 label。
 每个 edge 必须有 id, source, target。
 必须恰好 1 个 start 节点，至少 1 个 end 节点。
@@ -214,7 +214,7 @@ JSON schema:
 - 至少一条出边应标记 "default": true
 
 示例：排他网关的出边 data:
-  条件边: {"condition": {"field": "approve.result", "operator": "equals", "value": "approved"}}
+  条件边: {"condition": {"field": "process.result", "operator": "equals", "value": "completed"}}
   默认边: {"default": true}
 
 仅输出合法的 JSON，不要包含任何额外文字或 markdown 代码块标记。`
@@ -303,11 +303,11 @@ func TestLLMExtract_SimpleWorkflow(t *testing.T) {
 func TestLLMExtract_BranchWorkflow(t *testing.T) {
 	env := requireLLMEnv(t)
 
-	spec := `这是一个需要审批的 VPN 申请流程：
+	spec := `这是一个需要处理的 VPN 申请流程：
 1. 用户提交 VPN 申请表单
-2. 部门经理审批
-3. 如果审批通过，IT 执行开通操作，然后结束
-4. 如果审批拒绝，通知用户被拒绝，然后结束`
+2. 部门经理处理
+3. 如果处理完成，IT 执行开通操作，然后结束
+4. 如果处理取消，通知用户被取消，然后结束`
 
 	workflowJSON, validationErrors := callLLMForWorkflow(t, env, spec)
 

@@ -11,8 +11,8 @@ Feature: VPN 开通申请 — 服务台 Agent 对话校验
     And 已准备好以下参与人、岗位与职责
       | 身份               | 用户名             | 部门 | 岗位           |
       | 申请人             | vpn-requester      | -    | -              |
-      | 网络管理员审批人   | network-operator   | it   | network_admin  |
-      | 安全管理员审批人   | security-operator  | it   | security_admin |
+      | 网络管理员处理人   | network-operator   | it   | network_admin  |
+      | 安全管理员处理人   | security-operator  | it   | security_admin |
     And 已发布 VPN 对话测试服务
 
   Scenario: 完整输入 — Agent 直接整理草稿而非追问已给信息
@@ -29,7 +29,7 @@ Feature: VPN 开通申请 — 服务台 Agent 对话校验
     Then 工具调用序列包含 "itsm.service_match"
     And 工具调用序列包含 "itsm.service_load"
     And Agent 未调用 draft_prepare 或未继续到 draft_confirm
-    And 回复内容匹配 "不同.*路|审批.*路|选择|冲突|分属|哪一个|分别"
+    And 回复内容匹配 "不同.*路|处理.*路|选择|冲突|分属|哪一个|分别"
 
   Scenario: 同路由多选 — Agent 合并后正常推进
     Given 用户消息为 "我要申请VPN开通，访问原因选network_support，VPN类型L2TP，申请原因是需要远程访问内网进行网络调试和远程维护，访问时段2026-05-01 09:00:00~18:00:00"

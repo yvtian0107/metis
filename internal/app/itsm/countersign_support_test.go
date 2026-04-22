@@ -14,12 +14,12 @@ import (
 )
 
 // countersignCollaborationSpec is the collaboration spec for the multi-role countersign service.
-const countersignCollaborationSpec = `这是一个多角色并签申请服务。
+const countersignCollaborationSpec = `这是一个多角色并行处理申请服务。
 用户来找服务台时，先把申请标题、目标系统、时间窗口、申请原因和期望结果这些信息问清楚，再整理成可以确认的申请摘要。
-申请人提交后，先进入一个多角色并签审批节点，需要信息部的网络管理员（position_department: it/network_admin）和安全管理员（position_department: it/security_admin）并行完成审批。
-你必须使用 execution_mode: "parallel"，在 activities 数组中同时列出两个审批人，participant_type 使用 position_department。
-只有当全部并签审批都完成后，工单才可以汇聚到信息部运维管理员（position_department: it/ops_admin）的最终单签审批节点。
-最终单签审批通过后直接结束流程，不需要额外生成驳回分支。`
+申请人提交后，先进入一个多角色并行处理处理节点，需要信息部的网络管理员（position_department: it/network_admin）和安全管理员（position_department: it/security_admin）并行完成处理。
+你必须使用 execution_mode: "parallel"，在 activities 数组中同时列出两个处理人，participant_type 使用 position_department。
+只有当全部并行处理处理都完成后，工单才可以汇聚到信息部运维管理员（position_department: it/ops_admin）的最终单签处理节点。
+最终单签处理完成后直接结束流程，不需要额外生成取消分支。`
 
 // countersignCasePayload defines test data for a single countersign BDD scenario.
 type countersignCasePayload struct {
@@ -30,12 +30,12 @@ type countersignCasePayload struct {
 // countersignCasePayloads provides test case payloads for countersign BDD.
 var countersignCasePayloads = map[string]countersignCasePayload{
 	"standard": {
-		Summary: "多角色并签申请：需要网络和安全管理员同时审批的变更请求。",
+		Summary: "多角色并行处理申请：需要网络和安全管理员同时处理的变更请求。",
 		FormData: map[string]any{
 			"title":         "防火墙策略变更",
 			"target_system": "prod-firewall-01",
 			"time_window":   "今晚 22:00 到 23:00",
-			"reason":        "需要调整防火墙策略以支持新的微服务通信，涉及网络和安全双重审批。",
+			"reason":        "需要调整防火墙策略以支持新的微服务通信，涉及网络和安全双重处理。",
 			"expected":      "允许 10.0.1.0/24 网段访问 10.0.2.0/24 的 8443 端口",
 		},
 	},
@@ -159,7 +159,7 @@ func publishCountersignSmartService(bc *bddContext) error {
 
 	// 5. ServiceDefinition with engine_type=smart
 	svc := &ServiceDefinition{
-		Name:              "多角色并签申请",
+		Name:              "多角色并行处理申请",
 		Code:              "countersign-request",
 		CatalogID:         catalog.ID,
 		EngineType:        "smart",

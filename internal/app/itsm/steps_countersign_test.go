@@ -16,16 +16,16 @@ import (
 
 // registerCountersignSteps registers all countersign BDD step definitions.
 func registerCountersignSteps(sc *godog.ScenarioContext, bc *bddContext) {
-	sc.Given(`^已定义多角色并签协作规范$`, bc.givenCountersignCollaborationSpec)
-	sc.Given(`^已基于协作规范发布多角色并签服务（智能引擎）$`, bc.givenCountersignSmartServicePublished)
-	sc.Given(`^"([^"]*)" 已创建并签工单，场景为 "([^"]*)"$`, bc.givenCountersignTicketCreated)
+	sc.Given(`^已定义多角色并行处理协作规范$`, bc.givenCountersignCollaborationSpec)
+	sc.Given(`^已基于协作规范发布多角色并行处理服务（智能引擎）$`, bc.givenCountersignSmartServicePublished)
+	sc.Given(`^"([^"]*)" 已创建并行处理工单，场景为 "([^"]*)"$`, bc.givenCountersignTicketCreated)
 
-	sc.When(`^并签组中岗位 "([^"]*)" 的审批人认领并审批通过$`, bc.whenCountersignRoleApproves)
+	sc.When(`^并行处理组中岗位 "([^"]*)" 的处理人认领并处理完成$`, bc.whenCountersignRoleProcesss)
 
-	sc.Then(`^应存在一个并签活动组，包含 (\d+) 个并行活动$`, bc.thenParallelGroupExists)
-	sc.Then(`^并签组仍有未完成活动，不应触发下一步$`, bc.thenParallelGroupNotConverged)
-	sc.Then(`^并签组全部完成，应触发下一轮决策$`, bc.thenParallelGroupConverged)
-	sc.Then(`^不应存在分配给岗位 "([^"]*)" 的待办活动$`, bc.thenNoActivityForPosition)
+	sc.Then(`^应存在一个并行处理活动组，包含 (\d+) 个并行活动$`, bc.thenParallelGroupExists)
+	sc.Then(`^并行处理组仍有未完成活动，不应触发下一步$`, bc.thenParallelGroupNotConverged)
+	sc.Then(`^并行处理组全部完成，应触发下一轮决策$`, bc.thenParallelGroupConverged)
+	sc.Then(`^不应存在分配给岗位 "([^"]*)" 的待处理活动$`, bc.thenNoActivityForPosition)
 }
 
 // --- Given steps ---
@@ -72,9 +72,9 @@ func (bc *bddContext) givenCountersignTicketCreated(username, caseKey string) er
 
 // --- When steps ---
 
-// whenCountersignRoleApproves finds the parallel activity assigned to a specific position code
+// whenCountersignRoleProcesss finds the parallel activity assigned to a specific position code
 // and completes it via SmartEngine.Progress().
-func (bc *bddContext) whenCountersignRoleApproves(positionCode string) error {
+func (bc *bddContext) whenCountersignRoleProcesss(positionCode string) error {
 	if bc.ticket == nil {
 		return fmt.Errorf("no ticket in context")
 	}
@@ -199,7 +199,7 @@ func (bc *bddContext) whenCountersignRoleApproves(positionCode string) error {
 	err := bc.smartEngine.Progress(ctx, bc.db, engine.ProgressParams{
 		TicketID:   bc.ticket.ID,
 		ActivityID: targetActivity.ID,
-		Outcome:    "approved",
+		Outcome:    "completed",
 		OperatorID: operatorID,
 	})
 	if err != nil {

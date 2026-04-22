@@ -426,7 +426,7 @@ func (s *ServiceDefService) checkWorkflowActionRisk(serviceID uint, def *engine.
 
 func (s *ServiceDefService) checkWorkflowParticipantRisk(def *engine.WorkflowDef) *ServiceHealthItem {
 	for _, node := range def.Nodes {
-		if node.Type != engine.NodeForm && node.Type != engine.NodeApprove && node.Type != engine.NodeProcess {
+		if node.Type != engine.NodeForm && node.Type != engine.NodeProcess {
 			continue
 		}
 		data, err := engine.ParseNodeData(node.Data)

@@ -1,6 +1,6 @@
 package itsm
 
-// steps_boss_test.go — step definitions for the Boss serial approval BDD scenarios.
+// steps_boss_test.go — step definitions for the Boss serial process BDD scenarios.
 
 import (
 	"encoding/json"
@@ -10,7 +10,7 @@ import (
 	"github.com/cucumber/godog"
 )
 
-// registerBossSteps registers all Boss serial approval step definitions.
+// registerBossSteps registers all Boss serial process step definitions.
 func registerBossSteps(sc *godog.ScenarioContext, bc *bddContext) {
 	sc.Given(`^已定义高风险变更协同申请协作规范$`, bc.givenBossCollaborationSpec)
 	sc.Given(`^已基于协作规范发布高风险变更协同申请服务（智能引擎）$`, bc.givenBossSmartServicePublished)
@@ -18,7 +18,7 @@ func registerBossSteps(sc *godog.ScenarioContext, bc *bddContext) {
 	sc.Given(`^"([^"]*)" 已创建高风险变更工单 "([^"]*)"，场景为 "([^"]*)"$`, bc.givenBossTicketCreatedWithAlias)
 
 	sc.Then(`^工单的表单数据中包含完整的 resource_items 明细表格$`, bc.thenFormDataContainsResourceItems)
-	sc.Then(`^工单 "([^"]*)" 的审批记录与工单 "([^"]*)" 完全隔离$`, bc.thenApprovalRecordsIsolated)
+	sc.Then(`^工单 "([^"]*)" 的处理记录与工单 "([^"]*)" 完全隔离$`, bc.thenProcessRecordsIsolated)
 }
 
 // --- Given steps ---
@@ -172,8 +172,8 @@ func (bc *bddContext) thenFormDataContainsResourceItems() error {
 	return nil
 }
 
-// thenApprovalRecordsIsolated asserts that two tickets' TicketAssignment records are completely isolated.
-func (bc *bddContext) thenApprovalRecordsIsolated(ticketRefA, ticketRefB string) error {
+// thenProcessRecordsIsolated asserts that two tickets' TicketAssignment records are completely isolated.
+func (bc *bddContext) thenProcessRecordsIsolated(ticketRefA, ticketRefB string) error {
 	ticketA, ok := bc.tickets[ticketRefA]
 	if !ok {
 		return fmt.Errorf("ticket alias %q not found in context", ticketRefA)

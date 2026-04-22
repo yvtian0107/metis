@@ -20,10 +20,10 @@ import (
 const dbBackupCollaborationSpec = `这是一个数据库备份白名单临时放行服务。
 用户来找服务台时，要先把目标数据库、来源 IP、放行时间窗和申请原因这些信息问清楚，再整理成可以确认的申请摘要。
 信息收集完成后，你需要先调用预检动作（precheck）验证参数合法性，根据预检结果决定下一步。
-预检通过后，交给信息部的数据库管理员岗位审批，审批参与者类型必须使用 position_department，部门编码使用 it，岗位编码使用 db_admin。
-审批通过后，你需要调用放行动作（apply）完成实际的白名单配置。放行动作执行成功后，流程立即结束，不再创建任何新的审批、处理或通知活动。
-不要让申请人在表单里自己选择审批类别，流程决策智能体应根据上下文在运行时决定。
-不需要额外生成驳回分支。`
+预检使用后，交给信息部的数据库管理员岗位处理，处理参与者类型必须使用 position_department，部门编码使用 it，岗位编码使用 db_admin。
+处理完成后，你需要调用放行动作（apply）完成实际的白名单配置。放行动作执行成功后，流程立即结束，不再创建任何新的处理、处理或通知活动。
+不要让申请人在表单里自己选择处理类别，流程决策智能体应根据上下文在运行时决定。
+不需要额外生成取消分支。`
 
 // dbBackupCasePayload defines test data for a single db backup whitelist BDD scenario.
 type dbBackupCasePayload struct {

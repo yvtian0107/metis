@@ -36,7 +36,7 @@ var _ engine.EngineConfigProvider = (*testConfigProvider)(nil)
 // registerParticipantSteps registers participant validation step definitions.
 func registerParticipantSteps(sc *godog.ScenarioContext, bc *bddContext) {
 	sc.Given(`^引擎已配置兜底处理人为 "([^"]*)"$`, bc.givenFallbackAssignee)
-	sc.When(`^引擎执行无参与者的审批决策$`, bc.whenExecutePlanWithoutParticipant)
+	sc.When(`^引擎执行无参与者的处理决策$`, bc.whenExecutePlanWithoutParticipant)
 	sc.Then(`^工单分配人为兜底处理人$`, bc.thenAssigneeIsFallback)
 	sc.Then(`^时间线包含参与者兜底事件$`, bc.thenTimelineContainsFallbackEvent)
 }
@@ -64,7 +64,7 @@ func (bc *bddContext) givenFallbackAssignee(username string) error {
 
 // --- When steps ---
 
-// whenExecutePlanWithoutParticipant directly calls ExecuteConfirmedPlan with a
+// whenExecutePlanWithoutParticipant directly calls ExecuteDecisionPlan with a
 // crafted DecisionPlan that has no participant_id, bypassing the LLM to test
 // the fallback assignment logic deterministically.
 func (bc *bddContext) whenExecutePlanWithoutParticipant() error {
@@ -79,21 +79,21 @@ func (bc *bddContext) whenExecutePlanWithoutParticipant() error {
 	}
 
 	plan := &engine.DecisionPlan{
-		NextStepType: "approve",
+		NextStepType: "process",
 		Activities: []engine.DecisionActivity{
 			{
-				Type:         "approve",
-				Instructions: "审批 VPN 开通申请",
+				Type:         "process",
+				Instructions: "处理 VPN 开通申请",
 				// ParticipantID intentionally nil — triggers fallback
 			},
 		},
-		Reasoning:  "测试兜底场景：无参与者的审批决策",
+		Reasoning:  "测试兜底场景：无参与者的处理决策",
 		Confidence: 0.9,
 	}
 
-	if err := bc.smartEngine.ExecuteConfirmedPlan(bc.db, bc.ticket.ID, plan); err != nil {
+	if err := bc.smartEngine.ExecuteDecisionPlan(bc.db, bc.ticket.ID, plan); err != nil {
 		bc.lastErr = err
-		return fmt.Errorf("execute confirmed plan: %w", err)
+		return fmt.Errorf("execute decision plan: %w", err)
 	}
 
 	// Refresh ticket.
