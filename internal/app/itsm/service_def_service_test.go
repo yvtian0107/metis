@@ -105,3 +105,66 @@ func TestServiceDefServiceUpdate_RejectsInactiveAgent(t *testing.T) {
 		t.Fatalf("expected agent not available, got %v", err)
 	}
 }
+
+func TestServiceDefinitionResponse_NoPublishHealthSnapshotBeforeGeneration(t *testing.T) {
+	db := newTestDB(t)
+	svc := newServiceDefServiceForTest(t, db)
+	catSvc := newCatalogServiceForTest(t, db)
+
+	root, _ := catSvc.Create("Root", "root", "", "", nil, 10)
+	service, err := svc.Create(&ServiceDefinition{
+		Name:       "Smart",
+		Code:       "smart-no-snapshot",
+		CatalogID:  root.ID,
+		EngineType: "smart",
+	})
+	if err != nil {
+		t.Fatalf("create service: %v", err)
+	}
+
+	if service.ToResponse().PublishHealthCheck != nil {
+		t.Fatal("expected publish health check to be nil before generation")
+	}
+}
+
+func TestServiceDefServiceRefreshPublishHealthCheck_SavesSnapshot(t *testing.T) {
+	db := newTestDB(t)
+	svc := newServiceDefServiceForTest(t, db)
+	catSvc := newCatalogServiceForTest(t, db)
+
+	root, _ := catSvc.Create("Root", "root", "", "", nil, 10)
+	service, err := svc.Create(&ServiceDefinition{
+		Name:              "Smart",
+		Code:              "smart-health-snapshot",
+		CatalogID:         root.ID,
+		EngineType:        "smart",
+		CollaborationSpec: "用户提交申请后由直属经理审批",
+		WorkflowJSON:      JSONField(`{"nodes":[],"edges":[]}`),
+	})
+	if err != nil {
+		t.Fatalf("create service: %v", err)
+	}
+
+	check, err := svc.RefreshPublishHealthCheck(service.ID)
+	if err != nil {
+		t.Fatalf("refresh health check: %v", err)
+	}
+	if check == nil || len(check.Items) == 0 {
+		t.Fatalf("expected populated health check, got %+v", check)
+	}
+
+	reloaded, err := svc.Get(service.ID)
+	if err != nil {
+		t.Fatalf("reload service: %v", err)
+	}
+	resp := reloaded.ToResponse()
+	if resp.PublishHealthCheck == nil {
+		t.Fatal("expected saved publish health check in response")
+	}
+	if resp.PublishHealthCheck.ServiceID != service.ID {
+		t.Fatalf("expected service id %d, got %d", service.ID, resp.PublishHealthCheck.ServiceID)
+	}
+	if resp.PublishHealthCheck.CheckedAt == nil {
+		t.Fatal("expected checkedAt to be set")
+	}
+}

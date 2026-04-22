@@ -150,7 +150,7 @@ func setupDialogTestWithMutation(bc *bddContext) (func(ctx context.Context, user
 		return nil, fmt.Errorf("create LLM client: %w", err)
 	}
 
-	op := tools.NewOperator(bc.db, nil, nil, nil, nil)
+	op := tools.NewOperator(bc.db, nil, nil, nil, nil, &bddServiceMatcher{db: bc.db})
 	store := newMutatingStateStore(bc.db)
 	registry := tools.NewRegistry(op, store)
 

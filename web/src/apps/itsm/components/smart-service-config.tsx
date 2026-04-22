@@ -19,7 +19,7 @@ export function SmartServiceConfig({
     <div className="space-y-1.5">
       <Label>{t("services.collaborationSpecLabel")}</Label>
       <Textarea
-        rows={6}
+        rows={4}
         placeholder={t("smart.collaborationSpecPlaceholder")}
         value={collaborationSpec}
         onChange={(e) => onCollaborationSpecChange(e.target.value)}

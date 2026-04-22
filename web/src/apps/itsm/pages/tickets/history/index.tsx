@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next"
 import { useNavigate } from "react-router"
 import { Ticket, Search } from "lucide-react"
 import { useListPage } from "@/hooks/use-list-page"
+import { withActiveMenuPermission } from "@/lib/navigation-state"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
@@ -17,6 +18,7 @@ import {
 } from "@/components/ui/table"
 import { type TicketItem } from "../../../api"
 import { SLABadge } from "../../../components/sla-badge"
+import { TICKET_MENU_PERMISSION } from "../navigation"
 
 const STATUS_MAP: Record<string, { variant: "default" | "secondary" | "destructive"; key: string }> = {
   completed: { variant: "default", key: "statusCompleted" },
@@ -87,7 +89,11 @@ export function Component() {
               items.map((item) => {
                 const statusInfo = STATUS_MAP[item.status] ?? { variant: "secondary" as const, key: "statusCompleted" }
                 return (
-                  <TableRow key={item.id} className="cursor-pointer" onClick={() => navigate(`/itsm/tickets/${item.id}`)}>
+                  <TableRow
+                    key={item.id}
+                    className="cursor-pointer"
+                    onClick={() => navigate(`/itsm/tickets/${item.id}`, { state: withActiveMenuPermission(TICKET_MENU_PERMISSION.history) })}
+                  >
                     <TableCell className="font-mono text-sm">{item.code}</TableCell>
                     <TableCell className="font-medium">{item.title}</TableCell>
                     <TableCell>

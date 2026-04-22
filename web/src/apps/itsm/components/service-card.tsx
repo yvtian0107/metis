@@ -1,6 +1,6 @@
 import { useNavigate } from "react-router"
 import { useTranslation } from "react-i18next"
-import { MoreHorizontal, Pencil, Trash2, Plus } from "lucide-react"
+import { MoreHorizontal, Pencil, Trash2, Plus, Sparkles, Workflow } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -13,23 +13,6 @@ import {
 } from "@/components/ui/alert-dialog"
 import { useState } from "react"
 import type { ServiceDefItem } from "../api"
-
-// ─── Brand color mapping ─────────────────────────────────
-
-const engineBrand = {
-  smart: {
-    stripe: "bg-violet-500",
-    avatarBg: "bg-violet-50 text-violet-700",
-  },
-  classic: {
-    stripe: "bg-sky-500",
-    avatarBg: "bg-sky-50 text-sky-700",
-  },
-} as const
-
-function getBrand(engineType: string) {
-  return engineBrand[engineType as keyof typeof engineBrand] ?? engineBrand.classic
-}
 
 function getInitials(name: string) {
   return name.slice(0, 2).toUpperCase()
@@ -60,35 +43,34 @@ interface ServiceCardProps {
 export function ServiceCard({ service, canUpdate, canDelete, onDelete }: ServiceCardProps) {
   const { t } = useTranslation("itsm")
   const navigate = useNavigate()
-  const brand = getBrand(service.engineType)
   const [deleteOpen, setDeleteOpen] = useState(false)
+  const isSmart = service.engineType === "smart"
+  const EngineIcon = isSmart ? Sparkles : Workflow
 
   return (
     <>
       <div
         className={cn(
-          "group relative flex flex-col rounded-xl border bg-card transition-all duration-200 cursor-pointer overflow-hidden",
-          "hover:border-primary/20 hover:shadow-md hover:-translate-y-0.5",
+          "workspace-surface group relative flex min-h-[154px] cursor-pointer flex-col rounded-[1.25rem] p-4",
+          "transition-colors duration-200 hover:border-border/80 hover:bg-white/50",
         )}
         onClick={() => navigate(`/itsm/services/${service.id}`)}
       >
-        {/* Stripe */}
-        <div className={cn("h-[3px] w-full", brand.stripe)} />
-
-        {/* Header */}
-        <div className="flex items-start gap-3 px-4 pt-3 pb-2">
-          <div className={cn("flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-sm font-semibold", brand.avatarBg)}>
+        <div className="flex items-start gap-3">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-border/55 bg-background/45 text-[13px] font-semibold text-foreground/78">
             {getInitials(service.name)}
           </div>
-          <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-medium leading-5">{service.name}</p>
-            <p className="truncate text-xs text-muted-foreground font-mono">{service.code}</p>
+          <div className="min-w-0 flex-1 space-y-1">
+            <p className="truncate text-[15px] font-semibold leading-5 tracking-[-0.01em]">{service.name}</p>
+            <div className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
+              <span className="truncate font-mono">{service.code}</span>
+            </div>
           </div>
           {(canUpdate || canDelete) && (
             <div data-action-zone="" onClick={(e) => e.stopPropagation()}>
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <Button variant="ghost" size="icon" className="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <Button variant="ghost" size="icon-sm" className="opacity-0 transition-opacity group-hover:opacity-100">
                     <MoreHorizontal className="h-4 w-4" />
                   </Button>
                 </DropdownMenuTrigger>
@@ -109,18 +91,20 @@ export function ServiceCard({ service, canUpdate, canDelete, onDelete }: Service
           )}
         </div>
 
-        {/* Chips */}
-        <div className="flex items-center gap-1.5 px-4 pb-3">
-          <Badge variant={service.engineType === "smart" ? "default" : "outline"} className="text-[10px] px-1.5 py-0">
-            {service.engineType === "smart" ? t("services.engineSmart") : t("services.engineClassic")}
+        <div className="mt-4 flex flex-wrap items-center gap-2">
+          <Badge variant={isSmart ? "default" : "outline"} className="h-6 gap-1.5 px-2 text-[11px]">
+            <EngineIcon className="h-3 w-3" />
+            {isSmart ? t("services.engineSmart") : t("services.engineClassic")}
+          </Badge>
+          <Badge variant={service.isActive ? "secondary" : "outline"} className="h-6 gap-1.5 px-2 text-[11px]">
+            <span className={cn("h-1.5 w-1.5 rounded-full", service.isActive ? "bg-emerald-500" : "bg-muted-foreground/45")} />
+            {service.isActive ? t("services.active") : t("services.inactive")}
           </Badge>
         </div>
 
-        {/* Footer */}
-        <div className="flex items-center gap-2 border-t px-4 py-2 text-xs text-muted-foreground">
-          <span className={cn("h-2 w-2 shrink-0 rounded-full", service.isActive ? "bg-green-500" : "bg-gray-400")} />
-          <span>{service.isActive ? t("services.active") : t("services.inactive")}</span>
-          <span className="ml-auto">{relativeTime(service.updatedAt)}</span>
+        <div className="mt-auto flex items-center border-t border-border/45 pt-3 text-xs text-muted-foreground">
+          <span>{relativeTime(service.updatedAt)}</span>
+          <span className="ml-auto opacity-0 transition-opacity group-hover:opacity-100">{t("services.detail")}</span>
         </div>
       </div>
 

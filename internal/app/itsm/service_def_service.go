@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/samber/do/v2"
 	"gorm.io/gorm"
@@ -132,6 +133,11 @@ func (s *ServiceDefService) Update(id uint, updates map[string]any) (*ServiceDef
 		}
 		return nil, err
 	}
+	if existing.PublishHealthCheckedAt != nil {
+		if _, err := s.RefreshPublishHealthCheck(id); err != nil {
+			return nil, err
+		}
+	}
 	return s.repo.FindByID(id)
 }
 
@@ -160,6 +166,7 @@ type ServiceHealthCheck struct {
 	ServiceID uint                `json:"serviceId"`
 	Status    string              `json:"status"` // pass | warn | fail
 	Items     []ServiceHealthItem `json:"items"`
+	CheckedAt *time.Time          `json:"checkedAt,omitempty"`
 }
 
 func (s *ServiceDefService) HealthCheck(id uint) (*ServiceHealthCheck, error) {
@@ -167,6 +174,45 @@ func (s *ServiceDefService) HealthCheck(id uint) (*ServiceHealthCheck, error) {
 	if err != nil {
 		return nil, err
 	}
+	return svc.ToResponse().PublishHealthCheck, nil
+}
+
+func (s *ServiceDefService) RefreshPublishHealthCheck(id uint) (*ServiceHealthCheck, error) {
+	svc, err := s.Get(id)
+	if err != nil {
+		return nil, err
+	}
+	check := s.computePublishHealthCheck(svc)
+	items, err := json.Marshal(check.Items)
+	if err != nil {
+		return nil, err
+	}
+	now := time.Now()
+	if err := s.repo.Update(id, map[string]any{
+		"publish_health_status":     check.Status,
+		"publish_health_items":      JSONField(items),
+		"publish_health_checked_at": now,
+	}); err != nil {
+		return nil, err
+	}
+	check.CheckedAt = &now
+	return check, nil
+}
+
+func (s *ServiceDefService) RefreshPublishHealthCheckIfPresent(id uint) error {
+	svc, err := s.Get(id)
+	if err != nil {
+		return err
+	}
+	if svc.PublishHealthCheckedAt == nil {
+		return nil
+	}
+	_, err = s.RefreshPublishHealthCheck(id)
+	return err
+}
+
+func (s *ServiceDefService) computePublishHealthCheck(svc *ServiceDefinition) *ServiceHealthCheck {
+	id := svc.ID
 	check := &ServiceHealthCheck{ServiceID: id, Status: "pass"}
 	add := func(key, label, status, message string) {
 		check.Items = append(check.Items, ServiceHealthItem{Key: key, Label: label, Status: status, Message: message})
@@ -185,7 +231,7 @@ func (s *ServiceDefService) HealthCheck(id uint) (*ServiceHealthCheck, error) {
 		} else {
 			add("workflow", "流程定义", "pass", "工作流结构校验通过")
 		}
-		return check, nil
+		return check
 	}
 
 	if strings.TrimSpace(svc.CollaborationSpec) == "" {
@@ -241,7 +287,7 @@ func (s *ServiceDefService) HealthCheck(id uint) (*ServiceHealthCheck, error) {
 	}
 
 	add("permissions", "权限与接管", "warn", "请确认审批人、管理员接管权限已按角色分配")
-	return check, nil
+	return check
 }
 
 // validateWorkflowJSON runs the engine validator and wraps errors.

@@ -23,7 +23,7 @@ func AllTools() []ITSMTool {
 		{
 			Name:        "itsm.service_match",
 			DisplayName: "服务匹配",
-			Description: "读取 ITSM 中的服务目录与服务扁平结构，返回 0~3 个最匹配的服务候选。",
+			Description: "读取 ITSM 服务目录并通过结构化语义判定返回权威匹配结果：明确命中时只返回一个 selected_service_id；真实歧义时返回候选；无匹配时返回空列表。",
 			ParametersSchema: json.RawMessage(`{
 				"type": "object",
 				"properties": {
@@ -274,8 +274,8 @@ func SeedAgents(db *gorm.DB) error {
 进入"提单推进模式"后，你的工作顺序必须是：
 1. 先理解用户诉求
 2. 优先调用个人信息工具读取当前提单用户的已有资料和组织归属
-3. 调用服务匹配工具找出 0~3 个候选服务；如果证据不足，就宁可少给也不要勉强匹配。你必须把当前识别到的服务名称、匹配原因和是否需要确认明确告诉用户，不能只说"已完成服务匹配"；若 service_match 返回空列表，应告知用户当前无匹配服务，建议换个描述再试或联系 IT 管理员，不允许在无真实 service_id 的情况下继续推进
-4. 仅当 service_match 返回 confirmation_required=false 时，可直接调用服务加载工具读取协作规范；若返回 confirmation_required=true，必须先向用户展示候选、等待确认，调用 itsm.service_confirm 锁定选择后再调用 itsm.service_load
+3. 调用服务匹配工具获取权威结构化匹配结果；service_match 已经基于服务名称、目录和描述完成语义判定，你必须接受它返回的 matches、selected_service_id、confirmation_required，不允许自行扩展候选、不允许重排候选、不允许把弱相关服务补充给用户；若 service_match 返回空列表，应告知用户当前无匹配服务，建议换个描述再试或联系 IT 管理员，不允许在无真实 service_id 的情况下继续推进
+4. 当 service_match 返回 selected_service_id 且 confirmation_required=false 时，说明服务已明确锁定，必须直接调用服务加载工具读取协作规范，不要再向用户展示候选选择题；仅当 service_match 返回 confirmation_required=true 时，才向用户展示候选、等待确认，调用 itsm.service_confirm 锁定选择后再调用 itsm.service_load
 5. 基于个人信息工具返回结果，只补问缺失字段和服务特有字段；不要反复询问已经明确的信息
 6. 每次整理出拟提单摘要和表单字段后，都要把它当作"当前草稿版本"；若用户补充、修改或纠正任何字段，就必须把它视为新版本草稿并重新展示
 7. 只要你准备向用户展示任何"拟提单 / 草稿 / 拟提交信息"，无论是第一次展示还是更新后的版本，都必须先调用 itsm.draft_prepare；严禁先口头展示、再事后补调
@@ -296,7 +296,7 @@ func SeedAgents(db *gorm.DB) error {
 8. 工单创建前的标准顺序是：itsm.service_match ->（confirmation_required=true 时必须先调用 itsm.service_confirm）-> itsm.service_load -> itsm.draft_prepare ->（用户明确确认后）itsm.draft_confirm -> itsm.validate_participants -> itsm.ticket_create；如果顺序不满足，就继续补工具调用，不要直接输出最终提交结果
 9. 工单创建工具会校验"已加载当前服务 + 已确认当前草稿版本"；不要在未满足前置条件时尝试碰运气调用
 10. 如果服务匹配或服务加载还没有给出真实服务 id，就先补做前置工具调用，不允许硬填 service_id=0
-10.1 当 service_match 返回 confirmation_required=true 时：先向用户展示候选并等待选择；用户确认后调用 itsm.service_confirm(service_id) 记录选择，再调用 itsm.service_load；任何候选都不可跳过这一步。用户以序号回复（"1""第一个""前者""后者"等）时，从 matches 数组取对应位置的 id 字段传入，不得把序号数字本身当作 service_id
+10.1 当 service_match 返回 confirmation_required=true 时：先向用户展示候选并等待选择；用户确认后调用 itsm.service_confirm(service_id) 记录选择，再调用 itsm.service_load；任何候选都不可跳过这一步。用户以序号回复（"1""第一个""前者""后者"等）时，从 matches 数组取对应位置的 id 字段传入，不得把序号数字本身当作 service_id。若 service_match 已返回 selected_service_id，则不能要求用户再从候选中选择
 11. 在调用 itsm.draft_prepare 之前，必须先根据 service_load 返回的 routing_field_hint 中的 option_route_map 判断用户的诉求是否跨越了多条路由分支。如果用户同时提到了映射到不同审批路径的多种需求，你必须主动向用户说明这些需求分属不同审批路径，请用户明确选择当前要办理哪一个，而不是替用户做选择、忽略冲突或直接把冲突数据提交给 draft_prepare
 12. 当用户提到多个访问原因或类别，但它们全部映射到同一个路由分支，应合并为该分支对应的结构化字段值并继续流程，不要求用户二选一；同时将用户提到的所有具体原因完整写入 summary 及服务表单中描述访问目的或申请原因的字段，确保工单详情中可见用户完整诉求
 13. 在调用 itsm.draft_prepare 前，先对照 service_load 返回的字段定义检查所有必填字段是否已收集；如果有必填字段缺失，必须先向用户追问缺失字段，不得带着空字段调用 itsm.draft_prepare
@@ -385,8 +385,16 @@ func SeedAgents(db *gorm.DB) error {
 		}
 		if agent.Code != "" {
 			if err := db.Table("ai_agents").Where("code = ?", agent.Code).Select("id", "code").First(&existing).Error; err == nil {
-				// Preset agent exists — skip system_prompt update to preserve custom edits
-				slog.Info("ITSM agent seed: 智能体已存在，跳过 prompt 更新", "name", agent.Name, "code", agent.Code)
+				db.Table("ai_agents").Where("id = ?", existing.ID).Updates(map[string]any{
+					"name":          agent.Name,
+					"description":   agent.Description,
+					"system_prompt": agent.SystemPrompt,
+					"temperature":   agent.Temperature,
+					"max_tokens":    agent.MaxTokens,
+					"max_turns":     agent.MaxTurns,
+					"is_active":     true,
+				})
+				slog.Info("ITSM agent seed: updated preset agent", "name", agent.Name, "code", agent.Code)
 				syncAgentToolBindings(db, existing.ID, agent.ToolNames)
 				continue
 			}
@@ -402,7 +410,16 @@ func SeedAgents(db *gorm.DB) error {
 			if len(updates) > 0 {
 				db.Table("ai_agents").Where("id = ?", existing.ID).Updates(updates)
 			}
-			slog.Info("ITSM agent seed: 智能体已存在，跳过 prompt 更新", "name", agent.Name, "code", agent.Code)
+			db.Table("ai_agents").Where("id = ?", existing.ID).Updates(map[string]any{
+				"name":          agent.Name,
+				"description":   agent.Description,
+				"system_prompt": agent.SystemPrompt,
+				"temperature":   agent.Temperature,
+				"max_tokens":    agent.MaxTokens,
+				"max_turns":     agent.MaxTurns,
+				"is_active":     true,
+			})
+			slog.Info("ITSM agent seed: updated preset agent", "name", agent.Name, "code", agent.Code)
 			syncAgentToolBindings(db, existing.ID, agent.ToolNames)
 			continue
 		}

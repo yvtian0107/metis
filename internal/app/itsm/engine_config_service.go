@@ -14,10 +14,10 @@ import (
 )
 
 var (
-	ErrEngineNotConfigured   = errors.New("工作流解析引擎未配置，请前往引擎配置页面设置")
-	ErrModelNotFound         = errors.New("模型不存在或已停用")
-	ErrAgentNotFound         = errors.New("智能体不存在或已停用")
-	ErrFallbackUserNotFound  = errors.New("兜底处理人不存在或已停用")
+	ErrEngineNotConfigured  = errors.New("工作流解析引擎未配置，请前往引擎配置页面设置")
+	ErrModelNotFound        = errors.New("模型不存在或已停用")
+	ErrAgentNotFound        = errors.New("智能体不存在或已停用")
+	ErrFallbackUserNotFound = errors.New("兜底处理人不存在或已停用")
 )
 
 // EngineConfigService manages ITSM engine configuration.
@@ -41,10 +41,10 @@ func NewEngineConfigService(i do.Injector) (*EngineConfigService, error) {
 
 // EngineConfig is the aggregated engine configuration response.
 type EngineConfig struct {
-	Generator   EngineAgentConfig      `json:"generator"`
-	Servicedesk EngineAgentSelector    `json:"servicedesk"`
-	Decision    EngineDecisionConfig   `json:"decision"`
-	General     EngineGeneralConfig    `json:"general"`
+	Generator   EngineAgentConfig    `json:"generator"`
+	Servicedesk EngineAgentSelector  `json:"servicedesk"`
+	Decision    EngineDecisionConfig `json:"decision"`
+	General     EngineGeneralConfig  `json:"general"`
 }
 
 type EngineAgentConfig struct {
@@ -66,10 +66,10 @@ type EngineDecisionConfig struct {
 }
 
 type EngineGeneralConfig struct {
-	MaxRetries        int    `json:"maxRetries"`
-	TimeoutSeconds    int    `json:"timeoutSeconds"`
-	ReasoningLog      string `json:"reasoningLog"`
-	FallbackAssignee  uint   `json:"fallbackAssignee"`
+	MaxRetries       int    `json:"maxRetries"`
+	TimeoutSeconds   int    `json:"timeoutSeconds"`
+	ReasoningLog     string `json:"reasoningLog"`
+	FallbackAssignee uint   `json:"fallbackAssignee"`
 }
 
 // GetConfig returns the aggregated engine configuration.
@@ -298,4 +298,8 @@ func (s *EngineConfigService) DecisionMode() string {
 // Implements engine.EngineConfigProvider.
 func (s *EngineConfigService) DecisionAgentID() uint {
 	return uint(s.getConfigInt("itsm.engine.decision.agent_id", 0))
+}
+
+func (s *EngineConfigService) ServicedeskAgentID() uint {
+	return uint(s.getConfigInt("itsm.engine.servicedesk.agent_id", 0))
 }

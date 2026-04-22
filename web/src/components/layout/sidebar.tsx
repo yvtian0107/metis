@@ -7,6 +7,7 @@ import { useMenuStore, type MenuItem } from "@/stores/menu"
 import { useUiStore } from "@/stores/ui"
 import { getIcon } from "@/lib/icon-map"
 import { cn } from "@/lib/utils"
+import { getActiveMenuPermission } from "@/lib/navigation-state"
 import { getAppNavigation } from "@/apps/registry"
 import {
   Tooltip,
@@ -73,6 +74,18 @@ function findBestLeaf(items: MenuItem[], pathname: string): MenuItem | null {
   }
 
   return best
+}
+
+function findLeafByPermission(items: MenuItem[], permission: string | null): MenuItem | null {
+  if (!permission) return null
+  return items.find((item) => item.permission === permission) ?? null
+}
+
+function findActiveLeaf(items: MenuItem[], pathname: string, activeMenuPermission: string | null): MenuItem | null {
+  const exact = items.find((item) => item.path && pathname === item.path)
+  if (exact) return exact
+
+  return findLeafByPermission(items, activeMenuPermission) ?? findBestLeaf(items, pathname)
 }
 
 function buildNavApps(menuTree: MenuItem[]): NavApp[] {
@@ -179,10 +192,12 @@ function resolveSectionKey(section: NavSection, index: number): string {
 
 export function Sidebar() {
   const { t } = useTranslation("layout")
-  const { pathname } = useLocation()
+  const location = useLocation()
+  const { pathname } = location
   const navigate = useNavigate()
   const collapsed = useUiStore((s) => s.sidebarCollapsed)
   const menuTree = useMenuStore((s) => s.menuTree)
+  const activeMenuPermission = getActiveMenuPermission(location.state)
 
   const { data: siteInfo } = useQuery({
     queryKey: ["site-info"],
@@ -193,8 +208,8 @@ export function Sidebar() {
   const navApps = useMemo(() => buildNavApps(menuTree), [menuTree])
   const activeApp = useMemo(() => findActiveNavApp(navApps, pathname), [navApps, pathname])
   const activeLeaf = useMemo(
-    () => (activeApp ? findBestLeaf(activeApp.leafItems, pathname) : null),
-    [activeApp, pathname],
+    () => (activeApp ? findActiveLeaf(activeApp.leafItems, pathname, activeMenuPermission) : null),
+    [activeApp, pathname, activeMenuPermission],
   )
   const sections = useMemo<ResolvedNavSection[]>(
     () => buildSections(activeApp).map((section, index) => ({

@@ -7,6 +7,7 @@ import { CheckCircle, X, Bot } from "lucide-react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
 import { useListPage } from "@/hooks/use-list-page"
+import { withActiveMenuPermission } from "@/lib/navigation-state"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
@@ -21,6 +22,7 @@ import {
 } from "@/components/ui/table"
 import { type ApprovalItem, approveActivity, denyActivity, confirmActivity, rejectActivity } from "../../../api"
 import { SLABadge } from "../../../components/sla-badge"
+import { TICKET_MENU_PERMISSION } from "../navigation"
 
 export function Component() {
   const { t } = useTranslation(["itsm", "common"])
@@ -102,7 +104,7 @@ export function Component() {
                     onReject={(reason) => rejectMut.mutate({ item, reason })}
                     confirming={confirmMut.isPending}
                     rejecting={rejectMut.isPending}
-                    onNavigate={() => navigate(`/itsm/tickets/${item.ticketId}`)}
+                    onNavigate={() => navigate(`/itsm/tickets/${item.ticketId}`, { state: withActiveMenuPermission(TICKET_MENU_PERMISSION.approvals) })}
                   />
                 ) : (
                   <ApprovalRow
@@ -113,7 +115,7 @@ export function Component() {
                     onDeny={(reason) => denyMut.mutate({ item, reason })}
                     approving={approveMut.isPending}
                     denying={denyMut.isPending}
-                    onNavigate={() => navigate(`/itsm/tickets/${item.ticketId}`)}
+                    onNavigate={() => navigate(`/itsm/tickets/${item.ticketId}`, { state: withActiveMenuPermission(TICKET_MENU_PERMISSION.approvals) })}
                   />
                 ),
               )

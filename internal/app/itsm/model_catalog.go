@@ -91,63 +91,85 @@ func (c *ServiceCatalog) ToResponse() ServiceCatalogResponse {
 // ServiceDefinition 服务定义
 type ServiceDefinition struct {
 	model.BaseModel
-	Name              string    `json:"name" gorm:"size:128;not null"`
-	Code              string    `json:"code" gorm:"size:64;uniqueIndex;not null"`
-	Description       string    `json:"description" gorm:"size:1024"`
-	CatalogID         uint      `json:"catalogId" gorm:"not null;index"`
-	EngineType        string    `json:"engineType" gorm:"size:16;not null;default:classic"` // classic | smart
-	SLAID             *uint     `json:"slaId" gorm:"index"`
-	IntakeFormSchema  JSONField `json:"intakeFormSchema" gorm:"type:text"`    // inline form schema
-	WorkflowJSON      JSONField `json:"workflowJson" gorm:"type:text"`        // classic mode
-	CollaborationSpec string    `json:"collaborationSpec" gorm:"type:text"`    // smart mode
-	AgentID           *uint     `json:"agentId" gorm:"index"`                 // smart mode
-	AgentConfig       JSONField `json:"agentConfig" gorm:"type:text"`         // smart mode
-	KnowledgeBaseIDs  JSONField `json:"knowledgeBaseIds" gorm:"type:text"`    // smart mode: [1,2,3]
-	IsActive          bool      `json:"isActive" gorm:"not null;default:true"`
-	SortOrder         int       `json:"sortOrder" gorm:"default:0"`
+	Name                   string     `json:"name" gorm:"size:128;not null"`
+	Code                   string     `json:"code" gorm:"size:64;uniqueIndex;not null"`
+	Description            string     `json:"description" gorm:"size:1024"`
+	CatalogID              uint       `json:"catalogId" gorm:"not null;index"`
+	EngineType             string     `json:"engineType" gorm:"size:16;not null;default:classic"` // classic | smart
+	SLAID                  *uint      `json:"slaId" gorm:"index"`
+	IntakeFormSchema       JSONField  `json:"intakeFormSchema" gorm:"type:text"`  // inline form schema
+	WorkflowJSON           JSONField  `json:"workflowJson" gorm:"type:text"`      // classic mode
+	CollaborationSpec      string     `json:"collaborationSpec" gorm:"type:text"` // smart mode
+	AgentID                *uint      `json:"agentId" gorm:"index"`               // smart mode
+	AgentConfig            JSONField  `json:"agentConfig" gorm:"type:text"`       // smart mode
+	KnowledgeBaseIDs       JSONField  `json:"knowledgeBaseIds" gorm:"type:text"`  // smart mode: [1,2,3]
+	PublishHealthStatus    string     `json:"publishHealthStatus" gorm:"size:16"`
+	PublishHealthItems     JSONField  `json:"publishHealthItems" gorm:"type:text"`
+	PublishHealthCheckedAt *time.Time `json:"publishHealthCheckedAt" gorm:"index"`
+	IsActive               bool       `json:"isActive" gorm:"not null;default:true"`
+	SortOrder              int        `json:"sortOrder" gorm:"default:0"`
 }
 
 func (ServiceDefinition) TableName() string { return "itsm_service_definitions" }
 
 type ServiceDefinitionResponse struct {
-	ID                uint      `json:"id"`
-	Name              string    `json:"name"`
-	Code              string    `json:"code"`
-	Description       string    `json:"description"`
-	CatalogID         uint      `json:"catalogId"`
-	EngineType        string    `json:"engineType"`
-	SLAID             *uint     `json:"slaId"`
-	IntakeFormSchema  JSONField `json:"intakeFormSchema"`
-	WorkflowJSON      JSONField `json:"workflowJson"`
-	CollaborationSpec string    `json:"collaborationSpec"`
-	AgentID           *uint     `json:"agentId"`
-	AgentConfig       JSONField `json:"agentConfig"`
-	KnowledgeBaseIDs  JSONField `json:"knowledgeBaseIds"`
-	IsActive          bool      `json:"isActive"`
-	SortOrder         int       `json:"sortOrder"`
-	CreatedAt         time.Time `json:"createdAt"`
-	UpdatedAt         time.Time `json:"updatedAt"`
+	ID                 uint                `json:"id"`
+	Name               string              `json:"name"`
+	Code               string              `json:"code"`
+	Description        string              `json:"description"`
+	CatalogID          uint                `json:"catalogId"`
+	EngineType         string              `json:"engineType"`
+	SLAID              *uint               `json:"slaId"`
+	IntakeFormSchema   JSONField           `json:"intakeFormSchema"`
+	WorkflowJSON       JSONField           `json:"workflowJson"`
+	CollaborationSpec  string              `json:"collaborationSpec"`
+	AgentID            *uint               `json:"agentId"`
+	AgentConfig        JSONField           `json:"agentConfig"`
+	KnowledgeBaseIDs   JSONField           `json:"knowledgeBaseIds"`
+	PublishHealthCheck *ServiceHealthCheck `json:"publishHealthCheck"`
+	IsActive           bool                `json:"isActive"`
+	SortOrder          int                 `json:"sortOrder"`
+	CreatedAt          time.Time           `json:"createdAt"`
+	UpdatedAt          time.Time           `json:"updatedAt"`
 }
 
 func (s *ServiceDefinition) ToResponse() ServiceDefinitionResponse {
+	var publishHealthCheck *ServiceHealthCheck
+	if s.PublishHealthCheckedAt != nil && len(s.PublishHealthItems) > 0 {
+		var items []ServiceHealthItem
+		if err := json.Unmarshal([]byte(s.PublishHealthItems), &items); err == nil {
+			status := s.PublishHealthStatus
+			if status == "" {
+				status = "pass"
+			}
+			publishHealthCheck = &ServiceHealthCheck{
+				ServiceID: s.ID,
+				Status:    status,
+				Items:     items,
+				CheckedAt: s.PublishHealthCheckedAt,
+			}
+		}
+	}
+
 	return ServiceDefinitionResponse{
-		ID:                s.ID,
-		Name:              s.Name,
-		Code:              s.Code,
-		Description:       s.Description,
-		CatalogID:         s.CatalogID,
-		EngineType:        s.EngineType,
-		SLAID:             s.SLAID,
-		IntakeFormSchema:  s.IntakeFormSchema,
-		WorkflowJSON:      s.WorkflowJSON,
-		CollaborationSpec: s.CollaborationSpec,
-		AgentID:           s.AgentID,
-		AgentConfig:       s.AgentConfig,
-		KnowledgeBaseIDs:  s.KnowledgeBaseIDs,
-		IsActive:          s.IsActive,
-		SortOrder:         s.SortOrder,
-		CreatedAt:         s.CreatedAt,
-		UpdatedAt:         s.UpdatedAt,
+		ID:                 s.ID,
+		Name:               s.Name,
+		Code:               s.Code,
+		Description:        s.Description,
+		CatalogID:          s.CatalogID,
+		EngineType:         s.EngineType,
+		SLAID:              s.SLAID,
+		IntakeFormSchema:   s.IntakeFormSchema,
+		WorkflowJSON:       s.WorkflowJSON,
+		CollaborationSpec:  s.CollaborationSpec,
+		AgentID:            s.AgentID,
+		AgentConfig:        s.AgentConfig,
+		KnowledgeBaseIDs:   s.KnowledgeBaseIDs,
+		PublishHealthCheck: publishHealthCheck,
+		IsActive:           s.IsActive,
+		SortOrder:          s.SortOrder,
+		CreatedAt:          s.CreatedAt,
+		UpdatedAt:          s.UpdatedAt,
 	}
 }
 

@@ -7,6 +7,7 @@ import { useQuery } from "@tanstack/react-query"
 import { Search, Ticket, Plus } from "lucide-react"
 import { usePermission } from "@/hooks/use-permission"
 import { useListPage } from "@/hooks/use-list-page"
+import { withActiveMenuPermission } from "@/lib/navigation-state"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
@@ -23,6 +24,7 @@ import {
 import {
   type TicketItem, fetchPriorities, fetchServiceDefs,
 } from "../../api"
+import { TICKET_MENU_PERMISSION } from "./navigation"
 
 const STATUS_MAP: Record<string, { variant: "default" | "secondary" | "destructive" | "outline"; key: string }> = {
   pending: { variant: "secondary", key: "statusPending" },
@@ -153,7 +155,11 @@ export function Component() {
               items.map((item) => {
                 const statusInfo = STATUS_MAP[item.status] ?? { variant: "secondary" as const, key: "statusPending" }
                 return (
-                  <TableRow key={item.id} className="cursor-pointer" onClick={() => navigate(`/itsm/tickets/${item.id}`)}>
+                  <TableRow
+                    key={item.id}
+                    className="cursor-pointer"
+                    onClick={() => navigate(`/itsm/tickets/${item.id}`, { state: withActiveMenuPermission(TICKET_MENU_PERMISSION.list) })}
+                  >
                     <TableCell className="font-mono text-sm">{item.code}</TableCell>
                     <TableCell className="font-medium">{item.title}</TableCell>
                     <TableCell>

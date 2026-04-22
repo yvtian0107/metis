@@ -13,12 +13,14 @@ var (
 )
 
 type ServiceActionService struct {
-	repo *ServiceActionRepo
+	repo        *ServiceActionRepo
+	serviceDefs *ServiceDefService
 }
 
 func NewServiceActionService(i do.Injector) (*ServiceActionService, error) {
 	repo := do.MustInvoke[*ServiceActionRepo](i)
-	return &ServiceActionService{repo: repo}, nil
+	serviceDefs := do.MustInvoke[*ServiceDefService](i)
+	return &ServiceActionService{repo: repo, serviceDefs: serviceDefs}, nil
 }
 
 func (s *ServiceActionService) Create(action *ServiceAction) (*ServiceAction, error) {
@@ -28,6 +30,11 @@ func (s *ServiceActionService) Create(action *ServiceAction) (*ServiceAction, er
 	action.IsActive = true
 	if err := s.repo.Create(action); err != nil {
 		return nil, err
+	}
+	if s.serviceDefs != nil {
+		if err := s.serviceDefs.RefreshPublishHealthCheckIfPresent(action.ServiceID); err != nil {
+			return nil, err
+		}
 	}
 	return s.repo.FindByID(action.ID)
 }
@@ -59,17 +66,29 @@ func (s *ServiceActionService) Update(id uint, updates map[string]any) (*Service
 	if err := s.repo.Update(id, updates); err != nil {
 		return nil, err
 	}
+	if s.serviceDefs != nil {
+		if err := s.serviceDefs.RefreshPublishHealthCheckIfPresent(existing.ServiceID); err != nil {
+			return nil, err
+		}
+	}
 	return s.repo.FindByID(id)
 }
 
 func (s *ServiceActionService) Delete(id uint) error {
-	if _, err := s.repo.FindByID(id); err != nil {
+	existing, err := s.repo.FindByID(id)
+	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return ErrServiceActionNotFound
 		}
 		return err
 	}
-	return s.repo.Delete(id)
+	if err := s.repo.Delete(id); err != nil {
+		return err
+	}
+	if s.serviceDefs != nil {
+		return s.serviceDefs.RefreshPublishHealthCheckIfPresent(existing.ServiceID)
+	}
+	return nil
 }
 
 func (s *ServiceActionService) ListByService(serviceID uint) ([]ServiceAction, error) {

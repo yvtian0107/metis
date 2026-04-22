@@ -6,7 +6,7 @@ import { useForm } from "react-hook-form"
 import { z } from "zod"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { MoreVertical, ArrowRightLeft, UserRoundCog, RotateCcw } from "lucide-react"
+import { ShieldAlert, ArrowRightLeft, UserRoundCog, RotateCcw } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
@@ -26,6 +26,7 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
+import { cn } from "@/lib/utils"
 import { overrideJump, overrideReassign, retryAI, fetchUsers } from "../api"
 
 const STEP_TYPES = ["form", "approve", "process", "action", "notify", "wait"]
@@ -34,9 +35,10 @@ interface OverrideActionsProps {
   ticketId: number
   currentActivityId: number | null
   aiFailureCount?: number
+  triggerClassName?: string
 }
 
-export function OverrideActions({ ticketId, currentActivityId, aiFailureCount }: OverrideActionsProps) {
+export function OverrideActions({ ticketId, currentActivityId, aiFailureCount, triggerClassName }: OverrideActionsProps) {
   const { t } = useTranslation("itsm")
   const queryClient = useQueryClient()
   const [jumpOpen, setJumpOpen] = useState(false)
@@ -101,9 +103,11 @@ export function OverrideActions({ ticketId, currentActivityId, aiFailureCount }:
     <>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button variant="outline" size="sm">
-            <MoreVertical className="mr-1 h-3.5 w-3.5" />
-            {t("smart.override")}
+          <Button variant="outline" size="sm" className={cn(triggerClassName)}>
+            <span className="grid w-[5.25rem] grid-cols-[0.875rem_minmax(0,1fr)] items-center gap-2 text-left text-[11px] leading-none">
+              <ShieldAlert className="h-3.5 w-3.5 shrink-0 justify-self-center" />
+              <span className="truncate font-medium">{t("smart.override")}</span>
+            </span>
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">

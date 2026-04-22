@@ -119,6 +119,9 @@ func (a *AIApp) Providers(i do.Injector) {
 	do.Provide(i, NewMemoryService)
 	do.Provide(i, NewMemoryHandler)
 	do.Provide(i, NewAgentGateway)
+	do.Provide(i, func(i do.Injector) (app.AIAgentProvider, error) {
+		return do.MustInvoke[*AgentGateway](i), nil
+	})
 	do.Provide(i, NewKnowledgeQueryHandler)
 	do.Provide(i, NewKnowledgeToolRegistry)
 

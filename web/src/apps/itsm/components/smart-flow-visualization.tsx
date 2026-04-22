@@ -50,12 +50,12 @@ export function SmartFlowVisualization({ activities, currentActivityId }: SmartF
   }
 
   return (
-    <Card>
+    <Card className="overflow-visible">
       <CardHeader>
         <CardTitle className="text-base">{t("smart.flowTitle")}</CardTitle>
       </CardHeader>
-      <CardContent>
-        <div className="flex items-start gap-1 overflow-x-auto pb-2">
+      <CardContent className="overflow-visible px-5 pb-5">
+        <div className="flex min-h-[122px] items-start gap-1 overflow-x-auto overflow-y-visible px-3 py-3">
           {sorted.map((activity, idx) => {
             const isCurrent = activity.id === currentActivityId
             const isAI = activity.aiDecision != null || activity.aiConfidence != null

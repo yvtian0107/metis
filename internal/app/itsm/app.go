@@ -29,6 +29,18 @@ type ITSMApp struct {
 	injector do.Injector
 }
 
+type lazyAIAgentProvider struct {
+	injector do.Injector
+}
+
+func (p *lazyAIAgentProvider) GetAgentConfig(agentID uint) (*app.AIAgentConfig, error) {
+	provider, err := do.InvokeAs[app.AIAgentProvider](p.injector)
+	if err != nil {
+		return nil, err
+	}
+	return provider.GetAgentConfig(agentID)
+}
+
 func (a *ITSMApp) Name() string { return "itsm" }
 
 // GetToolRegistry implements app.ToolRegistryProvider.
@@ -185,7 +197,9 @@ func (a *ITSMApp) Providers(i do.Injector) {
 		// TicketCreator is resolved lazily (same pattern as withdrawFunc) to break circular dep.
 		var ticketCreator tools.TicketCreator
 		ticketCreator = &lazyTicketCreator{injector: i}
-		return tools.NewOperator(db.DB, resolver, orgResolver, withdrawFunc, ticketCreator), nil
+		configProvider := do.MustInvoke[*EngineConfigService](i)
+		matcher := NewLLMServiceMatcher(db.DB, configProvider, &lazyAIAgentProvider{injector: i}, nil)
+		return tools.NewOperator(db.DB, resolver, orgResolver, withdrawFunc, ticketCreator, matcher), nil
 	})
 	do.Provide(i, func(i do.Injector) (*tools.SessionStateStore, error) {
 		db := do.MustInvoke[*database.DB](i)

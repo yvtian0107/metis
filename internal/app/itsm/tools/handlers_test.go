@@ -35,6 +35,8 @@ func (m *memStateStore) SaveState(sessionID uint, state *ServiceDeskState) error
 type stubOperator struct {
 	detail             *ServiceDetail
 	details            map[uint]*ServiceDetail
+	matchResponse      []ServiceMatch
+	matchDecision      MatchDecision
 	createdServiceID   uint
 	createdSummary     string
 	createdFormData    map[string]any
@@ -42,7 +44,9 @@ type stubOperator struct {
 	validatedFormData  map[string]any
 }
 
-func (s *stubOperator) MatchServices(query string) ([]ServiceMatch, error) { return nil, nil }
+func (s *stubOperator) MatchServices(ctx context.Context, query string) ([]ServiceMatch, MatchDecision, error) {
+	return s.matchResponse, s.matchDecision, nil
+}
 func (s *stubOperator) LoadService(serviceID uint) (*ServiceDetail, error) {
 	if s.details != nil {
 		if detail, ok := s.details[serviceID]; ok {
@@ -79,6 +83,112 @@ func vpnServiceDetail(serviceID uint) *ServiceDetail {
 			{Key: "request_kind", Label: "访问原因", Type: "textarea", Required: true},
 		},
 		FieldsHash: "vpn123",
+	}
+}
+
+func TestServiceMatch_SelectServiceAutoConfirmsAndAllowsLoad(t *testing.T) {
+	store := newMemStateStore()
+	op := &stubOperator{
+		matchResponse: []ServiceMatch{
+			{ID: 5, Name: "VPN 开通申请", CatalogPath: "基础设施与网络/网络与 VPN", Description: "VPN 开通", Score: 0.97, Reason: "用户明确要求申请 VPN"},
+		},
+		matchDecision: MatchDecision{Kind: MatchDecisionSelectService, SelectedServiceID: 5},
+		details:       map[uint]*ServiceDetail{5: vpnServiceDetail(5)},
+	}
+	ctx := context.WithValue(context.Background(), app.SessionIDKey, uint(1))
+
+	result, err := serviceMatchHandler(op, store)(ctx, 1, []byte(`{"query":"我要申请VPN"}`))
+	if err != nil {
+		t.Fatalf("service match: %v", err)
+	}
+
+	var resp struct {
+		Matches              []ServiceMatch `json:"matches"`
+		ConfirmationRequired bool           `json:"confirmation_required"`
+		SelectedServiceID    uint           `json:"selected_service_id"`
+	}
+	if err := json.Unmarshal(result, &resp); err != nil {
+		t.Fatalf("unmarshal match response: %v", err)
+	}
+	if resp.ConfirmationRequired {
+		t.Fatalf("select_service should not require confirmation: %+v", resp)
+	}
+	if resp.SelectedServiceID != 5 || len(resp.Matches) != 1 || resp.Matches[0].Name != "VPN 开通申请" {
+		t.Fatalf("expected only selected VPN service, got %+v", resp)
+	}
+	state := store.states[1]
+	if state.Stage != "candidates_ready" || state.ConfirmedServiceID != 5 || state.TopMatchServiceID != 5 || state.ConfirmationRequired {
+		t.Fatalf("expected selected service to be confirmed in state, got %+v", state)
+	}
+
+	if _, err := serviceLoadHandler(op, store)(ctx, 1, []byte(`{"service_id":5}`)); err != nil {
+		t.Fatalf("selected service should load without service_confirm: %v", err)
+	}
+}
+
+func TestServiceMatch_NeedClarificationRequiresServiceConfirm(t *testing.T) {
+	store := newMemStateStore()
+	op := &stubOperator{
+		matchResponse: []ServiceMatch{
+			{ID: 5, Name: "VPN 开通申请", Score: 0.72, Reason: "涉及 VPN"},
+			{ID: 8, Name: "VPN 故障排查", Score: 0.7, Reason: "用户描述可能是故障"},
+		},
+		matchDecision: MatchDecision{Kind: MatchDecisionNeedClarification, ClarificationQuestion: "请选择是开通 VPN 还是排查 VPN 故障"},
+	}
+	ctx := context.WithValue(context.Background(), app.SessionIDKey, uint(1))
+
+	result, err := serviceMatchHandler(op, store)(ctx, 1, []byte(`{"query":"VPN有问题，也想开通权限"}`))
+	if err != nil {
+		t.Fatalf("service match: %v", err)
+	}
+
+	var resp struct {
+		Matches               []ServiceMatch `json:"matches"`
+		ConfirmationRequired  bool           `json:"confirmation_required"`
+		SelectedServiceID     uint           `json:"selected_service_id"`
+		ClarificationQuestion string         `json:"clarification_question"`
+	}
+	if err := json.Unmarshal(result, &resp); err != nil {
+		t.Fatalf("unmarshal match response: %v", err)
+	}
+	if !resp.ConfirmationRequired || resp.SelectedServiceID != 0 || len(resp.Matches) != 2 {
+		t.Fatalf("expected clarification candidates without selected service, got %+v", resp)
+	}
+	if resp.ClarificationQuestion == "" {
+		t.Fatalf("expected clarification question in response")
+	}
+	state := store.states[1]
+	if state.ConfirmedServiceID != 0 || !state.ConfirmationRequired || len(state.CandidateServiceIDs) != 2 {
+		t.Fatalf("expected confirmation to be required in state, got %+v", state)
+	}
+}
+
+func TestServiceMatch_NoMatchClearsCandidates(t *testing.T) {
+	store := newMemStateStore()
+	op := &stubOperator{
+		matchDecision: MatchDecision{Kind: MatchDecisionNoMatch},
+	}
+	ctx := context.WithValue(context.Background(), app.SessionIDKey, uint(1))
+
+	result, err := serviceMatchHandler(op, store)(ctx, 1, []byte(`{"query":"我要领一杯咖啡"}`))
+	if err != nil {
+		t.Fatalf("service match: %v", err)
+	}
+
+	var resp struct {
+		Matches              []ServiceMatch `json:"matches"`
+		ConfirmationRequired bool           `json:"confirmation_required"`
+		SelectedServiceID    uint           `json:"selected_service_id"`
+	}
+	if err := json.Unmarshal(result, &resp); err != nil {
+		t.Fatalf("unmarshal match response: %v", err)
+	}
+	if resp.ConfirmationRequired || resp.SelectedServiceID != 0 || len(resp.Matches) != 0 {
+		t.Fatalf("expected empty no-match response, got %+v", resp)
+	}
+	state := store.states[1]
+	if state.ConfirmedServiceID != 0 || state.TopMatchServiceID != 0 || len(state.CandidateServiceIDs) != 0 {
+		t.Fatalf("expected no-match state to clear candidates, got %+v", state)
 	}
 }
 

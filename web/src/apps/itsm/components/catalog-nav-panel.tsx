@@ -13,7 +13,6 @@ import {
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
@@ -160,39 +159,39 @@ export function CatalogNavPanel({
 
   return (
     <>
-      <div className="flex w-64 shrink-0 flex-col rounded-xl border bg-card overflow-hidden">
-        <div className="flex-1 overflow-y-auto p-2">
+      <div className="workspace-surface flex w-56 shrink-0 flex-col overflow-hidden rounded-[1.15rem]">
+        <div className="flex-1 overflow-y-auto p-1.5">
           {/* "全部" */}
           <button
             type="button"
             onClick={() => onSelect(null)}
             className={cn(
-              "flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm transition-colors",
-              "hover:bg-accent",
-              selectedCatalogId === null && "bg-accent font-medium",
+              "workspace-nav-item flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left transition-colors",
+              "text-muted-foreground hover:bg-background/58 hover:text-foreground",
+              selectedCatalogId === null && "bg-background/70 font-medium text-foreground",
             )}
           >
             <FolderTree className="h-4 w-4 shrink-0 text-muted-foreground" />
             <span className="flex-1">{t("itsm:services.allNav")}</span>
-            <Badge variant="outline" className="ml-auto text-xs tabular-nums border-transparent bg-muted/60">
+            <span className="ml-auto w-6 text-right text-xs tabular-nums text-muted-foreground">
               {totalServices}
-            </Badge>
+            </span>
           </button>
 
           {/* Group sections */}
           {roots.map((root) => (
             <div key={root.id} className="mt-3">
               {/* Section header */}
-              <div className="group/header flex items-center gap-1 px-3 py-1">
+              <div className="group/header flex items-center gap-1 px-2.5 py-1.5">
                 <CatalogIcon name={root.icon} className="h-3.5 w-3.5 shrink-0 text-muted-foreground/60" />
-                <span className="flex-1 truncate text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                <span className="workspace-nav-section-title flex-1 truncate">
                   {root.name}
                 </span>
                 {(canUpdate || canDelete || canCreate) && (
-                  <div className="opacity-0 group-hover/header:opacity-100 transition-opacity">
+                  <div className="opacity-0 transition-opacity group-hover/header:opacity-100">
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
-                        <button type="button" className="h-5 w-5 inline-flex items-center justify-center rounded text-muted-foreground/50 hover:text-primary">
+                        <button type="button" className="inline-flex h-5 w-5 items-center justify-center rounded text-muted-foreground/50 hover:bg-background/60 hover:text-foreground">
                           <MoreHorizontal className="h-3.5 w-3.5" />
                         </button>
                       </DropdownMenuTrigger>
@@ -229,19 +228,19 @@ export function CatalogNavPanel({
                     type="button"
                     onClick={() => onSelect(child.id)}
                     className={cn(
-                      "flex w-full items-center gap-2 rounded-md px-3 py-1.5 pl-8 text-left text-sm transition-colors",
-                      "hover:bg-accent",
-                      selectedCatalogId === child.id && "border-l-2 border-primary bg-accent font-medium",
+                      "workspace-nav-item flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 pl-7 text-left transition-colors",
+                      "text-muted-foreground hover:bg-background/58 hover:text-foreground",
+                      selectedCatalogId === child.id && "bg-background/70 font-medium text-foreground",
                     )}
                   >
                     <span className="flex-1 truncate">{child.name}</span>
-                    <Badge variant="outline" className="text-[10px] tabular-nums border-transparent bg-muted/60">
+                    <span className="w-5 text-right text-xs tabular-nums text-muted-foreground/75">
                       {serviceCounts.get(child.id) ?? 0}
-                    </Badge>
+                    </span>
                   </button>
                 ))}
                 {(!root.children || root.children.length === 0) && (
-                  <p className="px-3 pl-8 py-1.5 text-xs text-muted-foreground/50">{t("itsm:catalogs.childrenEmpty")}</p>
+                  <p className="px-2.5 py-1.5 pl-7 text-xs text-muted-foreground/50">{t("itsm:catalogs.childrenEmpty")}</p>
                 )}
               </nav>
             </div>
@@ -250,11 +249,11 @@ export function CatalogNavPanel({
 
         {/* Bottom: create root */}
         {canCreate && (
-          <div className="shrink-0 border-t p-2">
+          <div className="shrink-0 border-t border-border/45 p-1.5">
             <button
               type="button"
               onClick={openCreateRoot}
-              className="flex w-full items-center justify-center gap-1.5 rounded-md border border-primary/30 bg-primary/5 px-3 py-2 text-sm text-primary transition-colors hover:bg-primary hover:text-primary-foreground"
+              className="workspace-nav-item flex w-full items-center justify-center gap-1.5 rounded-lg border border-border/55 bg-background/40 px-2.5 py-2 font-medium text-foreground/78 transition-colors hover:bg-background/70 hover:text-foreground"
             >
               <Plus className="h-4 w-4" />{t("itsm:catalogs.create")}
             </button>

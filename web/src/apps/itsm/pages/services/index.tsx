@@ -177,18 +177,18 @@ export function Component() {
   // ── Render ───────────────────────────────────────────
 
   return (
-    <div className="flex h-[calc(100vh-theme(spacing.14)-theme(spacing.12))] flex-col">
-      {/* Page header */}
-      <div className="flex shrink-0 items-center justify-between pb-4">
-        <h2 className="text-lg font-semibold">{t("itsm:services.title")}</h2>
+    <div className="workspace-page flex h-[calc(100vh-theme(spacing.14)-theme(spacing.12))] flex-col">
+      <div className="workspace-page-header shrink-0">
+        <div>
+          <h2 className="workspace-page-title">{t("itsm:services.title")}</h2>
+        </div>
         {canCreateService && (
-          <Button onClick={() => setCreateOpen(true)}>
+          <Button size="sm" onClick={() => setCreateOpen(true)}>
             <Plus className="mr-1.5 h-4 w-4" />{t("itsm:services.create")}
           </Button>
         )}
       </div>
 
-      {/* Workspace: nav + grid */}
       <div className="flex min-h-0 flex-1 gap-4">
         <CatalogNavPanel
           catalogs={catalogs}
@@ -200,13 +200,12 @@ export function Component() {
           canDelete={canDeleteCatalog}
         />
 
-        <div className="flex-1 min-w-0 overflow-y-auto">
+        <div className="min-w-0 flex-1 overflow-y-auto pr-1">
           {servicesLoading ? (
-            <div className="flex items-center justify-center py-20">
-              <div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+            <div className="workspace-surface flex h-48 items-center justify-center rounded-[1.25rem]">
+              <div className="h-6 w-6 animate-spin rounded-full border-2 border-muted-foreground/25 border-t-primary/70" />
             </div>
           ) : selectedCatalogId === null ? (
-            /* "全部" view: grouped by root */
             roots.length === 0 ? (
               <EmptyState
                 icon={Cog}
@@ -222,8 +221,11 @@ export function Component() {
                   if (group.length === 0) return null
                   return (
                     <div key={root.id}>
-                      <h3 className="mb-3 text-sm font-medium text-muted-foreground">{root.name}</h3>
-                      <div className="grid grid-cols-3 gap-4">
+                      <div className="mb-3 flex items-center gap-3 border-b border-border/45 pb-2">
+                        <h3 className="text-sm font-semibold text-foreground/82">{root.name}</h3>
+                        <span className="text-xs text-muted-foreground">{group.length}</span>
+                      </div>
+                      <div className="grid grid-cols-[repeat(auto-fill,minmax(260px,1fr))] gap-4">
                         {group.map((svc) => (
                           <ServiceCard
                             key={svc.id}
@@ -259,7 +261,7 @@ export function Component() {
                 actionLabel={t("itsm:services.addService")}
               />
             ) : (
-              <div className="grid grid-cols-3 gap-4">
+              <div className="grid grid-cols-[repeat(auto-fill,minmax(260px,1fr))] gap-4">
                 {filteredServices.map((svc) => (
                   <ServiceCard
                     key={svc.id}
@@ -364,12 +366,14 @@ function EmptyState({ icon: Icon, title, description, action, actionLabel }: {
   actionLabel?: string
 }) {
   return (
-    <div className="flex flex-col items-center justify-center py-20 text-center">
-      <Icon className="h-12 w-12 text-muted-foreground/40 mb-4" />
-      <h3 className="text-base font-medium">{title}</h3>
-      {description && <p className="mt-1 text-sm text-muted-foreground">{description}</p>}
+    <div className="workspace-surface flex min-h-[260px] flex-col items-center justify-center rounded-[1.25rem] px-6 py-14 text-center">
+      <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl border border-border/55 bg-background/45">
+        <Icon className="h-5 w-5 text-muted-foreground/65" />
+      </div>
+      <h3 className="text-base font-semibold tracking-[-0.01em]">{title}</h3>
+      {description && <p className="mt-1 max-w-sm text-sm text-muted-foreground">{description}</p>}
       {action && actionLabel && (
-        <Button className="mt-4" onClick={action}>
+        <Button className="mt-4" size="sm" onClick={action}>
           <Plus className="mr-1.5 h-4 w-4" />{actionLabel}
         </Button>
       )}

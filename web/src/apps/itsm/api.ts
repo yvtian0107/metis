@@ -65,6 +65,7 @@ export interface ServiceDefItem {
   collaborationSpec: string
   agentId: number | null
   agentConfig: SmartAgentConfig | null
+  publishHealthCheck: ServiceHealthCheck | null
   isActive: boolean
   sortOrder: number
   createdAt: string
@@ -704,6 +705,8 @@ export interface WorkflowGenerateResponse {
   workflowJson: unknown
   retries: number
   errors?: { nodeId?: string; edgeId?: string; message: string }[]
+  service?: ServiceDefItem
+  healthCheck?: ServiceHealthCheck
 }
 
 export function generateWorkflow(data: { serviceId: number; collaborationSpec: string }) {
@@ -723,6 +726,7 @@ export interface ServiceHealthCheck {
   serviceId: number
   status: "pass" | "warn" | "fail"
   items: ServiceHealthItem[]
+  checkedAt?: string
 }
 
 export function fetchServiceHealth(serviceId: number) {

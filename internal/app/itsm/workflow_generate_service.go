@@ -30,6 +30,7 @@ type WorkflowGenerateService struct {
 	providerSvc   *ai.ProviderService
 	sysConfigRepo *repository.SysConfigRepo
 	actionRepo    *ServiceActionRepo
+	serviceDefSvc *ServiceDefService
 }
 
 func NewWorkflowGenerateService(i do.Injector) (*WorkflowGenerateService, error) {
@@ -39,6 +40,7 @@ func NewWorkflowGenerateService(i do.Injector) (*WorkflowGenerateService, error)
 		providerSvc:   do.MustInvoke[*ai.ProviderService](i),
 		sysConfigRepo: do.MustInvoke[*repository.SysConfigRepo](i),
 		actionRepo:    do.MustInvoke[*ServiceActionRepo](i),
+		serviceDefSvc: do.MustInvoke[*ServiceDefService](i),
 	}, nil
 }
 
@@ -50,9 +52,11 @@ type GenerateRequest struct {
 
 // GenerateResponse is the output of workflow generation.
 type GenerateResponse struct {
-	WorkflowJSON json.RawMessage          `json:"workflowJson"`
-	Retries      int                      `json:"retries"`
-	Errors       []engine.ValidationError `json:"errors,omitempty"`
+	WorkflowJSON json.RawMessage            `json:"workflowJson"`
+	Retries      int                        `json:"retries"`
+	Errors       []engine.ValidationError   `json:"errors,omitempty"`
+	Service      *ServiceDefinitionResponse `json:"service,omitempty"`
+	HealthCheck  *ServiceHealthCheck        `json:"healthCheck,omitempty"`
 }
 
 // Generate parses a collaboration spec into a validated workflow JSON via LLM.
@@ -154,10 +158,7 @@ func (s *WorkflowGenerateService) Generate(ctx context.Context, req *GenerateReq
 		lastWorkflowJSON = workflowJSON
 
 		if len(validationErrors) == 0 {
-			return &GenerateResponse{
-				WorkflowJSON: workflowJSON,
-				Retries:      attempt,
-			}, nil
+			return s.buildGenerateResponse(req, workflowJSON, attempt, nil)
 		}
 
 		slog.Warn("workflow generate: validation failed",
@@ -169,15 +170,42 @@ func (s *WorkflowGenerateService) Generate(ctx context.Context, req *GenerateReq
 		}
 
 		// Return last attempt with errors
-		return &GenerateResponse{
-			WorkflowJSON: lastWorkflowJSON,
-			Retries:      attempt,
-			Errors:       validationErrors,
-		}, nil
+		return s.buildGenerateResponse(req, lastWorkflowJSON, attempt, validationErrors)
 	}
 
 	// Should not reach here
 	return nil, ErrWorkflowGeneration
+}
+
+func (s *WorkflowGenerateService) buildGenerateResponse(req *GenerateRequest, workflowJSON json.RawMessage, retries int, validationErrors []engine.ValidationError) (*GenerateResponse, error) {
+	resp := &GenerateResponse{
+		WorkflowJSON: workflowJSON,
+		Retries:      retries,
+		Errors:       validationErrors,
+	}
+	if req.ServiceID == 0 || s.serviceDefSvc == nil {
+		return resp, nil
+	}
+
+	updated, err := s.serviceDefSvc.Update(req.ServiceID, map[string]any{
+		"workflow_json":      JSONField(workflowJSON),
+		"collaboration_spec": req.CollaborationSpec,
+	})
+	if err != nil {
+		return nil, err
+	}
+	health, err := s.serviceDefSvc.RefreshPublishHealthCheck(req.ServiceID)
+	if err != nil {
+		return nil, err
+	}
+	updated, err = s.serviceDefSvc.Get(updated.ID)
+	if err != nil {
+		return nil, err
+	}
+	serviceResp := updated.ToResponse()
+	resp.Service = &serviceResp
+	resp.HealthCheck = health
+	return resp, nil
 }
 
 // buildActionsContext formats available service actions for the LLM prompt.

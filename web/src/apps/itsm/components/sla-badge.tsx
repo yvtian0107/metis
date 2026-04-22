@@ -3,9 +3,21 @@ import { Badge } from "@/components/ui/badge"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 
 const SLA_VARIANT: Record<string, "default" | "secondary" | "destructive"> = {
+  on_track: "default",
+  breached_response: "destructive",
+  breached_resolution: "destructive",
   normal: "default",
   warning: "secondary",
   breached: "destructive",
+}
+
+const SLA_LABEL_KEY: Record<string, string> = {
+  on_track: "tickets.slaOnTrack",
+  breached_response: "tickets.slaBreachedResponse",
+  breached_resolution: "tickets.slaBreachedResolution",
+  normal: "tickets.slaNormal",
+  warning: "tickets.slaWarning",
+  breached: "tickets.slaBreached",
 }
 
 function formatRemaining(deadline: string | null): string | null {
@@ -34,17 +46,17 @@ export function SLABadge({ slaStatus, slaResolutionDeadline, finalOnly }: SLABad
   if (!slaStatus) return <span className="text-muted-foreground">—</span>
 
   const variant = SLA_VARIANT[slaStatus] ?? "secondary"
-  const label = t(`tickets.sla${slaStatus.charAt(0).toUpperCase() + slaStatus.slice(1)}`)
+  const label = t(SLA_LABEL_KEY[slaStatus] ?? "tickets.slaUnknown", { status: slaStatus })
   const remaining = finalOnly ? null : formatRemaining(slaResolutionDeadline ?? null)
 
   if (!remaining) {
-    return <Badge variant={variant}>{label}</Badge>
+    return <Badge variant={variant} className="whitespace-nowrap">{label}</Badge>
   }
 
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <Badge variant={variant} className="cursor-default">
+        <Badge variant={variant} className="cursor-default whitespace-nowrap">
           {label}
           <span className="ml-1 font-normal opacity-80">({remaining})</span>
         </Badge>

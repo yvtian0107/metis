@@ -103,12 +103,30 @@ type AgentTicketResult struct {
 
 // ServiceDeskOperator provides the business logic for service desk tools.
 type ServiceDeskOperator interface {
-	MatchServices(query string) ([]ServiceMatch, error)
+	MatchServices(ctx context.Context, query string) ([]ServiceMatch, MatchDecision, error)
 	LoadService(serviceID uint) (*ServiceDetail, error)
 	CreateTicket(userID uint, serviceID uint, summary string, formData map[string]any, sessionID uint) (*TicketResult, error)
 	ListMyTickets(userID uint, status string) ([]TicketSummary, error)
 	WithdrawTicket(userID uint, ticketCode string, reason string) error
 	ValidateParticipants(serviceID uint, formData map[string]any) (*ParticipantValidation, error)
+}
+
+type MatchDecisionKind string
+
+const (
+	MatchDecisionSelectService     MatchDecisionKind = "select_service"
+	MatchDecisionNeedClarification MatchDecisionKind = "need_clarification"
+	MatchDecisionNoMatch           MatchDecisionKind = "no_match"
+)
+
+type MatchDecision struct {
+	Kind                  MatchDecisionKind `json:"kind"`
+	SelectedServiceID     uint              `json:"selected_service_id,omitempty"`
+	ClarificationQuestion string            `json:"clarification_question,omitempty"`
+}
+
+type ServiceMatcher interface {
+	MatchServices(ctx context.Context, query string) ([]ServiceMatch, MatchDecision, error)
 }
 
 // ServiceMatch is a single search result from MatchServices.
@@ -326,30 +344,39 @@ func serviceMatchHandler(op ServiceDeskOperator, store StateStore) ToolHandler {
 			return nil, fmt.Errorf("query is required")
 		}
 
-		matches, err := op.MatchServices(p.Query)
+		matches, decision, err := op.MatchServices(ctx, p.Query)
 		if err != nil {
 			return nil, fmt.Errorf("match services: %w", err)
 		}
 
-		// Determine whether confirmation is required.
 		confirmationRequired := false
-		if len(matches) >= 2 {
-			diff := matches[0].Score - matches[1].Score
-			if diff < 0 {
-				diff = -diff
-			}
-			if diff < 0.1 {
-				confirmationRequired = true
-			}
-		}
-		if len(matches) > 0 && matches[0].Score < 0.8 {
-			confirmationRequired = true
-		}
-
-		// Auto-select when unambiguous.
 		var selectedServiceID uint
-		if !confirmationRequired && len(matches) == 1 {
-			selectedServiceID = matches[0].ID
+		switch decision.Kind {
+		case MatchDecisionSelectService:
+			selectedServiceID = decision.SelectedServiceID
+			if selectedServiceID == 0 && len(matches) == 1 {
+				selectedServiceID = matches[0].ID
+			}
+			if selectedServiceID == 0 {
+				return nil, fmt.Errorf("select_service decision missing selected_service_id")
+			}
+			var selectedMatch *ServiceMatch
+			for i := range matches {
+				if matches[i].ID == selectedServiceID {
+					selectedMatch = &matches[i]
+					break
+				}
+			}
+			if selectedMatch == nil {
+				return nil, fmt.Errorf("select_service decision service_id %d not found in matches", selectedServiceID)
+			}
+			matches = []ServiceMatch{*selectedMatch}
+		case MatchDecisionNeedClarification:
+			confirmationRequired = true
+		case MatchDecisionNoMatch:
+			matches = nil
+		default:
+			return nil, fmt.Errorf("unknown service match decision: %s", decision.Kind)
 		}
 
 		// Collect candidate IDs.
@@ -385,10 +412,11 @@ func serviceMatchHandler(op ServiceDeskOperator, store StateStore) ToolHandler {
 		}
 
 		return mustMarshal(map[string]any{
-			"query":                 p.Query,
-			"matches":               matches,
-			"confirmation_required": confirmationRequired,
-			"selected_service_id":   selectedServiceID,
+			"query":                  p.Query,
+			"matches":                matches,
+			"confirmation_required":  confirmationRequired,
+			"selected_service_id":    selectedServiceID,
+			"clarification_question": decision.ClarificationQuestion,
 		}), nil
 	}
 }

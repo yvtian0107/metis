@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/cucumber/godog"
+	"gorm.io/gorm"
 
 	"metis/internal/app/ai"
 	"metis/internal/app/itsm/tools"
@@ -29,6 +30,43 @@ import (
 // ---------------------------------------------------------------------------
 // memStateStore — in-memory StateStore for dialog tests
 // ---------------------------------------------------------------------------
+
+type bddServiceMatcher struct {
+	db *gorm.DB
+}
+
+func (m *bddServiceMatcher) MatchServices(ctx context.Context, query string) ([]tools.ServiceMatch, tools.MatchDecision, error) {
+	type row struct {
+		ID          uint
+		Name        string
+		Description string
+	}
+	var rows []row
+	if err := m.db.Table("itsm_service_definitions").
+		Where("is_active = ? AND deleted_at IS NULL", true).
+		Select("id, name, description").
+		Order("id ASC").
+		Find(&rows).Error; err != nil {
+		return nil, tools.MatchDecision{}, err
+	}
+	if len(rows) == 0 {
+		return nil, tools.MatchDecision{Kind: tools.MatchDecisionNoMatch}, nil
+	}
+	matches := make([]tools.ServiceMatch, 0, len(rows))
+	for _, row := range rows {
+		matches = append(matches, tools.ServiceMatch{
+			ID:          row.ID,
+			Name:        row.Name,
+			Description: row.Description,
+			Score:       1,
+			Reason:      "BDD 测试服务匹配",
+		})
+	}
+	if len(matches) == 1 {
+		return matches[:1], tools.MatchDecision{Kind: tools.MatchDecisionSelectService, SelectedServiceID: matches[0].ID}, nil
+	}
+	return matches, tools.MatchDecision{Kind: tools.MatchDecisionNeedClarification, ClarificationQuestion: "请选择要办理的服务"}, nil
+}
 
 type memStateStore struct {
 	states map[uint]*tools.ServiceDeskState
@@ -64,7 +102,7 @@ type dialogTestState struct {
 	mutateDraft  bool // flag: mutate form fields after draft_prepare
 	// E2E dialog fields
 	currentUserID   uint
-	currentUsername  string
+	currentUsername string
 	messages        []dialogMessage
 	dialogMode      string
 	previousTickets []*Ticket
@@ -111,7 +149,7 @@ func setupDialogTest(bc *bddContext) (func(ctx context.Context, userMsg string) 
 	}
 
 	// Build ITSM tool registry backed by real operator + memStateStore.
-	op := tools.NewOperator(bc.db, nil, nil, nil, nil)
+	op := tools.NewOperator(bc.db, nil, nil, nil, nil, &bddServiceMatcher{db: bc.db})
 	store := newMemStateStore()
 	registry := tools.NewRegistry(op, store)
 
@@ -241,7 +279,8 @@ func toolCallCount(calls []toolCallRecord, name string) int {
 
 // vpnDialogWorkflowJSON provides a static workflow with an exclusive_gateway
 // routing on request_kind → network_support/remote_maintenance → 网络管理审批,
-//                         → security → 安全管理审批.
+//
+//	→ security → 安全管理审批.
 var vpnDialogWorkflowJSON = json.RawMessage(`{
 	"nodes": [
 		{"id": "start", "type": "start", "label": "开始"},

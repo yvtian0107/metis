@@ -19,14 +19,16 @@ import (
 )
 
 type KnowledgeDocService struct {
-	repo *KnowledgeDocRepo
-	db   *gorm.DB
+	repo        *KnowledgeDocRepo
+	db          *gorm.DB
+	serviceDefs *ServiceDefService
 }
 
 func NewKnowledgeDocService(i do.Injector) (*KnowledgeDocService, error) {
 	repo := do.MustInvoke[*KnowledgeDocRepo](i)
 	db := do.MustInvoke[*database.DB](i)
-	return &KnowledgeDocService{repo: repo, db: db.DB}, nil
+	serviceDefs := do.MustInvoke[*ServiceDefService](i)
+	return &KnowledgeDocService{repo: repo, db: db.DB, serviceDefs: serviceDefs}, nil
 }
 
 // MaxFileSize is the upload limit (10 MB).
@@ -102,6 +104,11 @@ func (s *KnowledgeDocService) Upload(serviceID uint, fileName string, fileSize i
 		Payload:  string(payload),
 	}
 	s.db.Create(exec)
+	if s.serviceDefs != nil {
+		if err := s.serviceDefs.RefreshPublishHealthCheckIfPresent(serviceID); err != nil {
+			return nil, err
+		}
+	}
 
 	return doc, nil
 }
@@ -111,7 +118,17 @@ func (s *KnowledgeDocService) List(serviceID uint) ([]ServiceKnowledgeDocument, 
 }
 
 func (s *KnowledgeDocService) Delete(id uint) error {
-	return s.repo.Delete(id)
+	doc, err := s.repo.GetByID(id)
+	if err != nil {
+		return err
+	}
+	if err := s.repo.Delete(id); err != nil {
+		return err
+	}
+	if s.serviceDefs != nil {
+		return s.serviceDefs.RefreshPublishHealthCheckIfPresent(doc.ServiceID)
+	}
+	return nil
 }
 
 // ParseDocument synchronously parses a document (called by scheduler task handler).
@@ -127,8 +144,17 @@ func (s *KnowledgeDocService) ParseDocument(documentID uint) error {
 	text, err := docparse.Parse(doc.FilePath)
 	if err != nil {
 		s.repo.UpdateParseResult(doc.ID, "failed", "", err.Error())
+		if s.serviceDefs != nil {
+			_ = s.serviceDefs.RefreshPublishHealthCheckIfPresent(doc.ServiceID)
+		}
 		return fmt.Errorf("parse document: %w", err)
 	}
 
-	return s.repo.UpdateParseResult(doc.ID, "completed", text, "")
+	if err := s.repo.UpdateParseResult(doc.ID, "completed", text, ""); err != nil {
+		return err
+	}
+	if s.serviceDefs != nil {
+		return s.serviceDefs.RefreshPublishHealthCheckIfPresent(doc.ServiceID)
+	}
+	return nil
 }

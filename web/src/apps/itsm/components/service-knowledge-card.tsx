@@ -1,6 +1,6 @@
 "use client"
 
-import { useRef, useState, useEffect, useCallback } from "react"
+import { useRef, useState, useEffect, useCallback, useMemo, type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { Upload, Trash2, FileText, Loader2 } from "lucide-react"
@@ -11,7 +11,7 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table"
 import {
-  DataTableCard, DataTableEmptyRow, DataTableLoadingRow,
+  DataTableCard, DataTableLoadingRow,
   DataTableActions, DataTableActionsCell, DataTableActionsHead,
 } from "@/components/ui/data-table"
 import {
@@ -43,13 +43,27 @@ function ParseStatusBadge({ status }: { status: string }) {
   }
 }
 
-export function ServiceKnowledgeCard({ serviceId }: { serviceId: number }) {
+function CompactKnowledgeEmptyRow({ title, description }: { title: ReactNode; description?: ReactNode }) {
+  return (
+    <TableRow>
+      <TableCell colSpan={5} className="h-28 text-center">
+        <div className="flex flex-col items-center gap-1.5 text-muted-foreground">
+          <FileText className="h-6 w-6 stroke-1" />
+          <p className="text-sm font-medium">{title}</p>
+          {description ? <p className="text-xs">{description}</p> : null}
+        </div>
+      </TableCell>
+    </TableRow>
+  )
+}
+
+export function ServiceKnowledgeCard({ serviceId, title }: { serviceId: number; title?: ReactNode }) {
   const { t } = useTranslation(["itsm", "common"])
   const queryClient = useQueryClient()
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [uploading, setUploading] = useState(false)
 
-  const queryKey = ["itsm-knowledge-docs", serviceId]
+  const queryKey = useMemo(() => ["itsm-knowledge-docs", serviceId], [serviceId])
 
   const { data: docs = [], isLoading } = useQuery({
     queryKey,
@@ -63,6 +77,7 @@ export function ServiceKnowledgeCard({ serviceId }: { serviceId: number }) {
     if (!hasProcessing || serviceId <= 0) return
     const timer = window.setTimeout(() => {
       queryClient.invalidateQueries({ queryKey })
+      queryClient.invalidateQueries({ queryKey: ["itsm-service", serviceId] })
     }, 2000)
     return () => window.clearTimeout(timer)
   }, [hasProcessing, serviceId, queryClient, queryKey])
@@ -72,6 +87,7 @@ export function ServiceKnowledgeCard({ serviceId }: { serviceId: number }) {
     try {
       await uploadKnowledgeDoc(serviceId, file)
       queryClient.invalidateQueries({ queryKey })
+      queryClient.invalidateQueries({ queryKey: ["itsm-service", serviceId] })
       toast.success(t("itsm:knowledge.uploadSuccess"))
     } catch (err) {
       toast.error((err as Error).message || t("itsm:knowledge.uploadError"))
@@ -84,42 +100,57 @@ export function ServiceKnowledgeCard({ serviceId }: { serviceId: number }) {
     mutationFn: (docId: number) => deleteKnowledgeDoc(serviceId, docId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey })
+      queryClient.invalidateQueries({ queryKey: ["itsm-service", serviceId] })
       toast.success(t("itsm:knowledge.deleteSuccess"))
     },
     onError: (err) => toast.error(err.message),
   })
 
+  const uploadButton = (
+    <>
+      <Button
+        size="sm"
+        disabled={uploading}
+        onClick={() => fileInputRef.current?.click()}
+      >
+        {uploading
+          ? <><Loader2 className="mr-1.5 h-4 w-4 animate-spin" />{t("itsm:knowledge.uploading")}</>
+          : <><Upload className="mr-1.5 h-4 w-4" />{t("itsm:knowledge.upload")}</>
+        }
+      </Button>
+      <input
+        ref={fileInputRef}
+        type="file"
+        className="hidden"
+        accept=".pdf,.docx,.xlsx,.pptx,.txt,.md,.markdown"
+        onChange={(e) => {
+          const file = e.target.files?.[0]
+          if (file) handleUpload(file)
+          e.target.value = ""
+        }}
+      />
+    </>
+  )
+
   return (
     <div className="space-y-3">
-      <div className="flex items-center justify-between">
-        <div>
-          <p className="text-xs text-muted-foreground">{t("itsm:knowledge.supportedFormats")}</p>
+      {title ? (
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h3 className="text-sm font-semibold text-foreground/82">{title}</h3>
+            <p className="mt-1 text-xs text-muted-foreground">{t("itsm:knowledge.supportedFormats")}</p>
+          </div>
+          {uploadButton}
         </div>
-        <Button
-          size="sm"
-          disabled={uploading}
-          onClick={() => fileInputRef.current?.click()}
-        >
-          {uploading
-            ? <><Loader2 className="mr-1.5 h-4 w-4 animate-spin" />{t("itsm:knowledge.uploading")}</>
-            : <><Upload className="mr-1.5 h-4 w-4" />{t("itsm:knowledge.upload")}</>
-          }
-        </Button>
-        <input
-          ref={fileInputRef}
-          type="file"
-          className="hidden"
-          accept=".pdf,.docx,.xlsx,.pptx,.txt,.md,.markdown"
-          onChange={(e) => {
-            const file = e.target.files?.[0]
-            if (file) handleUpload(file)
-            e.target.value = ""
-          }}
-        />
-      </div>
+      ) : (
+        <div className="flex items-center justify-between">
+          <p className="text-xs text-muted-foreground">{t("itsm:knowledge.supportedFormats")}</p>
+          {uploadButton}
+        </div>
+      )}
 
-      <DataTableCard>
-        <Table>
+      <DataTableCard className="rounded-[1.1rem]">
+        <Table className="[&_td]:h-11 [&_th]:h-10 [&_th]:text-muted-foreground/72">
           <TableHeader>
             <TableRow>
               <TableHead className="min-w-[200px]">{t("itsm:knowledge.fileName")}</TableHead>
@@ -133,7 +164,7 @@ export function ServiceKnowledgeCard({ serviceId }: { serviceId: number }) {
             {isLoading ? (
               <DataTableLoadingRow colSpan={5} />
             ) : docs.length === 0 ? (
-              <DataTableEmptyRow colSpan={5} icon={FileText} title={t("itsm:knowledge.empty")} description={t("itsm:knowledge.emptyHint")} />
+              <CompactKnowledgeEmptyRow title={t("itsm:knowledge.empty")} description={t("itsm:knowledge.emptyHint")} />
             ) : (
               docs.map((doc) => (
                 <TableRow key={doc.id}>

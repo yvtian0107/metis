@@ -135,6 +135,45 @@ func TestBuildActionsContext(t *testing.T) {
 	}
 }
 
+func TestBuildGenerateResponse_PersistsWorkflowAndHealthSnapshot(t *testing.T) {
+	db := newTestDB(t)
+	serviceDefs := newServiceDefServiceForTest(t, db)
+	catSvc := newCatalogServiceForTest(t, db)
+
+	root, _ := catSvc.Create("Root", "root", "", "", nil, 10)
+	service, err := serviceDefs.Create(&ServiceDefinition{
+		Name:       "Smart",
+		Code:       "smart-generate-response",
+		CatalogID:  root.ID,
+		EngineType: "smart",
+	})
+	if err != nil {
+		t.Fatalf("create service: %v", err)
+	}
+
+	svc := &WorkflowGenerateService{serviceDefSvc: serviceDefs}
+	workflowJSON := json.RawMessage(`{"nodes":[],"edges":[]}`)
+	resp, err := svc.buildGenerateResponse(&GenerateRequest{
+		ServiceID:         service.ID,
+		CollaborationSpec: "用户提交申请后直属经理审批",
+	}, workflowJSON, 0, nil)
+	if err != nil {
+		t.Fatalf("build response: %v", err)
+	}
+	if resp.Service == nil || resp.HealthCheck == nil {
+		t.Fatalf("expected service and health check in response, got %+v", resp)
+	}
+	if string(resp.Service.WorkflowJSON) != string(workflowJSON) {
+		t.Fatalf("expected workflow json to be saved, got %s", resp.Service.WorkflowJSON)
+	}
+	if resp.Service.CollaborationSpec != "用户提交申请后直属经理审批" {
+		t.Fatalf("expected collaboration spec to be saved, got %q", resp.Service.CollaborationSpec)
+	}
+	if resp.Service.PublishHealthCheck == nil {
+		t.Fatal("expected service response to include saved health snapshot")
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Layer 2: LLM integration tests — environment-gated
 // ---------------------------------------------------------------------------
