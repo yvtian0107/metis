@@ -46,6 +46,34 @@ func TestReactExecutor_DirectContent(t *testing.T) {
 	}
 }
 
+func TestBuildLLMMessages_MapsToolTranscriptFields(t *testing.T) {
+	req := ExecuteRequest{
+		SystemPrompt: "system",
+		Messages: []ExecuteMessage{
+			{Role: MessageRoleUser, Content: "查 VPN"},
+			{
+				Role: MessageRoleAssistant,
+				ToolCalls: []llm.ToolCall{
+					{ID: "call_1", Name: "itsm.service_match", Arguments: `{"query":"VPN"}`},
+				},
+			},
+			{Role: llm.RoleTool, Content: `{"selected_service_id":5}`, ToolCallID: "call_1"},
+		},
+	}
+
+	messages := buildLLMMessages(req)
+
+	if len(messages) != 4 {
+		t.Fatalf("expected system + 3 messages, got %+v", messages)
+	}
+	if len(messages[2].ToolCalls) != 1 || messages[2].ToolCalls[0].Name != "itsm.service_match" {
+		t.Fatalf("expected tool calls to be preserved, got %+v", messages[2])
+	}
+	if messages[3].Role != llm.RoleTool || messages[3].ToolCallID != "call_1" {
+		t.Fatalf("expected tool result to preserve call id, got %+v", messages[3])
+	}
+}
+
 func TestReactExecutor_ToolCallRoundTrip(t *testing.T) {
 	mockExec := newMockToolExecutor()
 	mockExec.SetResult("search", ToolResult{Output: "result from search"})

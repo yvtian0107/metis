@@ -34,11 +34,41 @@ func (gw *AgentGateway) buildAssistantRuntime(ctx context.Context, agent *Agent,
 		return nil, err
 	}
 
+	runtimeContext := gw.buildAgentRuntimeContext(ctx, agent, session)
+	assembly.SystemPrompt = appendPromptBlock(assembly.SystemPrompt, runtimeContext)
+
 	knowledgeBlock := gw.buildKnowledgeContext(ctx, agent.ID, latestUserMessage(messages))
 	assembly.SystemPrompt = appendPromptBlock(assembly.SystemPrompt, knowledgeBlock)
 
 	_ = session
 	return assembly, nil
+}
+
+func (gw *AgentGateway) buildAgentRuntimeContext(ctx context.Context, agent *Agent, session *AgentSession) string {
+	if agent == nil || session == nil || len(gw.runtimeContextProviders) == 0 {
+		return ""
+	}
+	var agentCode string
+	if agent.Code != nil {
+		agentCode = strings.TrimSpace(*agent.Code)
+	}
+	if agentCode == "" {
+		return ""
+	}
+	var blocks []string
+	for _, provider := range gw.runtimeContextProviders {
+		block, err := provider.BuildAgentRuntimeContext(ctx, agentCode, session.ID, session.UserID)
+		if err != nil {
+			slog.Warn("agent runtime context provider failed", "agent", agentCode, "sessionID", session.ID, "error", err)
+			continue
+		}
+		block = strings.TrimSpace(block)
+		if block == "" {
+			continue
+		}
+		blocks = append(blocks, block)
+	}
+	return strings.Join(blocks, "\n\n")
 }
 
 func (gw *AgentGateway) addBuiltinRuntimeTools(agentID uint, assembly *assistantRuntimeAssembly, seen map[string]struct{}) error {

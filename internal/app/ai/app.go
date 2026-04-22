@@ -391,6 +391,19 @@ func collectToolRegistries(i do.Injector) []ToolHandlerRegistry {
 	return registries
 }
 
+func collectRuntimeContextProviders() []app.AgentRuntimeContextProvider {
+	var providers []app.AgentRuntimeContextProvider
+	for _, a := range app.All() {
+		provider, ok := a.(app.AgentRuntimeContextProvider)
+		if !ok {
+			continue
+		}
+		providers = append(providers, provider)
+		slog.Info("AI: discovered runtime context provider", "app", a.Name())
+	}
+	return providers
+}
+
 // --- userFinderAdapter bridges service.UserService to the UserFinder interface ---
 
 type userFinderAdapter struct {

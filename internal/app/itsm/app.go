@@ -48,6 +48,42 @@ func (a *ITSMApp) GetToolRegistry() any {
 	return do.MustInvoke[*tools.Registry](a.injector)
 }
 
+// BuildAgentRuntimeContext implements app.AgentRuntimeContextProvider for ITSM
+// service desk sessions.
+func (a *ITSMApp) BuildAgentRuntimeContext(ctx context.Context, agentCode string, sessionID, userID uint) (string, error) {
+	if agentCode != "itsm.servicedesk" || sessionID == 0 {
+		return "", nil
+	}
+	store := do.MustInvoke[*tools.SessionStateStore](a.injector)
+	state, err := store.GetState(sessionID)
+	if err != nil {
+		return "", err
+	}
+	if state == nil || state.Stage == "idle" {
+		return "", nil
+	}
+	payload := map[string]any{
+		"stage":                   state.Stage,
+		"candidate_service_ids":   state.CandidateServiceIDs,
+		"top_match_service_id":    state.TopMatchServiceID,
+		"confirmed_service_id":    state.ConfirmedServiceID,
+		"confirmation_required":   state.ConfirmationRequired,
+		"loaded_service_id":       state.LoadedServiceID,
+		"request_text":            state.RequestText,
+		"prefill_form_data":       state.PrefillFormData,
+		"draft_summary":           state.DraftSummary,
+		"draft_form_data":         state.DraftFormData,
+		"draft_version":           state.DraftVersion,
+		"confirmed_draft_version": state.ConfirmedDraftVersion,
+		"next_expected_action":    tools.NextExpectedAction(state),
+	}
+	b, err := json.MarshalIndent(payload, "", "  ")
+	if err != nil {
+		return "", err
+	}
+	return "## ITSM Service Desk Runtime Context\nUse this session state as current facts. Continue from next_expected_action unless the user explicitly starts a new request.\n```json\n" + string(b) + "\n```", nil
+}
+
 func (a *ITSMApp) Models() []any {
 	return []any{
 		// Configuration models
@@ -428,6 +464,7 @@ var _ engine.WorkflowEngine = (*engine.SmartEngine)(nil)
 
 // Ensure ITSMApp implements app.ToolRegistryProvider at compile time
 var _ app.ToolRegistryProvider = (*ITSMApp)(nil)
+var _ app.AgentRuntimeContextProvider = (*ITSMApp)(nil)
 
 // lazyTicketCreator defers resolution of TicketService to break circular dependency.
 type lazyTicketCreator struct {

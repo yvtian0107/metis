@@ -42,7 +42,9 @@ func TestSeedAgentsUpdatesExistingPresetAgentPrompt(t *testing.T) {
 	if err := db.Where("code = ?", code).First(&got).Error; err != nil {
 		t.Fatalf("load service desk agent: %v", err)
 	}
-	if got.SystemPrompt == "stale prompt" || !strings.Contains(got.SystemPrompt, "prefill_suggestions") {
+	if got.SystemPrompt == "stale prompt" ||
+		!strings.Contains(got.SystemPrompt, "prefill_suggestions") ||
+		!strings.Contains(got.SystemPrompt, "itsm.current_request_context") {
 		t.Fatalf("expected service desk prompt to be refreshed")
 	}
 	if got.Name != "IT 服务台智能体" || !got.IsActive {
@@ -57,5 +59,28 @@ func TestSeedAgentsUpdatesExistingPresetAgentPrompt(t *testing.T) {
 		if !strings.Contains(decision.SystemPrompt, needle) {
 			t.Fatalf("expected decision prompt to contain %q", needle)
 		}
+	}
+}
+
+func TestSeedToolsIncludesCurrentRequestContext(t *testing.T) {
+	dsn := "file:" + t.Name() + "?mode=memory&cache=shared"
+	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	if err := db.AutoMigrate(&aiapp.Tool{}, &aiapp.AgentTool{}); err != nil {
+		t.Fatalf("migrate db: %v", err)
+	}
+
+	if err := SeedTools(db); err != nil {
+		t.Fatalf("seed tools: %v", err)
+	}
+
+	var tool aiapp.Tool
+	if err := db.Where("name = ?", "itsm.current_request_context").First(&tool).Error; err != nil {
+		t.Fatalf("expected current request context tool to be seeded: %v", err)
+	}
+	if !strings.Contains(tool.Description, "多轮继续") {
+		t.Fatalf("expected context-aware tool description, got %q", tool.Description)
 	}
 }

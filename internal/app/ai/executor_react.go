@@ -7,6 +7,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"metis/internal/app"
 	"metis/internal/llm"
 )
 
@@ -133,7 +134,8 @@ func (e *ReactExecutor) Execute(ctx context.Context, req ExecuteRequest) (<-chan
 				})
 
 				start := time.Now()
-				result, execErr := e.toolExecutor.ExecuteTool(ctx, ToolCall{
+				toolCtx := context.WithValue(ctx, app.UserMessageKey, latestLLMUserMessage(messages))
+				result, execErr := e.toolExecutor.ExecuteTool(toolCtx, ToolCall{
 					ID:   tc.ID,
 					Name: tc.Name,
 					Args: json.RawMessage(tc.Arguments),
@@ -174,6 +176,15 @@ func (e *ReactExecutor) Execute(ctx context.Context, req ExecuteRequest) (<-chan
 	return ch, nil
 }
 
+func latestLLMUserMessage(messages []llm.Message) string {
+	for i := len(messages) - 1; i >= 0; i-- {
+		if messages[i].Role == llm.RoleUser || messages[i].Role == MessageRoleUser {
+			return messages[i].Content
+		}
+	}
+	return ""
+}
+
 // buildLLMMessages converts ExecuteRequest messages to llm.Message format,
 // prepending the system prompt.
 func buildLLMMessages(req ExecuteRequest) []llm.Message {
@@ -183,9 +194,11 @@ func buildLLMMessages(req ExecuteRequest) []llm.Message {
 	}
 	for _, m := range req.Messages {
 		msgs = append(msgs, llm.Message{
-			Role:    m.Role,
-			Content: m.Content,
-			Images:  m.Images,
+			Role:       m.Role,
+			Content:    m.Content,
+			Images:     m.Images,
+			ToolCalls:  m.ToolCalls,
+			ToolCallID: m.ToolCallID,
 		})
 	}
 	return msgs

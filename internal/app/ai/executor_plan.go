@@ -8,6 +8,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"metis/internal/app"
 	"metis/internal/llm"
 )
 
@@ -90,6 +91,7 @@ func (e *PlanAndExecuteExecutor) Execute(ctx context.Context, req ExecuteRequest
 		// Phase 2: Execute each step
 		messages := buildLLMMessages(req)
 		tools := buildLLMTools(req.Tools)
+		originalUserMessage := latestLLMUserMessage(messages)
 		priorStepSummaries := make([]llm.Message, 0, len(steps))
 
 		for _, step := range steps {
@@ -164,7 +166,8 @@ func (e *PlanAndExecuteExecutor) Execute(ctx context.Context, req ExecuteRequest
 					emit(Event{Type: EventTypeToolCall, ToolCallID: tc.ID, ToolName: tc.Name, ToolArgs: json.RawMessage(tc.Arguments)})
 
 					start := time.Now()
-					result, execErr := e.toolExecutor.ExecuteTool(ctx, ToolCall{ID: tc.ID, Name: tc.Name, Args: json.RawMessage(tc.Arguments)})
+					toolCtx := context.WithValue(ctx, app.UserMessageKey, originalUserMessage)
+					result, execErr := e.toolExecutor.ExecuteTool(toolCtx, ToolCall{ID: tc.ID, Name: tc.Name, Args: json.RawMessage(tc.Arguments)})
 					durationMs := result.DurationMs
 					if durationMs == 0 {
 						durationMs = int(time.Since(start).Milliseconds())

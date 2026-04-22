@@ -11,6 +11,7 @@ import (
 
 	"metis/internal/database"
 	"metis/internal/llm"
+	"metis/internal/model"
 )
 
 type recordingStreamEncoder struct {
@@ -136,6 +137,70 @@ func TestGateway_SystemPromptAssembly(t *testing.T) {
 	}
 }
 
+func TestBuildExecuteMessagesFromSessionMessages_ReplaysCompletedToolTranscript(t *testing.T) {
+	messages := []SessionMessage{
+		{Role: MessageRoleUser, Content: "查一下 VPN 服务", Sequence: 1},
+		{
+			Role:     MessageRoleToolCall,
+			Metadata: model.JSONText([]byte(`{"tool_call_id":"call_1","tool_name":"itsm.service_match","tool_args":{"query":"申请VPN"},"status":"running"}`)),
+			Sequence: 2,
+		},
+		{
+			Role:     MessageRoleToolResult,
+			Content:  `{"selected_service_id":5,"next_required_tool":"itsm.service_load"}`,
+			Metadata: model.JSONText([]byte(`{"tool_call_id":"call_1","status":"completed"}`)),
+			Sequence: 3,
+		},
+		{Role: MessageRoleAssistant, Content: "已匹配到 VPN 服务。", Sequence: 4},
+	}
+
+	execMessages := buildExecuteMessagesFromSessionMessages(messages)
+
+	if len(execMessages) != 4 {
+		t.Fatalf("expected user, assistant tool_call, tool result, assistant messages; got %+v", execMessages)
+	}
+	if execMessages[1].Role != MessageRoleAssistant || len(execMessages[1].ToolCalls) != 1 {
+		t.Fatalf("expected assistant tool call message, got %+v", execMessages[1])
+	}
+	call := execMessages[1].ToolCalls[0]
+	if call.ID != "call_1" || call.Name != "itsm.service_match" || call.Arguments != `{"query":"申请VPN"}` {
+		t.Fatalf("unexpected tool call replay: %+v", call)
+	}
+	if execMessages[2].Role != llm.RoleTool || execMessages[2].ToolCallID != "call_1" {
+		t.Fatalf("expected tool result message with call id, got %+v", execMessages[2])
+	}
+	if execMessages[2].Content != `{"selected_service_id":5,"next_required_tool":"itsm.service_load"}` {
+		t.Fatalf("unexpected tool output: %s", execMessages[2].Content)
+	}
+}
+
+func TestBuildExecuteMessagesFromSessionMessages_SkipsIncompleteToolTranscript(t *testing.T) {
+	messages := []SessionMessage{
+		{Role: MessageRoleUser, Content: "继续", Sequence: 1},
+		{
+			Role:     MessageRoleToolCall,
+			Metadata: model.JSONText([]byte(`{"tool_call_id":"call_missing","tool_name":"itsm.service_load","tool_args":{"service_id":5},"status":"running"}`)),
+			Sequence: 2,
+		},
+		{
+			Role:     MessageRoleToolResult,
+			Content:  `{"ok":true}`,
+			Metadata: model.JSONText([]byte(`{"tool_call_id":"orphan","status":"completed"}`)),
+			Sequence: 3,
+		},
+		{Role: MessageRoleAssistant, Content: "请稍后。", Sequence: 4},
+	}
+
+	execMessages := buildExecuteMessagesFromSessionMessages(messages)
+
+	if len(execMessages) != 2 {
+		t.Fatalf("expected only user and assistant messages, got %+v", execMessages)
+	}
+	if execMessages[0].Role != MessageRoleUser || execMessages[1].Role != MessageRoleAssistant {
+		t.Fatalf("unexpected messages after skipping incomplete transcript: %+v", execMessages)
+	}
+}
+
 func TestGateway_Run_CompletesSession(t *testing.T) {
 	db := setupTestDB(t)
 	mockLLM := newMockLLMClient([]llm.StreamEvent{
@@ -174,6 +239,61 @@ func TestGateway_Run_CompletesSession(t *testing.T) {
 	}
 	if !foundAssistant {
 		t.Errorf("expected assistant message 'Hello!', got %v", messages)
+	}
+}
+
+func TestGateway_Run_ReplaysStoredToolTranscriptToLLM(t *testing.T) {
+	db := setupTestDB(t)
+	mockLLM := newMockLLMClient([]llm.StreamEvent{
+		{Type: "content_delta", Content: "继续处理"},
+		{Type: "done", Usage: &llm.Usage{InputTokens: 4, OutputTokens: 2}},
+	}, nil)
+	gw := newGatewayForTest(t, db, mockLLM)
+
+	modelID := uint(1)
+	agent := &Agent{Name: "Agent", Type: AgentTypeAssistant, ModelID: &modelID, Strategy: AgentStrategyReact, CreatedBy: 1}
+	_ = gw.agentSvc.Create(agent)
+	session, _ := gw.sessionSvc.Create(agent.ID, 1)
+
+	_, _ = gw.sessionSvc.StoreMessage(session.ID, MessageRoleUser, "我要申请VPN", nil, 0)
+	_, _ = gw.sessionSvc.StoreMessage(
+		session.ID,
+		MessageRoleToolCall,
+		"",
+		model.JSONText([]byte(`{"tool_call_id":"call_1","tool_name":"itsm.service_match","tool_args":{"query":"我要申请VPN"},"status":"running"}`)),
+		0,
+	)
+	_, _ = gw.sessionSvc.StoreMessage(
+		session.ID,
+		MessageRoleToolResult,
+		`{"selected_service_id":5,"next_required_tool":"itsm.service_load"}`,
+		model.JSONText([]byte(`{"tool_call_id":"call_1","status":"completed"}`)),
+		0,
+	)
+	_, _ = gw.sessionSvc.StoreMessage(session.ID, MessageRoleUser, "是的", nil, 0)
+
+	reader, err := gw.Run(context.Background(), session.ID, 1)
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	_ = drainReader(reader)
+	time.Sleep(100 * time.Millisecond)
+
+	requests := mockLLM.Requests()
+	if len(requests) == 0 {
+		t.Fatalf("expected LLM request")
+	}
+	var foundAssistantToolCall, foundToolResult bool
+	for _, msg := range requests[0].Messages {
+		if msg.Role == llm.RoleAssistant && len(msg.ToolCalls) == 1 && msg.ToolCalls[0].ID == "call_1" {
+			foundAssistantToolCall = true
+		}
+		if msg.Role == llm.RoleTool && msg.ToolCallID == "call_1" && msg.Content == `{"selected_service_id":5,"next_required_tool":"itsm.service_load"}` {
+			foundToolResult = true
+		}
+	}
+	if !foundAssistantToolCall || !foundToolResult {
+		t.Fatalf("expected stored tool transcript in LLM request, got %+v", requests[0].Messages)
 	}
 }
 

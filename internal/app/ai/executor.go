@@ -3,6 +3,8 @@ package ai
 import (
 	"context"
 	"encoding/json"
+
+	"metis/internal/llm"
 )
 
 // Executor is the unified interface for all agent execution strategies.
@@ -25,7 +27,7 @@ type AgentExecuteConfig struct {
 	Type          string
 	Strategy      string
 	ModelID       uint
-	ModelName     string  // Actual model identifier (e.g., "claude-opus-4-20250514")
+	ModelName     string   // Actual model identifier (e.g., "claude-opus-4-20250514")
 	Temperature   *float32 // nil means don't send temperature (for models that don't support it)
 	MaxTokens     int
 	Runtime       string
@@ -38,14 +40,16 @@ type AgentExecuteConfig struct {
 
 // ExecuteMessage represents a message in the conversation history.
 type ExecuteMessage struct {
-	Role    string   `json:"role"`
-	Content string   `json:"content"`
-	Images  []string `json:"images,omitempty"` // base64 encoded image URLs (data:image/...)
+	Role       string         `json:"role"`
+	Content    string         `json:"content"`
+	Images     []string       `json:"images,omitempty"` // base64 encoded image URLs (data:image/...)
+	ToolCalls  []llm.ToolCall `json:"tool_calls,omitempty"`
+	ToolCallID string         `json:"tool_call_id,omitempty"`
 }
 
 // ToolDefinition describes a tool available to the agent.
 type ToolDefinition struct {
-	Type        string          `json:"type"`   // "builtin", "mcp", "skill"
+	Type        string          `json:"type"` // "builtin", "mcp", "skill"
 	Name        string          `json:"name"`
 	Description string          `json:"description"`
 	Parameters  json.RawMessage `json:"parameters"`

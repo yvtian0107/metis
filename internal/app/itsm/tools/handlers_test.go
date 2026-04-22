@@ -37,6 +37,7 @@ type stubOperator struct {
 	details            map[uint]*ServiceDetail
 	matchResponse      []ServiceMatch
 	matchDecision      MatchDecision
+	matchQueries       []string
 	createdServiceID   uint
 	createdSummary     string
 	createdFormData    map[string]any
@@ -45,6 +46,7 @@ type stubOperator struct {
 }
 
 func (s *stubOperator) MatchServices(ctx context.Context, query string) ([]ServiceMatch, MatchDecision, error) {
+	s.matchQueries = append(s.matchQueries, query)
 	return s.matchResponse, s.matchDecision, nil
 }
 func (s *stubOperator) LoadService(serviceID uint) (*ServiceDetail, error) {
@@ -138,6 +140,40 @@ func TestServiceLoad_ReturnsPrefillSuggestionsFromRequestText(t *testing.T) {
 	}
 }
 
+func TestServiceLoad_UsesOriginalUserMessageWhenMatchQueryIsAbbreviated(t *testing.T) {
+	store := newMemStateStore()
+	op := &stubOperator{
+		matchResponse: []ServiceMatch{
+			{ID: 5, Name: "VPN 开通申请", CatalogPath: "基础设施与网络/网络与 VPN", Description: "VPN 开通", Score: 0.97, Reason: "用户明确要求申请 VPN"},
+		},
+		matchDecision: MatchDecision{Kind: MatchDecisionSelectService, SelectedServiceID: 5},
+		details:       map[uint]*ServiceDetail{5: vpnServiceDetail(5)},
+	}
+	ctx := context.WithValue(context.Background(), app.SessionIDKey, uint(1))
+	ctx = context.WithValue(ctx, app.UserMessageKey, "我要申请VPN，线上支持用的，wenhaowu@dev.com")
+
+	if _, err := serviceMatchHandler(op, store)(ctx, 1, []byte(`{"query":"申请VPN"}`)); err != nil {
+		t.Fatalf("service match: %v", err)
+	}
+	result, err := serviceLoadHandler(op, store)(ctx, 1, []byte(`{"service_id":5}`))
+	if err != nil {
+		t.Fatalf("service load: %v", err)
+	}
+
+	var resp ServiceDetail
+	if err := json.Unmarshal(result, &resp); err != nil {
+		t.Fatalf("unmarshal service detail: %v", err)
+	}
+	if resp.PrefillSuggestions["vpn_account"] != "wenhaowu@dev.com" ||
+		resp.PrefillSuggestions["device_usage"] != "线上支持用" ||
+		resp.PrefillSuggestions["request_kind"] != "线上支持用" {
+		t.Fatalf("expected prefill from original user message, got %+v", resp.PrefillSuggestions)
+	}
+	if state := store.states[1]; state.RequestText != "我要申请VPN，线上支持用的，wenhaowu@dev.com" {
+		t.Fatalf("expected original request text in state, got %q", state.RequestText)
+	}
+}
+
 func TestServiceLoad_ReturnsMissingFieldsAndRecommendedStep(t *testing.T) {
 	store := newMemStateStore()
 	op := &stubOperator{
@@ -172,6 +208,95 @@ func TestServiceLoad_ReturnsMissingFieldsAndRecommendedStep(t *testing.T) {
 	}
 	if resp.FieldCollection.RecommendedNextStep != "ask_missing_fields" || resp.FieldCollection.NextRequiredTool != "" {
 		t.Fatalf("expected ask_missing_fields recommendation, got %+v", resp.FieldCollection)
+	}
+}
+
+func TestServiceMatch_ShortConfirmationReusesLoadedServiceWithoutClearingPrefill(t *testing.T) {
+	store := newMemStateStore()
+	op := &stubOperator{
+		matchResponse: []ServiceMatch{
+			{ID: 5, Name: "VPN 开通申请", CatalogPath: "基础设施与网络/网络与 VPN", Description: "VPN 开通", Score: 0.97, Reason: "用户明确要求申请 VPN"},
+		},
+		matchDecision: MatchDecision{Kind: MatchDecisionSelectService, SelectedServiceID: 5},
+		details:       map[uint]*ServiceDetail{5: vpnServiceDetail(5)},
+	}
+	ctx := context.WithValue(context.Background(), app.SessionIDKey, uint(1))
+
+	if _, err := serviceMatchHandler(op, store)(ctx, 1, []byte(`{"query":"我要申请VPN，线上支持用的，wenhaowu@dev.com"}`)); err != nil {
+		t.Fatalf("service match: %v", err)
+	}
+	if _, err := serviceLoadHandler(op, store)(ctx, 1, []byte(`{"service_id":5}`)); err != nil {
+		t.Fatalf("service load: %v", err)
+	}
+	if len(op.matchQueries) != 1 {
+		t.Fatalf("expected initial match only, got queries %+v", op.matchQueries)
+	}
+
+	result, err := serviceMatchHandler(op, store)(ctx, 1, []byte(`{"query":"是的"}`))
+	if err != nil {
+		t.Fatalf("short confirmation match guard: %v", err)
+	}
+
+	var resp struct {
+		AlreadyLoaded    bool   `json:"already_loaded"`
+		LoadedServiceID  uint   `json:"loaded_service_id"`
+		NextRequiredTool string `json:"next_required_tool"`
+		StateStage       string `json:"state_stage"`
+	}
+	if err := json.Unmarshal(result, &resp); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if !resp.AlreadyLoaded || resp.LoadedServiceID != 5 || resp.NextRequiredTool != "itsm.draft_prepare" {
+		t.Fatalf("expected existing loaded service reuse, got %+v", resp)
+	}
+	if len(op.matchQueries) != 1 {
+		t.Fatalf("short confirmation should not call matcher again, got queries %+v", op.matchQueries)
+	}
+	state := store.states[1]
+	if state.RequestText != "我要申请VPN，线上支持用的，wenhaowu@dev.com" {
+		t.Fatalf("request text was overwritten: %q", state.RequestText)
+	}
+	if state.PrefillFormData["vpn_account"] != "wenhaowu@dev.com" ||
+		state.PrefillFormData["device_usage"] != "线上支持用" ||
+		state.PrefillFormData["request_kind"] != "线上支持用" {
+		t.Fatalf("prefill was cleared or changed: %+v", state.PrefillFormData)
+	}
+}
+
+func TestCurrentRequestContext_ReturnsStateAndNextExpectedAction(t *testing.T) {
+	store := newMemStateStore()
+	store.states[1] = &ServiceDeskState{
+		Stage:           "service_loaded",
+		LoadedServiceID: 5,
+		RequestText:     "我要申请VPN，线上支持用的，wenhaowu@dev.com",
+		PrefillFormData: map[string]any{
+			"vpn_account":  "wenhaowu@dev.com",
+			"device_usage": "线上支持用",
+			"request_kind": "线上支持用",
+		},
+	}
+	ctx := context.WithValue(context.Background(), app.SessionIDKey, uint(1))
+
+	result, err := currentRequestContextHandler(store)(ctx, 1, []byte(`{}`))
+	if err != nil {
+		t.Fatalf("current context: %v", err)
+	}
+
+	var resp struct {
+		Stage              string         `json:"stage"`
+		LoadedServiceID    uint           `json:"loaded_service_id"`
+		RequestText        string         `json:"request_text"`
+		PrefillFormData    map[string]any `json:"prefill_form_data"`
+		NextExpectedAction string         `json:"next_expected_action"`
+	}
+	if err := json.Unmarshal(result, &resp); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if resp.Stage != "service_loaded" || resp.LoadedServiceID != 5 || resp.NextExpectedAction != "itsm.draft_prepare" {
+		t.Fatalf("unexpected context response: %+v", resp)
+	}
+	if resp.RequestText == "" || resp.PrefillFormData["vpn_account"] != "wenhaowu@dev.com" {
+		t.Fatalf("expected request text and prefill data, got %+v", resp)
 	}
 }
 

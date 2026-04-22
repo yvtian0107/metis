@@ -322,16 +322,16 @@ var vpnFormSchema = `{
 			"label": "访问原因",
 			"required": true,
 			"options": [
-				{"label": "network_support", "value": "network_support"},
-				{"label": "security", "value": "security"},
-				{"label": "remote_maintenance", "value": "remote_maintenance"}
+				{"label": "线上支持", "value": "network_support"},
+				{"label": "安全审计", "value": "security"},
+				{"label": "远程维护", "value": "remote_maintenance"}
 			]
 		},
 		{
 			"key": "vpn_type",
 			"type": "select",
 			"label": "VPN类型",
-			"required": true,
+			"required": false,
 			"options": [
 				{"label": "l2tp", "value": "l2tp"},
 				{"label": "ipsec", "value": "ipsec"}
@@ -347,7 +347,7 @@ var vpnFormSchema = `{
 			"key": "access_period",
 			"type": "text",
 			"label": "访问时段",
-			"required": true
+			"required": false
 		}
 	]
 }`

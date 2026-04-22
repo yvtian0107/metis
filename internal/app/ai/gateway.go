@@ -31,7 +31,8 @@ type AgentGateway struct {
 	encKey            crypto.EncryptionKey
 
 	// Tool registries for building CompositeToolExecutor per session
-	toolRegistries []ToolHandlerRegistry
+	toolRegistries          []ToolHandlerRegistry
+	runtimeContextProviders []app.AgentRuntimeContextProvider
 
 	// Active execution contexts, keyed by session ID
 	mu         sync.Mutex
@@ -44,17 +45,18 @@ type AgentGateway struct {
 
 func NewAgentGateway(i do.Injector) (*AgentGateway, error) {
 	return &AgentGateway{
-		agentSvc:          do.MustInvoke[*AgentService](i),
-		sessionSvc:        do.MustInvoke[*SessionService](i),
-		memorySvc:         do.MustInvoke[*MemoryService](i),
-		agentRepo:         do.MustInvoke[*AgentRepo](i),
-		modelRepo:         do.MustInvoke[*ModelRepo](i),
-		providerRepo:      do.MustInvoke[*ProviderRepo](i),
-		knowledgeSearcher: do.MustInvoke[*KnowledgeSearchService](i),
-		mcpClient:         do.MustInvoke[MCPRuntimeClient](i),
-		encKey:            do.MustInvoke[crypto.EncryptionKey](i),
-		toolRegistries:    collectToolRegistries(i),
-		executions:        make(map[uint]context.CancelFunc),
+		agentSvc:                do.MustInvoke[*AgentService](i),
+		sessionSvc:              do.MustInvoke[*SessionService](i),
+		memorySvc:               do.MustInvoke[*MemoryService](i),
+		agentRepo:               do.MustInvoke[*AgentRepo](i),
+		modelRepo:               do.MustInvoke[*ModelRepo](i),
+		providerRepo:            do.MustInvoke[*ProviderRepo](i),
+		knowledgeSearcher:       do.MustInvoke[*KnowledgeSearchService](i),
+		mcpClient:               do.MustInvoke[MCPRuntimeClient](i),
+		encKey:                  do.MustInvoke[crypto.EncryptionKey](i),
+		toolRegistries:          collectToolRegistries(i),
+		runtimeContextProviders: collectRuntimeContextProviders(),
+		executions:              make(map[uint]context.CancelFunc),
 		streamEncoderFactory: func(w io.Writer) StreamEncoder {
 			return NewUIMessageStreamEncoder(w)
 		},
@@ -87,25 +89,7 @@ func (gw *AgentGateway) Run(ctx context.Context, sessionID, userID uint) (io.Rea
 	memoryBlock, _ := gw.memorySvc.FormatForPrompt(agent.ID, session.UserID)
 	systemPrompt := buildSystemPrompt(agent, memoryBlock)
 
-	// Convert messages to ExecuteMessage format
-	execMessages := make([]ExecuteMessage, 0, len(messages))
-	for _, m := range messages {
-		if m.Role == MessageRoleUser || m.Role == MessageRoleAssistant {
-			var images []string
-			if len(m.Metadata) > 0 {
-				var meta struct {
-					Images []string `json:"images"`
-				}
-				_ = json.Unmarshal(m.Metadata, &meta)
-				images = meta.Images
-			}
-			execMessages = append(execMessages, ExecuteMessage{
-				Role:    m.Role,
-				Content: m.Content,
-				Images:  images,
-			})
-		}
-	}
+	execMessages := buildExecuteMessagesFromSessionMessages(messages)
 
 	var runtime *assistantRuntimeAssembly
 	if agent.Type == AgentTypeAssistant {
@@ -382,6 +366,128 @@ func buildSystemPrompt(agent *Agent, memoryBlock string) string {
 		prompt += "\n\n" + memoryBlock
 	}
 	return prompt
+}
+
+type storedToolCallMeta struct {
+	ToolCallID string          `json:"tool_call_id"`
+	ToolName   string          `json:"tool_name"`
+	ToolArgs   json.RawMessage `json:"tool_args"`
+}
+
+type storedToolResultMeta struct {
+	ToolCallID string `json:"tool_call_id"`
+}
+
+func buildExecuteMessagesFromSessionMessages(messages []SessionMessage) []ExecuteMessage {
+	execMessages := make([]ExecuteMessage, 0, len(messages))
+	for i := 0; i < len(messages); {
+		m := messages[i]
+		switch m.Role {
+		case MessageRoleUser, MessageRoleAssistant:
+			execMessages = append(execMessages, executeMessageFromChatMessage(m))
+			i++
+		case MessageRoleToolCall:
+			next, transcript := buildToolTranscript(messages, i)
+			execMessages = append(execMessages, transcript...)
+			i = next
+		default:
+			i++
+		}
+	}
+	return execMessages
+}
+
+func executeMessageFromChatMessage(m SessionMessage) ExecuteMessage {
+	var images []string
+	if len(m.Metadata) > 0 {
+		var meta struct {
+			Images []string `json:"images"`
+		}
+		_ = json.Unmarshal(m.Metadata, &meta)
+		images = meta.Images
+	}
+	return ExecuteMessage{
+		Role:    m.Role,
+		Content: m.Content,
+		Images:  images,
+	}
+}
+
+func buildToolTranscript(messages []SessionMessage, start int) (int, []ExecuteMessage) {
+	type callWithResult struct {
+		call   llm.ToolCall
+		output string
+	}
+
+	var calls []llm.ToolCall
+	i := start
+	for i < len(messages) && messages[i].Role == MessageRoleToolCall {
+		if call, ok := parseStoredToolCall(messages[i]); ok {
+			calls = append(calls, call)
+		}
+		i++
+	}
+
+	results := make(map[string]string)
+	for i < len(messages) && messages[i].Role == MessageRoleToolResult {
+		if id := parseStoredToolResultID(messages[i]); id != "" {
+			results[id] = messages[i].Content
+		}
+		i++
+	}
+
+	completed := make([]callWithResult, 0, len(calls))
+	for _, call := range calls {
+		output, ok := results[call.ID]
+		if !ok {
+			continue
+		}
+		completed = append(completed, callWithResult{call: call, output: output})
+	}
+	if len(completed) == 0 {
+		return i, nil
+	}
+
+	toolCalls := make([]llm.ToolCall, len(completed))
+	transcript := make([]ExecuteMessage, 0, len(completed)+1)
+	for idx, item := range completed {
+		toolCalls[idx] = item.call
+	}
+	transcript = append(transcript, ExecuteMessage{
+		Role:      MessageRoleAssistant,
+		ToolCalls: toolCalls,
+	})
+	for _, item := range completed {
+		transcript = append(transcript, ExecuteMessage{
+			Role:       llm.RoleTool,
+			Content:    item.output,
+			ToolCallID: item.call.ID,
+		})
+	}
+	return i, transcript
+}
+
+func parseStoredToolCall(m SessionMessage) (llm.ToolCall, bool) {
+	var meta storedToolCallMeta
+	if len(m.Metadata) == 0 || json.Unmarshal(m.Metadata, &meta) != nil {
+		return llm.ToolCall{}, false
+	}
+	if meta.ToolCallID == "" || meta.ToolName == "" {
+		return llm.ToolCall{}, false
+	}
+	args := "{}"
+	if len(meta.ToolArgs) > 0 {
+		args = string(meta.ToolArgs)
+	}
+	return llm.ToolCall{ID: meta.ToolCallID, Name: meta.ToolName, Arguments: args}, true
+}
+
+func parseStoredToolResultID(m SessionMessage) string {
+	var meta storedToolResultMeta
+	if len(m.Metadata) == 0 || json.Unmarshal(m.Metadata, &meta) != nil {
+		return ""
+	}
+	return meta.ToolCallID
 }
 
 func (gw *AgentGateway) buildLLMClient(agent *Agent) (llm.Client, error) {

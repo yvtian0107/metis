@@ -157,6 +157,12 @@ type ToolRegistryProvider interface {
 	GetToolRegistry() any
 }
 
+// AgentRuntimeContextProvider is an optional interface an App can implement
+// to inject domain-specific session state into assistant agent runs.
+type AgentRuntimeContextProvider interface {
+	BuildAgentRuntimeContext(ctx context.Context, agentCode string, sessionID, userID uint) (string, error)
+}
+
 // AIDecisionExecutor runs AI decision cycles (ReAct tool-calling loops) for smart
 // workflow engines. Implemented by the AI App; the engine provides domain context
 // and tool handlers.

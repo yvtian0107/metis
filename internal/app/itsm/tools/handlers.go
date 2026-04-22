@@ -250,6 +250,7 @@ func NewRegistry(op ServiceDeskOperator, store StateStore) *Registry {
 	r.handlers["itsm.service_match"] = serviceMatchHandler(op, store)
 	r.handlers["itsm.service_confirm"] = serviceConfirmHandler(store)
 	r.handlers["itsm.service_load"] = serviceLoadHandler(op, store)
+	r.handlers["itsm.current_request_context"] = currentRequestContextHandler(store)
 	r.handlers["itsm.new_request"] = newRequestHandler(store)
 	r.handlers["itsm.draft_prepare"] = draftPrepareHandler(op, store)
 	r.handlers["itsm.draft_confirm"] = draftConfirmHandler(op, store)
@@ -259,6 +260,34 @@ func NewRegistry(op ServiceDeskOperator, store StateStore) *Registry {
 	r.handlers["itsm.ticket_withdraw"] = ticketWithdrawHandler(op)
 
 	return r
+}
+
+func currentRequestContextHandler(store StateStore) ToolHandler {
+	return func(ctx context.Context, userID uint, args json.RawMessage) (json.RawMessage, error) {
+		sid := sessionID(ctx)
+		state, err := store.GetState(sid)
+		if err != nil {
+			return nil, fmt.Errorf("get state: %w", err)
+		}
+		if state == nil {
+			state = defaultState()
+		}
+		return mustMarshal(map[string]any{
+			"stage":                   state.Stage,
+			"candidate_service_ids":   state.CandidateServiceIDs,
+			"top_match_service_id":    state.TopMatchServiceID,
+			"confirmed_service_id":    state.ConfirmedServiceID,
+			"confirmation_required":   state.ConfirmationRequired,
+			"loaded_service_id":       state.LoadedServiceID,
+			"request_text":            state.RequestText,
+			"prefill_form_data":       state.PrefillFormData,
+			"draft_summary":           state.DraftSummary,
+			"draft_form_data":         state.DraftFormData,
+			"draft_version":           state.DraftVersion,
+			"confirmed_draft_version": state.ConfirmedDraftVersion,
+			"next_expected_action":    NextExpectedAction(state),
+		}), nil
+	}
 }
 
 // Execute runs a tool by name.
@@ -292,6 +321,33 @@ func mustMarshal(v any) json.RawMessage {
 
 func defaultState() *ServiceDeskState {
 	return &ServiceDeskState{Stage: "idle"}
+}
+
+// NextExpectedAction returns the next service desk tool/action implied by state.
+func NextExpectedAction(state *ServiceDeskState) string {
+	if state == nil {
+		return "itsm.service_match"
+	}
+	switch state.Stage {
+	case "idle":
+		return "itsm.service_match"
+	case "candidates_ready":
+		if state.ConfirmationRequired && state.ConfirmedServiceID == 0 {
+			return "itsm.service_confirm"
+		}
+		if state.ConfirmedServiceID > 0 || state.TopMatchServiceID > 0 {
+			return "itsm.service_load"
+		}
+	case "service_selected":
+		return "itsm.service_load"
+	case "service_loaded":
+		return "itsm.draft_prepare"
+	case "awaiting_confirmation":
+		return "itsm.draft_confirm"
+	case "confirmed":
+		return "itsm.validate_participants"
+	}
+	return ""
 }
 
 var emailPattern = regexp.MustCompile(`[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}`)
@@ -504,6 +560,25 @@ func serviceMatchHandler(op ServiceDeskOperator, store StateStore) ToolHandler {
 		if p.Query == "" {
 			return nil, fmt.Errorf("query is required")
 		}
+		requestText := originalRequestText(ctx, p.Query)
+
+		sid := sessionID(ctx)
+		state, _ := store.GetState(sid)
+		if state == nil {
+			state = defaultState()
+		}
+		if shouldReuseLoadedService(state, p.Query) {
+			return mustMarshal(map[string]any{
+				"ok":                 true,
+				"already_loaded":     true,
+				"service_locked":     true,
+				"loaded_service_id":  state.LoadedServiceID,
+				"request_text":       state.RequestText,
+				"prefill_form_data":  state.PrefillFormData,
+				"state_stage":        state.Stage,
+				"next_required_tool": NextExpectedAction(state),
+			}), nil
+		}
 
 		matches, decision, err := op.MatchServices(ctx, p.Query)
 		if err != nil {
@@ -552,11 +627,6 @@ func serviceMatchHandler(op ServiceDeskOperator, store StateStore) ToolHandler {
 		}
 
 		// Persist state.
-		sid := sessionID(ctx)
-		state, _ := store.GetState(sid)
-		if state == nil {
-			state = defaultState()
-		}
 		if err := state.TransitionTo("candidates_ready"); err != nil {
 			return nil, err
 		}
@@ -568,7 +638,7 @@ func serviceMatchHandler(op ServiceDeskOperator, store StateStore) ToolHandler {
 		} else {
 			state.ConfirmedServiceID = 0
 		}
-		state.RequestText = p.Query
+		state.RequestText = requestText
 		state.PrefillFormData = nil
 		if err := store.SaveState(sid, state); err != nil {
 			return nil, fmt.Errorf("save state: %w", err)
@@ -584,6 +654,43 @@ func serviceMatchHandler(op ServiceDeskOperator, store StateStore) ToolHandler {
 			"clarification_question": decision.ClarificationQuestion,
 		}), nil
 	}
+}
+
+func originalRequestText(ctx context.Context, fallback string) string {
+	if raw := ctx.Value(app.UserMessageKey); raw != nil {
+		if msg, ok := raw.(string); ok && strings.TrimSpace(msg) != "" {
+			return strings.TrimSpace(msg)
+		}
+	}
+	return fallback
+}
+
+func shouldReuseLoadedService(state *ServiceDeskState, query string) bool {
+	if state == nil || state.LoadedServiceID == 0 {
+		return false
+	}
+	switch state.Stage {
+	case "service_loaded", "awaiting_confirmation", "confirmed":
+	default:
+		return false
+	}
+	return isShortContinuation(query)
+}
+
+func isShortContinuation(query string) bool {
+	cleaned := strings.TrimSpace(query)
+	cleaned = strings.Trim(cleaned, "。.!！?？,，;；：: \t\r\n")
+	cleaned = strings.ReplaceAll(cleaned, " ", "")
+	if cleaned == "" || len([]rune(cleaned)) > 12 {
+		return false
+	}
+	confirmations := map[string]struct{}{
+		"是": {}, "是的": {}, "对": {}, "对的": {}, "可以": {}, "可": {},
+		"确认": {}, "继续": {}, "好的": {}, "好": {}, "嗯": {}, "嗯嗯": {},
+		"没问题": {}, "提交": {}, "用这个": {}, "就这个": {}, "没错": {},
+	}
+	_, ok := confirmations[cleaned]
+	return ok
 }
 
 func serviceMatchNextRequiredTool(selectedServiceID uint, confirmationRequired bool, matchCount int) string {

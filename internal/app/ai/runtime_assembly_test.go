@@ -61,6 +61,17 @@ func (r testToolRegistry) Execute(ctx context.Context, toolName string, userID u
 	return nil, errors.New("unknown tool")
 }
 
+type testRuntimeContextProvider struct {
+	block string
+}
+
+func (p testRuntimeContextProvider) BuildAgentRuntimeContext(ctx context.Context, agentCode string, sessionID, userID uint) (string, error) {
+	if agentCode == "itsm.servicedesk" && sessionID == 99 && userID == 7 {
+		return p.block, nil
+	}
+	return "", nil
+}
+
 func registerTestRecallEngine() {
 	registerTestRecallEngineOnce.Do(func() {
 		RegisterEngine(AssetCategoryKB, "test_recall", &testRecallEngine{})
@@ -159,6 +170,28 @@ func TestAssistantRuntimeAssembly_FiltersAndDeduplicatesResources(t *testing.T) 
 	}
 	if runtime.Tools[0].Name != "runtime.active" {
 		t.Fatalf("expected runtime.active, got %s", runtime.Tools[0].Name)
+	}
+}
+
+func TestAssistantRuntimeAssembly_AppendsRuntimeContextProviderBlock(t *testing.T) {
+	db := setupTestDB(t)
+	gw := newGatewayForTest(t, db, nil)
+	gw.runtimeContextProviders = []app.AgentRuntimeContextProvider{
+		testRuntimeContextProvider{block: "## Runtime Context\nloaded_service_id: 5"},
+	}
+
+	code := "itsm.servicedesk"
+	modelID := uint(1)
+	agent := &Agent{Name: "Agent", Type: AgentTypeAssistant, ModelID: &modelID, Code: &code, CreatedBy: 1}
+	_ = gw.agentSvc.Create(agent)
+	session := &AgentSession{BaseModel: model.BaseModel{ID: 99}, UserID: 7}
+
+	runtime, err := gw.buildAssistantRuntime(context.Background(), agent, session, []ExecuteMessage{{Role: MessageRoleUser, Content: "继续"}}, "base")
+	if err != nil {
+		t.Fatalf("build runtime: %v", err)
+	}
+	if !strings.Contains(runtime.SystemPrompt, "## Runtime Context") || !strings.Contains(runtime.SystemPrompt, "loaded_service_id: 5") {
+		t.Fatalf("expected runtime context block in prompt, got %q", runtime.SystemPrompt)
 	}
 }
 

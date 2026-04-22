@@ -10,10 +10,11 @@ import (
 
 // mockLLMClient is a test double for llm.Client that emits a programmed sequence of events.
 type mockLLMClient struct {
-	events []llm.StreamEvent
-	err    error
-	mu     sync.Mutex
-	cursor int
+	events   []llm.StreamEvent
+	err      error
+	mu       sync.Mutex
+	cursor   int
+	requests []llm.ChatRequest
 }
 
 type fakeMCPRuntimeClient struct {
@@ -59,6 +60,7 @@ func (m *mockLLMClient) ChatStream(ctx context.Context, req llm.ChatRequest) (<-
 		return nil, m.err
 	}
 	m.mu.Lock()
+	m.requests = append(m.requests, req)
 	defer m.mu.Unlock()
 
 	ch := make(chan llm.StreamEvent)
@@ -76,6 +78,12 @@ func (m *mockLLMClient) ChatStream(ctx context.Context, req llm.ChatRequest) (<-
 		}
 	}()
 	return ch, nil
+}
+
+func (m *mockLLMClient) Requests() []llm.ChatRequest {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]llm.ChatRequest(nil), m.requests...)
 }
 
 func (m *mockLLMClient) Embedding(ctx context.Context, req llm.EmbeddingRequest) (*llm.EmbeddingResponse, error) {
