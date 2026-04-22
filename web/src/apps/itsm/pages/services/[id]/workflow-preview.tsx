@@ -12,7 +12,11 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { nodeTypes } from "../../../components/workflow/nodes"
 import { edgeTypes } from "../../../components/workflow/custom-edges"
-import { type WFNodeData, type NodeType, type Participant, NODE_COLORS } from "../../../components/workflow/types"
+import { applyDagreLayout } from "../../../components/workflow/auto-layout"
+import { getNodeAccent } from "../../../components/workflow/visual-data"
+import { WorkflowNodeIconGlyph } from "../../../components/workflow/visual"
+import { type WFNodeData, type NodeType, type Participant, type WFEdgeData } from "../../../components/workflow/types"
+import "../../../components/workflow/style.css"
 
 interface WorkflowPreviewProps {
   workflowJson: unknown
@@ -89,11 +93,10 @@ export default function WorkflowPreview({ workflowJson }: WorkflowPreviewProps) 
       target: e.target,
       type: "workflow",
       markerEnd: { type: MarkerType.ArrowClosed },
-      data: e.data,
-      style: { strokeWidth: 1.5 },
+      data: { ...e.data, readonly: true } satisfies WFEdgeData,
     }))
 
-    return { nodes, edges }
+    return { nodes: applyDagreLayout(nodes, edges), edges }
   }, [workflowJson])
 
   const onNodeClick = useCallback((_: React.MouseEvent, node: Node) => {
@@ -101,12 +104,12 @@ export default function WorkflowPreview({ workflowJson }: WorkflowPreviewProps) 
   }, [])
 
   return (
-    <div className="flex gap-4">
-      <div className={`${selectedNode ? "w-2/3" : "w-full"} h-[500px] rounded-md border transition-all`}>
+    <div className="flex min-h-[460px] gap-3 overflow-hidden rounded-2xl border border-border/55 bg-white/38">
+      <div className="min-w-0 flex-1 transition-all">
         <ReactFlow
           nodes={nodes}
           edges={edges}
-          nodeTypes={nodeTypes as any}
+          nodeTypes={nodeTypes}
           edgeTypes={edgeTypes}
           nodesDraggable={false}
           nodesConnectable={false}
@@ -114,30 +117,38 @@ export default function WorkflowPreview({ workflowJson }: WorkflowPreviewProps) 
           onNodeClick={onNodeClick}
           onPaneClick={() => setSelectedNode(null)}
           fitView
-          className="bg-muted/20"
+          className="workflow-builder-flow"
         >
-          <Background />
-          <Controls showInteractive={false} />
+          <Background gap={24} size={1.2} />
+          <Controls showInteractive={false} position="bottom-left" />
           <MiniMap
+            position="bottom-right"
+            pannable
+            zoomable
             nodeColor={(n) => {
               const nodeData = n.data as unknown as WFNodeData
-              return NODE_COLORS[nodeData?.nodeType] ?? "#6b7280"
+              return getNodeAccent(nodeData?.nodeType)
             }}
-            maskColor="rgba(0,0,0,0.05)"
+            maskColor="rgba(15,23,42,0.06)"
           />
         </ReactFlow>
       </div>
 
       {selectedNode && (
-        <div className="w-1/3 rounded-md border p-4 space-y-3">
-          <div className="flex items-center justify-between">
-            <h4 className="text-sm font-semibold">{t("workflow.viewer.activityDetail")}</h4>
+        <aside className="w-[340px] shrink-0 border-l border-border/50 bg-white/68">
+          <div className="flex min-h-14 items-center justify-between border-b border-border/50 px-4">
+            <div className="flex min-w-0 items-center gap-2">
+              <span className="flex size-7 shrink-0 items-center justify-center rounded-lg text-white" style={{ backgroundColor: getNodeAccent(selectedNode.data.nodeType) }}>
+                <WorkflowNodeIconGlyph nodeType={selectedNode.data.nodeType} />
+              </span>
+              <h4 className="truncate text-sm font-semibold">{t("workflow.viewer.activityDetail")}</h4>
+            </div>
             <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setSelectedNode(null)}>
               <X className="h-3.5 w-3.5" />
             </Button>
           </div>
 
-          <div className="space-y-2 text-sm">
+          <div className="space-y-3 p-4 text-sm">
             <div className="flex items-center gap-2">
               <span className="text-muted-foreground">{t("workflow.prop.label")}:</span>
               <span className="font-medium">{selectedNode.data.label}</span>
@@ -147,7 +158,7 @@ export default function WorkflowPreview({ workflowJson }: WorkflowPreviewProps) 
               <span className="text-muted-foreground">{t("generate.nodeType")}:</span>
               <Badge
                 variant="outline"
-                style={{ borderColor: NODE_COLORS[selectedNode.data.nodeType], color: NODE_COLORS[selectedNode.data.nodeType] }}
+                style={{ borderColor: getNodeAccent(selectedNode.data.nodeType), color: getNodeAccent(selectedNode.data.nodeType) }}
               >
                 {t(`workflow.node.${selectedNode.data.nodeType}` as const)}
               </Badge>
@@ -212,7 +223,7 @@ export default function WorkflowPreview({ workflowJson }: WorkflowPreviewProps) 
               )
             })()}
           </div>
-        </div>
+        </aside>
       )}
     </div>
   )

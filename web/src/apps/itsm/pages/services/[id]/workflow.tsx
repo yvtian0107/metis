@@ -58,18 +58,27 @@ export function Component() {
   }
 
   return (
-    <div className="flex h-[calc(100vh-120px)] flex-col">
-      <div className="flex items-center gap-3 border-b px-4 py-2">
-        <Button variant="ghost" size="sm" onClick={() => navigate(-1)}>
-          <ArrowLeft className="mr-1 h-3.5 w-3.5" />{t("workflow.back")}
+    <div className="flex h-[calc(100vh-120px)] flex-col overflow-hidden rounded-[1.15rem] border border-border/55 bg-background/60">
+      <div className="flex min-h-14 items-center justify-between gap-3 border-b border-border/55 bg-white/52 px-4">
+        <div className="flex min-w-0 items-center gap-3">
+          <Button variant="ghost" size="icon-sm" onClick={() => navigate(-1)}>
+            <ArrowLeft className="h-4 w-4" />
+          </Button>
+          <div className="min-w-0">
+            <h2 className="truncate text-sm font-semibold">{t("workflow.editorTitle", { name: service?.name ?? "" })}</h2>
+            <p className="text-xs text-muted-foreground">{t("workflow.editorSubtitle")}</p>
+          </div>
+        </div>
+        <Button variant="outline" size="sm" onClick={() => navigate(`/itsm/services/${serviceId}`)}>
+          {t("workflow.back")}
         </Button>
-        <h2 className="text-sm font-semibold">{t("workflow.editorTitle", { name: service?.name ?? "" })}</h2>
       </div>
       <div className="flex-1">
         <WorkflowEditor
           initialData={initialData}
           onSave={(data) => saveMut.mutate(data)}
           saving={saveMut.isPending}
+          serviceId={serviceId}
         />
       </div>
     </div>

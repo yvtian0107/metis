@@ -32,9 +32,11 @@ import { nodeTypes } from "./nodes"
 import { edgeTypes } from "./custom-edges"
 import { NodePalette } from "./node-palette"
 import { NodePropertyPanel, EdgePropertyPanel } from "./property-panel"
-import { type WFNodeData, type WFEdgeData, type NodeType, NODE_COLORS } from "./types"
+import { type WFNodeData, type WFEdgeData, type NodeType } from "./types"
+import { getNodeAccent } from "./visual-data"
 import { applyDagreLayout } from "./auto-layout"
 import { useUndoRedo } from "./use-undo-redo"
+import "./style.css"
 
 interface WorkflowEditorProps {
   initialData?: { nodes: Node[]; edges: Edge[] }
@@ -62,6 +64,7 @@ function InnerEditor({ initialData, onSave, saving, serviceId, validationErrors 
   const migratedEdges = (initialData?.edges ?? []).map((e) => ({
     ...e,
     type: "workflow",
+    markerEnd: { type: MarkerType.ArrowClosed },
   }))
 
   const [nodes, setNodes, onNodesChange] = useNodesState(migratedNodes)
@@ -146,7 +149,15 @@ function InnerEditor({ initialData, onSave, saving, serviceId, validationErrors 
   }, [])
 
   function handleSave() {
-    onSave({ nodes, edges })
+    const cleanNodes = nodes.map((node) => ({
+      ...node,
+      data: { ...(node.data as Record<string, unknown>), _workflowState: undefined },
+    }))
+    const cleanEdges = edges.map((edge) => ({
+      ...edge,
+      data: { ...(edge.data as Record<string, unknown>), readonly: undefined, visited: undefined, failed: undefined },
+    }))
+    onSave({ nodes: cleanNodes, edges: cleanEdges })
   }
 
   function handleAutoLayout() {
@@ -253,7 +264,13 @@ function InnerEditor({ initialData, onSave, saving, serviceId, validationErrors 
   const decoratedNodes = nodes.map((n) => {
     const err = errorsByNode.get(n.id)
     if (!err) return n
-    return { ...n, className: "!border-destructive ring-1 ring-destructive/50" }
+    return { ...n, className: "ring-2 ring-destructive/45" }
+  })
+
+  const decoratedEdges = edges.map((e) => {
+    const err = errorsByEdge.get(e.id)
+    if (!err) return e
+    return { ...e, data: { ...e.data, failed: true } }
   })
 
   const edgeSourceNodeType = selectedEdge
@@ -261,15 +278,15 @@ function InnerEditor({ initialData, onSave, saving, serviceId, validationErrors 
     : undefined
 
   return (
-    <div className="flex h-full" ref={reactFlowWrapper}>
+    <div className="flex h-full overflow-hidden bg-background" ref={reactFlowWrapper}>
       <NodePalette />
-      <div className="flex-1">
+      <div className="min-w-0 flex-1">
         <ContextMenu>
           <ContextMenuTrigger asChild>
             <div className="h-full">
               <ReactFlow
                 nodes={decoratedNodes}
-                edges={edges}
+                edges={decoratedEdges}
                 onNodesChange={onNodesChange}
                 onEdgesChange={onEdgesChange}
                 onConnect={onConnect}
@@ -278,7 +295,7 @@ function InnerEditor({ initialData, onSave, saving, serviceId, validationErrors 
                 onNodeClick={onNodeClick}
                 onEdgeClick={onEdgeClick}
                 onPaneClick={onPaneClick}
-                nodeTypes={nodeTypes as any}
+                nodeTypes={nodeTypes}
                 edgeTypes={edgeTypes}
                 defaultEdgeOptions={{
                   type: "workflow",
@@ -287,18 +304,21 @@ function InnerEditor({ initialData, onSave, saving, serviceId, validationErrors 
                 fitView
                 selectNodesOnDrag
                 multiSelectionKeyCode="Shift"
-                className="bg-background"
+                className="workflow-builder-flow"
               >
-                <Background />
-                <Controls />
+                <Background gap={24} size={1.2} />
+                <Controls position="bottom-left" />
                 <MiniMap
-                  nodeColor={(n) => NODE_COLORS[(n.data as unknown as WFNodeData)?.nodeType] ?? "#6b7280"}
-                  maskColor="rgba(0,0,0,0.1)"
+                  position="bottom-right"
+                  pannable
+                  zoomable
+                  nodeColor={(n) => getNodeAccent((n.data as unknown as WFNodeData)?.nodeType)}
+                  maskColor="rgba(15,23,42,0.06)"
                 />
-                <Panel position="top-right" className="flex gap-1">
+                <Panel position="top-right" className="flex gap-1 rounded-xl border border-border/60 bg-white/80 p-1 shadow-[0_18px_42px_-34px_rgba(15,23,42,0.55)]">
                   <Tooltip>
                     <TooltipTrigger asChild>
-                      <Button variant="outline" size="icon" className="h-8 w-8" onClick={handleUndo} disabled={!canUndo}>
+                      <Button variant="ghost" size="icon" className="h-8 w-8" onClick={handleUndo} disabled={!canUndo}>
                         <Undo2 size={14} />
                       </Button>
                     </TooltipTrigger>
@@ -306,7 +326,7 @@ function InnerEditor({ initialData, onSave, saving, serviceId, validationErrors 
                   </Tooltip>
                   <Tooltip>
                     <TooltipTrigger asChild>
-                      <Button variant="outline" size="icon" className="h-8 w-8" onClick={handleRedo} disabled={!canRedo}>
+                      <Button variant="ghost" size="icon" className="h-8 w-8" onClick={handleRedo} disabled={!canRedo}>
                         <Redo2 size={14} />
                       </Button>
                     </TooltipTrigger>
@@ -314,7 +334,7 @@ function InnerEditor({ initialData, onSave, saving, serviceId, validationErrors 
                   </Tooltip>
                   <Tooltip>
                     <TooltipTrigger asChild>
-                      <Button variant="outline" size="icon" className="h-8 w-8" onClick={handleAutoLayout}>
+                      <Button variant="ghost" size="icon" className="h-8 w-8" onClick={handleAutoLayout}>
                         <LayoutGrid size={14} />
                       </Button>
                     </TooltipTrigger>

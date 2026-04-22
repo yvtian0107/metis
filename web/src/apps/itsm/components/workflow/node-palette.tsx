@@ -1,24 +1,7 @@
 import { useTranslation } from "react-i18next"
-import {
-  Play, Square, FileText, ShieldCheck, Wrench, Zap, GitBranch, Bell, Clock,
-  Code2, Radio, Layers, CircleDot, GitMerge,
-} from "lucide-react"
-import { NODE_COLORS, type NodeType } from "./types"
-
-const ICONS: Record<string, typeof Play> = {
-  start: Play, end: Square, timer: Clock, signal: Radio,
-  form: FileText, approve: ShieldCheck, process: Wrench, action: Zap,
-  script: Code2, notify: Bell,
-  exclusive: GitBranch, parallel: GitMerge, inclusive: CircleDot,
-  subprocess: Layers, wait: Clock,
-}
-
-const GROUPS: { label: string; types: NodeType[] }[] = [
-  { label: "workflow.group.events", types: ["start", "end", "timer", "signal"] },
-  { label: "workflow.group.tasks", types: ["form", "approve", "process", "action", "script", "notify"] },
-  { label: "workflow.group.gateways", types: ["exclusive", "parallel", "inclusive"] },
-  { label: "workflow.group.other", types: ["subprocess", "wait"] },
-]
+import type { NodeType } from "./types"
+import { WORKFLOW_NODE_GROUPS, getNodeAccent } from "./visual-data"
+import { WorkflowNodeIconGlyph } from "./visual"
 
 export function NodePalette() {
   const { t } = useTranslation("itsm")
@@ -29,31 +12,44 @@ export function NodePalette() {
   }
 
   return (
-    <div className="flex w-[160px] flex-col gap-2 overflow-y-auto border-r bg-muted/30 p-3">
-      {GROUPS.map((group) => (
-        <div key={group.label}>
-          <div className="mb-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+    <aside className="flex w-[232px] shrink-0 flex-col overflow-y-auto border-r border-border/55 bg-white/48 px-3 py-3">
+      <div className="mb-3 px-1">
+        <div className="text-sm font-semibold tracking-[-0.01em]">{t("workflow.nodeTypes")}</div>
+        <div className="mt-1 text-xs leading-5 text-muted-foreground">{t("workflow.paletteHint")}</div>
+      </div>
+      <div className="space-y-4">
+        {WORKFLOW_NODE_GROUPS.map((group) => (
+          <section key={group.label}>
+            <div className="mb-1.5 px-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground/72">
             {t(group.label)}
-          </div>
-          <div className="space-y-1">
-            {group.types.map((nt) => {
-              const Icon = ICONS[nt] ?? Wrench
-              const color = NODE_COLORS[nt]
-              return (
-                <div
-                  key={nt}
-                  draggable
-                  onDragStart={(e) => onDragStart(e, nt)}
-                  className="flex cursor-grab items-center gap-2 rounded-md border bg-background px-2 py-1.5 text-sm hover:border-primary/50 active:cursor-grabbing"
-                >
-                  <Icon size={14} style={{ color }} />
-                  <span>{t(`workflow.node.${nt}`)}</span>
-                </div>
-              )
-            })}
-          </div>
-        </div>
-      ))}
-    </div>
+            </div>
+            <div className="space-y-1.5">
+              {group.types.map((nt) => {
+                const color = getNodeAccent(nt)
+                return (
+                  <div
+                    key={nt}
+                    draggable
+                    onDragStart={(e) => onDragStart(e, nt)}
+                    className="group flex min-h-[3.125rem] cursor-grab items-center gap-2.5 rounded-xl border border-border/64 bg-white/72 px-2.5 py-2 transition hover:border-primary/35 hover:bg-white active:cursor-grabbing"
+                  >
+                    <div
+                      className="flex size-7 shrink-0 items-center justify-center rounded-lg text-white"
+                      style={{ backgroundColor: color }}
+                    >
+                      <WorkflowNodeIconGlyph nodeType={nt} />
+                    </div>
+                    <div className="min-w-0">
+                      <div className="truncate text-[13px] font-medium text-foreground">{t(`workflow.node.${nt}`)}</div>
+                      <div className="truncate text-[11px] text-muted-foreground">{t(`workflow.nodeDesc.${nt}`)}</div>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </section>
+        ))}
+      </div>
+    </aside>
   )
 }

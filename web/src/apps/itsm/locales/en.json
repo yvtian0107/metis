@@ -374,6 +374,9 @@
     "saveSuccess": "Workflow saved",
     "validationErrors": "Validation Errors",
     "editorTitle": "Workflow Design - {{name}}",
+    "editorSubtitle": "Compose nodes, branches, and automation from left to right",
+    "paletteHint": "Drag nodes onto the canvas or insert them from an edge",
+    "insertNode": "Insert node",
     "back": "Back",
     "notClassic": "Only classic engine supports workflow design",
     "designWorkflow": "Design Workflow",
@@ -395,6 +398,23 @@
       "inclusive": "Inclusive Gateway",
       "subprocess": "Subprocess",
       "script": "Script"
+    },
+    "nodeDesc": {
+      "start": "Flow entry point",
+      "end": "Flow completion",
+      "form": "Collect request data",
+      "approve": "Human approval",
+      "process": "Human handling step",
+      "action": "Run service action",
+      "exclusive": "Single branch",
+      "notify": "Send notification",
+      "wait": "Pause execution",
+      "timer": "Resume by time",
+      "signal": "Resume by signal",
+      "parallel": "Parallel paths",
+      "inclusive": "Multiple branches",
+      "subprocess": "Nested flow segment",
+      "script": "Variable/script logic"
     },
     "prop": {
       "label": "Label",
@@ -452,9 +472,22 @@
     },
     "group": {
       "events": "Events",
+      "human": "Human",
+      "automation": "Automation",
+      "control": "Control",
+      "composite": "Composite",
       "tasks": "Tasks",
       "gateways": "Gateways",
       "other": "Other"
+    },
+    "panel": {
+      "identity": "Identity",
+      "execution": "Execution",
+      "io": "Input / Output"
+    },
+    "state": {
+      "active": "Running",
+      "cancelled": "Cancelled"
     },
     "summary": {
       "formBound": "Form bound",

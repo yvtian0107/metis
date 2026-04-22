@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Link, useNavigate } from "react-router"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import type { UIMessage } from "ai"
@@ -8,16 +8,14 @@ import {
   AlertTriangle,
   ArrowUpRight,
   Bot,
-  GitPullRequestArrow,
+  FileStack,
   History,
   Loader2,
-  MessageSquare,
   PanelRight,
   Plus,
   RotateCw,
-  SearchCheck,
   Send,
-  ShieldAlert,
+  Sparkles,
   Square,
 } from "lucide-react"
 import { toast } from "sonner"
@@ -28,6 +26,13 @@ import { sessionApi, type AgentSession } from "@/lib/api"
 import { cn } from "@/lib/utils"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet"
 import { Textarea } from "@/components/ui/textarea"
 import {
   fetchEngineConfig,
@@ -37,15 +42,12 @@ import {
   type TicketItem,
 } from "../../api"
 
-type AgentSeatStatus = "online" | "pending" | "offline"
-
-interface AgentSeat {
-  key: string
-  name: string
-  role: string
-  status: AgentSeatStatus
-  icon: ComponentType<{ className?: string }>
-}
+const SUGGESTED_PROMPTS = [
+  "我想申请 VPN，线上支持用",
+  "电脑无法连接公司 Wi-Fi",
+  "需要临时访问生产服务器",
+  "帮我查一下我的工单进度",
+]
 
 function groupUIMessagesIntoPairs(messages: UIMessage[]): Array<{ userMessage: UIMessage; aiMessages: UIMessage[] }> {
   const pairs: Array<{ userMessage: UIMessage; aiMessages: UIMessage[] }> = []
@@ -67,20 +69,24 @@ function formatSessionTime(value: string) {
   return date.toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })
 }
 
+function sessionTitle(session: AgentSession) {
+  return session.title || `会话 #${session.id}`
+}
+
 function stageView(stage?: string) {
   switch (stage) {
     case "candidates_ready":
-      return { label: "匹配服务", tone: "bg-sky-500/10 text-sky-700 border-sky-500/20" }
+      return { label: "匹配服务", tone: "bg-sky-500", badge: "bg-sky-500/10 text-sky-700 border-sky-500/20" }
     case "service_selected":
-      return { label: "已选服务", tone: "bg-cyan-500/10 text-cyan-700 border-cyan-500/20" }
+      return { label: "已选服务", tone: "bg-cyan-500", badge: "bg-cyan-500/10 text-cyan-700 border-cyan-500/20" }
     case "service_loaded":
-      return { label: "加载工件", tone: "bg-amber-500/10 text-amber-700 border-amber-500/20" }
+      return { label: "加载工件", tone: "bg-amber-500", badge: "bg-amber-500/10 text-amber-700 border-amber-500/20" }
     case "awaiting_confirmation":
-      return { label: "等待确认", tone: "bg-violet-500/10 text-violet-700 border-violet-500/20" }
+      return { label: "等待确认", tone: "bg-violet-500", badge: "bg-violet-500/10 text-violet-700 border-violet-500/20" }
     case "confirmed":
-      return { label: "已确认", tone: "bg-emerald-500/10 text-emerald-700 border-emerald-500/20" }
+      return { label: "已确认", tone: "bg-emerald-500", badge: "bg-emerald-500/10 text-emerald-700 border-emerald-500/20" }
     default:
-      return { label: "待接入", tone: "bg-muted text-muted-foreground border-border" }
+      return { label: "待接入", tone: "bg-muted-foreground/40", badge: "bg-muted text-muted-foreground border-border" }
   }
 }
 
@@ -113,96 +119,184 @@ function compactValue(value: unknown) {
   return JSON.stringify(value)
 }
 
-function AgentDock({
-  seats,
-  activeKey,
+function hasArtifacts(stateData?: ServiceDeskSessionState, tickets?: TicketItem[]) {
+  const state = stateData?.state
+  return Boolean(
+    (state && state.stage !== "idle") ||
+    state?.draft_summary ||
+    objectEntries(state?.draft_form_data).length > 0 ||
+    objectEntries(state?.prefill_form_data).length > 0 ||
+    (tickets && tickets.length > 0),
+  )
+}
+
+function StatusDot({ className }: { className?: string }) {
+  return (
+    <span className={cn("relative flex size-2.5", className)}>
+      <span className="absolute inline-flex size-full animate-ping rounded-full bg-emerald-400 opacity-45" />
+      <span className="relative inline-flex size-2.5 rounded-full bg-emerald-500" />
+    </span>
+  )
+}
+
+function ServiceDeskSidebar({
+  sessions,
+  activeSessionId,
+  loading,
+  onSelect,
+  onNew,
 }: {
-  seats: AgentSeat[]
-  activeKey: string
+  sessions: AgentSession[]
+  activeSessionId: number | null
+  loading: boolean
+  onSelect: (sessionId: number) => void
+  onNew: () => void
 }) {
   return (
-    <div className="flex min-h-24 items-center gap-3 overflow-x-auto border-b border-border/70 bg-background/80 px-5 py-4">
-      {seats.map((seat) => {
-        const Icon = seat.icon
-        const active = seat.key === activeKey
-        const online = seat.status === "online"
-        return (
-          <button
-            key={seat.key}
-            type="button"
-            disabled={!online}
-            className={cn(
-              "group flex min-w-40 items-center gap-3 rounded-lg border px-3 py-2.5 text-left transition-colors",
-              active
-                ? "border-primary/40 bg-primary/8 text-foreground shadow-[0_16px_34px_-28px_hsl(var(--primary))]"
-                : "border-border/70 bg-background hover:bg-accent/45",
-              !online && "cursor-not-allowed opacity-55 hover:bg-background",
-            )}
-          >
-            <span
-              className={cn(
-                "flex size-11 shrink-0 items-center justify-center rounded-full border",
-                active ? "border-primary/35 bg-primary/12 text-primary" : "border-border bg-muted/55 text-muted-foreground",
-              )}
-            >
-              <Icon className="size-5" />
-            </span>
-            <span className="min-w-0">
-              <span className="block truncate text-sm font-medium">{seat.name}</span>
-              <span className="mt-0.5 flex items-center gap-1.5 text-xs text-muted-foreground">
-                <span
+    <aside className="hidden w-60 shrink-0 border-r border-border/70 bg-muted/12 md:flex md:flex-col">
+      <div className="flex h-14 items-center justify-between px-4">
+        <div className="flex items-center gap-2 text-sm font-medium">
+          <History className="size-4 text-muted-foreground" />
+          会话
+        </div>
+        <Button type="button" size="icon" variant="ghost" className="size-8" onClick={onNew}>
+          <Plus className="size-4" />
+        </Button>
+      </div>
+      <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
+        {loading ? (
+          <div className="flex items-center gap-2 px-3 py-3 text-xs text-muted-foreground">
+            <Loader2 className="size-3.5 animate-spin" />
+            载入会话
+          </div>
+        ) : sessions.length === 0 ? (
+          <div className="px-3 py-3 text-xs leading-5 text-muted-foreground">暂无历史会话</div>
+        ) : (
+          <div className="space-y-1">
+            {sessions.map((session) => {
+              const active = session.id === activeSessionId
+              return (
+                <button
+                  key={session.id}
+                  type="button"
+                  onClick={() => onSelect(session.id)}
                   className={cn(
-                    "size-1.5 rounded-full",
-                    online ? "bg-emerald-500" : seat.status === "pending" ? "bg-amber-500" : "bg-muted-foreground/45",
+                    "group flex w-full flex-col rounded-md px-3 py-2 text-left transition-colors",
+                    active ? "bg-background text-foreground shadow-[0_10px_30px_-24px_rgba(15,23,42,0.45)]" : "text-muted-foreground hover:bg-background/70 hover:text-foreground",
                   )}
-                />
-                {seat.role}
-              </span>
-            </span>
-          </button>
-        )
-      })}
+                >
+                  <span className="line-clamp-2 text-sm leading-5">{sessionTitle(session)}</span>
+                  <span className="mt-1 text-[11px] text-muted-foreground/75">{formatSessionTime(session.updatedAt)}</span>
+                </button>
+              )
+            })}
+          </div>
+        )}
+      </div>
+    </aside>
+  )
+}
+
+function ServiceDeskComposer({
+  value,
+  disabled,
+  pending,
+  placeholder,
+  onChange,
+  onSend,
+  compact,
+}: {
+  value: string
+  disabled?: boolean
+  pending?: boolean
+  placeholder: string
+  onChange: (value: string) => void
+  onSend: () => void
+  compact?: boolean
+}) {
+  return (
+    <div
+      className={cn(
+        "flex w-full items-end gap-2 rounded-xl border border-border/80 bg-background/92 p-2 shadow-[0_22px_55px_-46px_rgba(15,23,42,0.75)]",
+        compact ? "max-w-3xl" : "max-w-[720px]",
+      )}
+    >
+      <Textarea
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" && !event.shiftKey) {
+            event.preventDefault()
+            onSend()
+          }
+        }}
+        placeholder={placeholder}
+        className={cn(
+          "max-h-40 resize-none border-0 bg-transparent px-3 py-2.5 shadow-none focus-visible:ring-0",
+          compact ? "min-h-11" : "min-h-28 text-base",
+        )}
+        disabled={disabled}
+      />
+      <Button type="button" size="icon" className="size-10 shrink-0" onClick={onSend} disabled={!value.trim() || disabled || pending}>
+        {pending ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />}
+      </Button>
     </div>
   )
 }
 
-function SessionStrip({
-  sessions,
-  activeSessionId,
-  creating,
-  onSelect,
-  onCreate,
+function WelcomeStage({
+  agentName,
+  value,
+  disabled,
+  pending,
+  onChange,
+  onSend,
 }: {
-  sessions: AgentSession[]
-  activeSessionId: number | null
-  creating: boolean
-  onSelect: (sessionId: number) => void
-  onCreate: () => void
+  agentName: string
+  value: string
+  disabled?: boolean
+  pending?: boolean
+  onChange: (value: string) => void
+  onSend: () => void
 }) {
   return (
-    <div className="flex items-center gap-2 border-b border-border/70 bg-muted/18 px-5 py-2.5">
-      <div className="flex min-w-0 flex-1 items-center gap-2 overflow-x-auto">
-        <History className="size-4 shrink-0 text-muted-foreground" />
-        {sessions.slice(0, 8).map((session) => (
-          <button
-            key={session.id}
-            type="button"
-            onClick={() => onSelect(session.id)}
-            className={cn(
-              "h-8 max-w-52 shrink-0 rounded-md border px-3 text-left text-xs transition-colors",
-              activeSessionId === session.id
-                ? "border-primary/35 bg-primary/8 text-foreground"
-                : "border-border/70 bg-background/70 text-muted-foreground hover:bg-accent/45 hover:text-foreground",
-            )}
-          >
-            <span className="block truncate">{session.title || `会话 #${session.id}`}</span>
-          </button>
-        ))}
+    <div className="flex min-h-0 flex-1 flex-col items-center justify-center px-5 py-8">
+      <div className="flex flex-col items-center text-center">
+        <div className="flex size-16 items-center justify-center rounded-full border border-primary/20 bg-primary/8 text-primary shadow-[0_18px_44px_-34px_hsl(var(--primary))]">
+          <Bot className="size-8" />
+        </div>
+        <div className="mt-4 flex items-center gap-2 text-sm text-muted-foreground">
+          <StatusDot />
+          <span>{agentName}</span>
+        </div>
+        <h1 className="mt-3 text-3xl font-semibold tracking-normal text-foreground">IT 服务台</h1>
+        <p className="mt-3 max-w-xl text-sm leading-6 text-muted-foreground">
+          直接描述 IT 诉求，服务台会澄清信息、生成草稿，并在你确认后沉淀为工单。
+        </p>
       </div>
-      <Button type="button" size="sm" variant="outline" onClick={onCreate} disabled={creating}>
-        {creating ? <Loader2 className="mr-1.5 size-3.5 animate-spin" /> : <Plus className="mr-1.5 size-3.5" />}
-        新服务
-      </Button>
+      <div className="mt-9 flex w-full flex-col items-center">
+        <ServiceDeskComposer
+          value={value}
+          onChange={onChange}
+          onSend={onSend}
+          disabled={disabled}
+          pending={pending}
+          placeholder="描述你的 IT 诉求..."
+        />
+        <div className="mt-4 flex max-w-3xl flex-wrap justify-center gap-2">
+          {SUGGESTED_PROMPTS.map((prompt) => (
+            <button
+              key={prompt}
+              type="button"
+              onClick={() => onChange(prompt)}
+              className="rounded-full border border-border/80 bg-background/76 px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-accent/45 hover:text-foreground"
+              disabled={disabled}
+            >
+              {prompt}
+            </button>
+          ))}
+        </div>
+      </div>
     </div>
   )
 }
@@ -217,7 +311,7 @@ function NotOnDutyState({ loading }: { loading: boolean }) {
         ) : (
           <AlertTriangle className="mx-auto size-7 text-amber-600" />
         )}
-        <h2 className="mt-4 text-lg font-semibold">服务台智能体未上岗</h2>
+        <h2 className="mt-4 text-lg font-semibold">服务台智能体未配置</h2>
         <p className="mt-2 text-sm text-muted-foreground">
           需要在引擎配置中绑定 itsm.servicedesk 默认智能体。
         </p>
@@ -229,7 +323,7 @@ function NotOnDutyState({ loading }: { loading: boolean }) {
   )
 }
 
-function ServiceDeskArtifacts({
+function ArtifactPanelContent({
   stateData,
   tickets,
   loading,
@@ -245,101 +339,140 @@ function ServiceDeskArtifacts({
   const hasDraft = Boolean(state?.draft_summary) || draftEntries.length > 0
 
   return (
-    <aside className="hidden w-[340px] shrink-0 border-l border-border/70 bg-muted/12 xl:flex xl:flex-col">
-      <div className="flex h-14 items-center justify-between border-b border-border/70 px-4">
-        <div className="flex items-center gap-2">
-          <PanelRight className="size-4 text-muted-foreground" />
-          <span className="text-sm font-medium">ITSM 工件</span>
+    <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-4">
+      {loading && (
+        <div className="mb-3 flex items-center gap-2 rounded-md border border-border/70 bg-background/70 px-3 py-2 text-sm text-muted-foreground">
+          <Loader2 className="size-4 animate-spin" />
+          同步工件
         </div>
-        <Badge variant="outline" className={cn("border text-xs font-normal", view.tone)}>
-          {view.label}
-        </Badge>
-      </div>
+      )}
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
-        {loading && (
-          <div className="flex items-center gap-2 rounded-md border border-border/70 bg-background/70 px-3 py-2 text-sm text-muted-foreground">
-            <Loader2 className="size-4 animate-spin" />
-            同步工件
-          </div>
-        )}
-
-        <section className="rounded-lg border border-border/70 bg-background p-3">
+      <section className="rounded-lg border border-border/70 bg-background p-3">
+        <div className="flex items-center justify-between">
           <div className="text-xs font-medium text-muted-foreground">当前状态</div>
-          <div className="mt-2 text-sm font-medium">{expectedActionLabel(stateData?.nextExpectedAction)}</div>
-          {state?.request_text && (
-            <p className="mt-2 line-clamp-4 text-sm leading-6 text-muted-foreground">{state.request_text}</p>
-          )}
-          {(state?.loaded_service_id || state?.confirmed_service_id || state?.top_match_service_id) && (
-            <div className="mt-3 flex flex-wrap gap-1.5">
-              {state.loaded_service_id ? <Badge variant="secondary">服务 #{state.loaded_service_id}</Badge> : null}
-              {state.confirmed_service_id ? <Badge variant="secondary">确认 #{state.confirmed_service_id}</Badge> : null}
-              {state.top_match_service_id ? <Badge variant="secondary">匹配 #{state.top_match_service_id}</Badge> : null}
-            </div>
-          )}
-        </section>
-
-        <section className="mt-3 rounded-lg border border-border/70 bg-background p-3">
-          <div className="flex items-center justify-between">
-            <div className="text-xs font-medium text-muted-foreground">草稿</div>
-            {state?.draft_version ? <Badge variant="outline">v{state.draft_version}</Badge> : null}
-          </div>
-          {hasDraft ? (
-            <div className="mt-3 space-y-3">
-              {state?.draft_summary && <p className="text-sm leading-6">{state.draft_summary}</p>}
-              {draftEntries.length > 0 && (
-                <div className="space-y-2">
-                  {draftEntries.slice(0, 8).map(([key, value]) => (
-                    <div key={key} className="rounded-md bg-muted/45 px-2.5 py-2">
-                      <div className="text-[11px] text-muted-foreground">{key}</div>
-                      <div className="mt-0.5 break-words text-xs">{compactValue(value)}</div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          ) : (
-            <div className="mt-3 text-sm text-muted-foreground">等待对话生成草稿</div>
-          )}
-        </section>
-
-        {prefillEntries.length > 0 && (
-          <section className="mt-3 rounded-lg border border-border/70 bg-background p-3">
-            <div className="text-xs font-medium text-muted-foreground">预填字段</div>
-            <div className="mt-3 space-y-2">
-              {prefillEntries.slice(0, 6).map(([key, value]) => (
-                <div key={key} className="flex items-start justify-between gap-3 text-xs">
-                  <span className="text-muted-foreground">{key}</span>
-                  <span className="min-w-0 flex-1 break-words text-right">{compactValue(value)}</span>
-                </div>
-              ))}
-            </div>
-          </section>
+          <Badge variant="outline" className={cn("border text-xs font-normal", view.badge)}>
+            {view.label}
+          </Badge>
+        </div>
+        <div className="mt-2 text-sm font-medium">{expectedActionLabel(stateData?.nextExpectedAction)}</div>
+        {state?.request_text && (
+          <p className="mt-2 line-clamp-4 text-sm leading-6 text-muted-foreground">{state.request_text}</p>
         )}
+        {(state?.loaded_service_id || state?.confirmed_service_id || state?.top_match_service_id) && (
+          <div className="mt-3 flex flex-wrap gap-1.5">
+            {state.loaded_service_id ? <Badge variant="secondary">服务 #{state.loaded_service_id}</Badge> : null}
+            {state.confirmed_service_id ? <Badge variant="secondary">确认 #{state.confirmed_service_id}</Badge> : null}
+            {state.top_match_service_id ? <Badge variant="secondary">匹配 #{state.top_match_service_id}</Badge> : null}
+          </div>
+        )}
+      </section>
 
-        <section className="mt-3 rounded-lg border border-border/70 bg-background p-3">
-          <div className="text-xs font-medium text-muted-foreground">已创建工单</div>
-          {tickets.length > 0 ? (
-            <div className="mt-3 space-y-2">
-              {tickets.map((ticket) => (
-                <Link
-                  key={ticket.id}
-                  to={`/itsm/tickets/${ticket.id}`}
-                  className="group block rounded-md border border-border/70 px-3 py-2 transition-colors hover:bg-accent/45"
-                >
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="truncate text-sm font-medium">{ticket.code}</span>
-                    <ArrowUpRight className="size-3.5 text-muted-foreground group-hover:text-foreground" />
+      <section className="mt-3 rounded-lg border border-border/70 bg-background p-3">
+        <div className="flex items-center justify-between">
+          <div className="text-xs font-medium text-muted-foreground">草稿</div>
+          {state?.draft_version ? <Badge variant="outline">v{state.draft_version}</Badge> : null}
+        </div>
+        {hasDraft ? (
+          <div className="mt-3 space-y-3">
+            {state?.draft_summary && <p className="text-sm leading-6">{state.draft_summary}</p>}
+            {draftEntries.length > 0 && (
+              <div className="space-y-2">
+                {draftEntries.slice(0, 8).map(([key, value]) => (
+                  <div key={key} className="rounded-md bg-muted/45 px-2.5 py-2">
+                    <div className="text-[11px] text-muted-foreground">{key}</div>
+                    <div className="mt-0.5 break-words text-xs">{compactValue(value)}</div>
                   </div>
-                  <div className="mt-1 line-clamp-2 text-xs text-muted-foreground">{ticket.title}</div>
-                </Link>
-              ))}
-            </div>
-          ) : (
-            <div className="mt-3 text-sm text-muted-foreground">确认后沉淀为结构化工单</div>
-          )}
+                ))}
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="mt-3 text-sm text-muted-foreground">等待对话生成草稿</div>
+        )}
+      </section>
+
+      {prefillEntries.length > 0 && (
+        <section className="mt-3 rounded-lg border border-border/70 bg-background p-3">
+          <div className="text-xs font-medium text-muted-foreground">预填字段</div>
+          <div className="mt-3 space-y-2">
+            {prefillEntries.slice(0, 6).map(([key, value]) => (
+              <div key={key} className="flex items-start justify-between gap-3 text-xs">
+                <span className="text-muted-foreground">{key}</span>
+                <span className="min-w-0 flex-1 break-words text-right">{compactValue(value)}</span>
+              </div>
+            ))}
+          </div>
         </section>
-      </div>
+      )}
+
+      <section className="mt-3 rounded-lg border border-border/70 bg-background p-3">
+        <div className="text-xs font-medium text-muted-foreground">已创建工单</div>
+        {tickets.length > 0 ? (
+          <div className="mt-3 space-y-2">
+            {tickets.map((ticket) => (
+              <Link
+                key={ticket.id}
+                to={`/itsm/tickets/${ticket.id}`}
+                className="group block rounded-md border border-border/70 px-3 py-2 transition-colors hover:bg-accent/45"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className="truncate text-sm font-medium">{ticket.code}</span>
+                  <ArrowUpRight className="size-3.5 text-muted-foreground group-hover:text-foreground" />
+                </div>
+                <div className="mt-1 line-clamp-2 text-xs text-muted-foreground">{ticket.title}</div>
+              </Link>
+            ))}
+          </div>
+        ) : (
+          <div className="mt-3 text-sm text-muted-foreground">确认后沉淀为结构化工单</div>
+        )}
+      </section>
+    </div>
+  )
+}
+
+function ArtifactRail({
+  stateData,
+  tickets,
+  loading,
+}: {
+  stateData?: ServiceDeskSessionState
+  tickets: TicketItem[]
+  loading: boolean
+}) {
+  const [open, setOpen] = useState(false)
+  const view = stageView(stateData?.state?.stage)
+  const active = hasArtifacts(stateData, tickets)
+
+  return (
+    <aside className="pointer-events-none fixed bottom-24 right-4 z-30 flex shrink-0 md:pointer-events-auto md:static md:w-14 md:border-l md:border-border/70 md:bg-muted/12 md:py-3">
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="pointer-events-auto group flex w-10 flex-col items-center gap-2 rounded-lg border border-border/70 bg-background/88 px-2 py-3 text-muted-foreground shadow-[0_18px_45px_-32px_rgba(15,23,42,0.85)] backdrop-blur transition-colors hover:bg-background hover:text-foreground"
+      >
+        <span className="relative">
+          <FileStack className="size-4" />
+          {active && <span className={cn("absolute -right-1 -top-1 size-2 rounded-full", view.tone)} />}
+        </span>
+        <span className="text-[11px] [writing-mode:vertical-rl]">工件</span>
+      </button>
+      {loading && <Loader2 className="mt-3 size-3.5 animate-spin text-muted-foreground" />}
+      <Sheet open={open} onOpenChange={setOpen}>
+        <SheetContent
+          side="bottom"
+          className="h-[78vh] gap-0 rounded-t-2xl md:inset-y-0 md:left-auto md:right-0 md:bottom-auto md:h-full md:w-[390px] md:max-w-none md:rounded-none md:border-l md:border-t-0"
+        >
+          <SheetHeader className="border-b border-border/70 px-4 py-4">
+            <SheetTitle className="flex items-center gap-2 text-base">
+              <PanelRight className="size-4 text-muted-foreground" />
+              ITSM 工件
+            </SheetTitle>
+            <SheetDescription>{expectedActionLabel(stateData?.nextExpectedAction)}</SheetDescription>
+          </SheetHeader>
+          <ArtifactPanelContent stateData={stateData} tickets={tickets} loading={loading} />
+        </SheetContent>
+      </Sheet>
     </aside>
   )
 }
@@ -347,15 +480,20 @@ function ServiceDeskArtifacts({
 function ServiceDeskConversation({
   session,
   agentName,
+  initialPrompt,
+  onInitialPromptSent,
 }: {
   session: AgentSession
   agentName: string
+  initialPrompt?: string
+  onInitialPromptSent: () => void
 }) {
   const queryClient = useQueryClient()
   const [input, setInput] = useState("")
   const scrollRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const initialPromptSentRef = useRef(false)
 
   const { data: sessionData, isLoading } = useQuery({
     queryKey: ["ai-session", session.id],
@@ -394,6 +532,13 @@ function ServiceDeskConversation({
   })
 
   useEffect(() => {
+    if (!initialPrompt || initialPromptSentRef.current || isLoading) return
+    initialPromptSentRef.current = true
+    chat.sendMessage({ text: initialPrompt })
+    onInitialPromptSent()
+  }, [chat, initialPrompt, isLoading, onInitialPromptSent])
+
+  useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: isBusy ? "instant" : "smooth" })
   }, [chat.messages.length, isBusy])
 
@@ -422,19 +567,23 @@ function ServiceDeskConversation({
     sendMutation.mutate(text)
   }, [input, isBusy, sendMutation])
 
-  const showEmpty = !isLoading && qaPairs.length === 0
+  const showEmpty = !isLoading && qaPairs.length === 0 && !initialPrompt
 
   return (
-    <div className="flex min-h-0 flex-1 bg-background">
-      <main className="flex min-w-0 flex-1 flex-col">
+    <>
+      <main className="flex min-w-0 flex-1 flex-col bg-background">
         <div className="flex h-14 shrink-0 items-center justify-between border-b border-border/70 px-5">
-          <div className="min-w-0">
-            <div className="flex items-center gap-2">
-              <MessageSquare className="size-4 text-primary" />
-              <h1 className="truncate text-sm font-semibold">服务台</h1>
-              <Badge variant="secondary" className="font-normal">{agentName}</Badge>
+          <div className="flex min-w-0 items-center gap-3">
+            <div className="flex size-8 shrink-0 items-center justify-center rounded-full border border-primary/20 bg-primary/8 text-primary">
+              <Bot className="size-4" />
             </div>
-            <div className="mt-0.5 text-xs text-muted-foreground">{formatSessionTime(session.updatedAt)}</div>
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <h1 className="truncate text-sm font-semibold">IT 服务台</h1>
+                <StatusDot />
+              </div>
+              <div className="mt-0.5 truncate text-xs text-muted-foreground">{agentName} · {formatSessionTime(session.updatedAt)}</div>
+            </div>
           </div>
           <div className="flex items-center gap-2">
             {isBusy ? (
@@ -462,9 +611,9 @@ function ServiceDeskConversation({
               <div className="flex size-14 items-center justify-center rounded-full border border-primary/25 bg-primary/10 text-primary">
                 <Bot className="size-7" />
               </div>
-              <h2 className="mt-5 text-2xl font-semibold">IT 服务台已上岗</h2>
+              <h2 className="mt-5 text-2xl font-semibold">继续描述 IT 诉求</h2>
               <p className="mt-2 max-w-xl text-sm leading-6 text-muted-foreground">
-                直接描述诉求，智能体会澄清、填槽、生成草稿，并在你确认后沉淀为工单。
+                服务台会沿用当前会话上下文继续澄清、填槽和创建工单。
               </p>
             </div>
           ) : (
@@ -501,40 +650,35 @@ function ServiceDeskConversation({
         </div>
 
         <div className="shrink-0 border-t border-border/70 bg-background px-5 py-4">
-          <div className="mx-auto flex max-w-3xl items-end gap-2 rounded-lg border border-border/80 bg-muted/20 p-2">
-            <Textarea
-              ref={textareaRef}
+          <div className="mx-auto max-w-3xl">
+            <ServiceDeskComposer
               value={input}
-              onChange={(event) => setInput(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" && !event.shiftKey) {
-                  event.preventDefault()
-                  handleSend()
-                }
-              }}
-              placeholder="描述你的 IT 诉求..."
-              className="max-h-36 min-h-11 resize-none border-0 bg-transparent px-2 py-2 shadow-none focus-visible:ring-0"
+              onChange={setInput}
+              onSend={handleSend}
               disabled={isBusy}
+              pending={sendMutation.isPending}
+              placeholder="描述你的 IT 诉求..."
+              compact
             />
-            <Button type="button" size="icon" className="size-10 shrink-0" onClick={handleSend} disabled={!input.trim() || isBusy}>
-              {isBusy || sendMutation.isPending ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />}
-            </Button>
           </div>
         </div>
       </main>
 
-      <ServiceDeskArtifacts
+      <ArtifactRail
         stateData={stateQuery.data}
         tickets={ticketsQuery.data ?? []}
         loading={stateQuery.isLoading || ticketsQuery.isLoading}
       />
-    </div>
+    </>
   )
 }
 
 export function Component() {
   const queryClient = useQueryClient()
   const [selectedSessionId, setSelectedSessionId] = useState<number | null>(null)
+  const [createdSession, setCreatedSession] = useState<AgentSession | null>(null)
+  const [landingInput, setLandingInput] = useState("")
+  const [pendingInitialPrompt, setPendingInitialPrompt] = useState<{ sessionId: number; text: string } | null>(null)
 
   const { data: config, isLoading: configLoading } = useQuery({
     queryKey: ["itsm-engine-config"],
@@ -546,69 +690,112 @@ export function Component() {
 
   const sessionsQuery = useQuery({
     queryKey: ["ai-sessions", serviceDeskAgentId],
-    queryFn: () => sessionApi.list({ agentId: serviceDeskAgentId, page: 1, pageSize: 20 }),
+    queryFn: () => sessionApi.list({ agentId: serviceDeskAgentId, page: 1, pageSize: 30 }),
     enabled: serviceDeskAgentId > 0,
   })
 
   const sessions = sessionsQuery.data?.items ?? []
-  const activeSession = sessions.find((item) => item.id === selectedSessionId) ?? sessions[0] ?? null
-  const activeSessionId = activeSession?.id ?? null
+  const activeSession = selectedSessionId == null
+    ? null
+    : sessions.find((item) => item.id === selectedSessionId) ?? (createdSession?.id === selectedSessionId ? createdSession : null)
 
   const createSessionMutation = useMutation({
-    mutationFn: () => sessionApi.create(serviceDeskAgentId),
-    onSuccess: (session) => {
+    mutationFn: async (text: string) => {
+      const session = await sessionApi.create(serviceDeskAgentId)
+      return { session, text }
+    },
+    onSuccess: ({ session, text }) => {
+      setCreatedSession(session)
       setSelectedSessionId(session.id)
+      setPendingInitialPrompt({ sessionId: session.id, text })
+      setLandingInput("")
       queryClient.invalidateQueries({ queryKey: ["ai-sessions", serviceDeskAgentId] })
     },
     onError: (err) => toast.error(err.message),
   })
 
-  useEffect(() => {
-    if (serviceDeskAgentId <= 0) return
-    if (sessionsQuery.isLoading || sessionsQuery.isFetching) return
-    if (activeSessionId != null) return
-    if (createSessionMutation.isPending) return
-    createSessionMutation.mutate()
-  }, [activeSessionId, createSessionMutation, serviceDeskAgentId, sessionsQuery.isFetching, sessionsQuery.isLoading])
+  const handleLandingSend = useCallback(() => {
+    const text = landingInput.trim()
+    if (!text || serviceDeskAgentId <= 0 || createSessionMutation.isPending) return
+    createSessionMutation.mutate(text)
+  }, [createSessionMutation, landingInput, serviceDeskAgentId])
 
-  const seats = useMemo<AgentSeat[]>(() => [
-    {
-      key: "service-desk",
-      name: "IT 服务台",
-      role: serviceDeskAgentId > 0 ? "已上岗" : "未上岗",
-      status: serviceDeskAgentId > 0 ? "online" : "offline",
-      icon: Bot,
-    },
-    { key: "incident", name: "事件指挥官", role: "待上岗", status: "pending", icon: ShieldAlert },
-    { key: "change", name: "变更协同官", role: "待上岗", status: "pending", icon: GitPullRequestArrow },
-    { key: "problem", name: "问题分析师", role: "待上岗", status: "pending", icon: SearchCheck },
-  ], [serviceDeskAgentId])
+  const handleSelectSession = useCallback((sessionId: number) => {
+    setSelectedSessionId(sessionId)
+    setCreatedSession(null)
+    setPendingInitialPrompt(null)
+  }, [])
+
+  const handleNewSession = useCallback(() => {
+    setSelectedSessionId(null)
+    setCreatedSession(null)
+    setPendingInitialPrompt(null)
+    setLandingInput("")
+  }, [])
+
+  const clearPendingInitialPrompt = useCallback(() => {
+    setPendingInitialPrompt(null)
+  }, [])
 
   return (
-    <div className="flex h-[calc(100vh-3.5rem)] flex-col overflow-hidden bg-background">
-      <AgentDock seats={seats} activeKey="service-desk" />
-      {serviceDeskAgentId > 0 && (
-        <SessionStrip
-          sessions={sessions}
-          activeSessionId={activeSessionId}
-          creating={createSessionMutation.isPending}
-          onSelect={setSelectedSessionId}
-          onCreate={() => createSessionMutation.mutate()}
-        />
-      )}
+    <div className="grid h-[calc(100vh-3.5rem)] grid-cols-1 overflow-hidden bg-[linear-gradient(180deg,hsl(var(--background)),hsl(var(--muted)/0.18))] md:grid-cols-[240px_minmax(0,1fr)_56px]">
+      <ServiceDeskSidebar
+        sessions={sessions}
+        activeSessionId={activeSession?.id ?? null}
+        loading={sessionsQuery.isLoading}
+        onSelect={handleSelectSession}
+        onNew={handleNewSession}
+      />
+
       {serviceDeskAgentId <= 0 || configLoading ? (
-        <NotOnDutyState loading={configLoading} />
+        <main className="flex min-w-0 flex-1 flex-col">
+          <NotOnDutyState loading={configLoading} />
+        </main>
       ) : activeSession ? (
         <ServiceDeskConversation
           key={activeSession.id}
           session={activeSession}
           agentName={serviceDeskAgentName}
+          initialPrompt={pendingInitialPrompt?.sessionId === activeSession.id ? pendingInitialPrompt.text : undefined}
+          onInitialPromptSent={clearPendingInitialPrompt}
         />
       ) : (
-        <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
-          <Loader2 className="mr-2 size-4 animate-spin" />
-          启动服务台
-        </div>
+        <>
+          <main className="flex min-w-0 flex-1 flex-col">
+            <div className="flex h-14 shrink-0 items-center justify-between border-b border-border/70 px-5">
+              <div className="flex min-w-0 items-center gap-3">
+                <div className="flex size-8 shrink-0 items-center justify-center rounded-full border border-primary/20 bg-primary/8 text-primary">
+                  <Sparkles className="size-4" />
+                </div>
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2">
+                    <h1 className="truncate text-sm font-semibold">IT 服务台</h1>
+                    <StatusDot />
+                  </div>
+                  <div className="mt-0.5 truncate text-xs text-muted-foreground">{serviceDeskAgentName}</div>
+                </div>
+              </div>
+              <Button type="button" size="sm" variant="outline" className="md:hidden" onClick={handleNewSession}>
+                <Plus className="mr-1.5 size-3.5" />
+                新会话
+              </Button>
+            </div>
+            <WelcomeStage
+              agentName={serviceDeskAgentName}
+              value={landingInput}
+              onChange={setLandingInput}
+              onSend={handleLandingSend}
+              disabled={createSessionMutation.isPending}
+              pending={createSessionMutation.isPending}
+            />
+          </main>
+          <aside className="hidden w-14 shrink-0 border-l border-border/70 bg-muted/12 md:flex md:flex-col md:items-center md:py-3">
+            <div className="flex w-10 flex-col items-center gap-2 rounded-lg border border-border/60 bg-background/45 px-2 py-3 text-muted-foreground/50">
+              <FileStack className="size-4" />
+              <span className="text-[11px] [writing-mode:vertical-rl]">工件</span>
+            </div>
+          </aside>
+        </>
       )}
     </div>
   )

@@ -374,6 +374,9 @@
     "saveSuccess": "流程保存成功",
     "validationErrors": "流程校验错误",
     "editorTitle": "流程设计 - {{name}}",
+    "editorSubtitle": "横向编排节点、分支和自动化动作",
+    "paletteHint": "拖拽节点到画布，或在连线上插入节点",
+    "insertNode": "插入节点",
     "back": "返回",
     "notClassic": "仅经典引擎支持流程设计",
     "designWorkflow": "设计工作流",
@@ -395,6 +398,23 @@
       "inclusive": "包含网关",
       "subprocess": "子流程",
       "script": "脚本"
+    },
+    "nodeDesc": {
+      "start": "流程入口",
+      "end": "流程结束",
+      "form": "收集申请信息",
+      "approve": "人工审批判断",
+      "process": "人工处理节点",
+      "action": "执行服务动作",
+      "exclusive": "单一路径分支",
+      "notify": "发送通知",
+      "wait": "暂停等待",
+      "timer": "按时间唤醒",
+      "signal": "按信号唤醒",
+      "parallel": "并行推进",
+      "inclusive": "多路径分支",
+      "subprocess": "嵌套流程片段",
+      "script": "变量与脚本处理"
     },
     "prop": {
       "label": "名称",
@@ -452,9 +472,22 @@
     },
     "group": {
       "events": "事件",
+      "human": "人工节点",
+      "automation": "自动化",
+      "control": "控制节点",
+      "composite": "复合节点",
       "tasks": "任务",
       "gateways": "网关",
       "other": "其他"
+    },
+    "panel": {
+      "identity": "身份",
+      "execution": "执行",
+      "io": "输入输出"
+    },
+    "state": {
+      "active": "进行中",
+      "cancelled": "已取消"
     },
     "summary": {
       "formBound": "已绑定表单",

@@ -10,11 +10,17 @@ import {
   MarkerType,
 } from "@xyflow/react"
 import "@xyflow/react/dist/style.css"
+import { X } from "lucide-react"
+import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { nodeTypes } from "./nodes"
 import { edgeTypes } from "./custom-edges"
-import { type WFNodeData, NODE_COLORS } from "./types"
+import { applyDagreLayout } from "./auto-layout"
+import { getNodeAccent } from "./visual-data"
+import { WorkflowNodeIconGlyph } from "./visual"
+import { type WFNodeData, type WFEdgeData } from "./types"
 import type { ActivityItem, TokenItem } from "../../api"
+import "./style.css"
 
 interface WorkflowViewerProps {
   workflowJson: unknown
@@ -23,7 +29,7 @@ interface WorkflowViewerProps {
   currentActivityId?: number | null
 }
 
-export function WorkflowViewer({ workflowJson, activities, tokens = [] }: WorkflowViewerProps) {
+export function WorkflowViewer({ workflowJson, activities, tokens = [], currentActivityId = null }: WorkflowViewerProps) {
   const { t } = useTranslation("itsm")
   const [popoverNodeId, setPopoverNodeId] = useState<string | null>(null)
 
@@ -73,18 +79,23 @@ export function WorkflowViewer({ workflowJson, activities, tokens = [] }: Workfl
     const completedNodeIds = new Set<string>()
     const activeNodeIds = new Set<string>()
     const cancelledNodeIds = new Set<string>()
+    const failedNodeIds = new Set<string>()
 
     if (useTokenMode) {
       // Token-driven state
       for (const tk of tokens) {
         if (tk.status === "active") activeNodeIds.add(tk.nodeId)
         else if (tk.status === "completed") completedNodeIds.add(tk.nodeId)
+        else if (tk.status === "failed") failedNodeIds.add(tk.nodeId)
         else if (tk.status === "cancelled") cancelledNodeIds.add(tk.nodeId)
       }
     } else {
       // Fallback: activity-driven state
       for (const a of activities) {
+        if (a.id === currentActivityId) activeNodeIds.add(a.nodeId)
         if (a.status === "completed") completedNodeIds.add(a.nodeId)
+        else if (a.status === "failed") failedNodeIds.add(a.nodeId)
+        else if (a.status === "cancelled") cancelledNodeIds.add(a.nodeId)
         else if (a.status === "pending" || a.status === "in_progress") activeNodeIds.add(a.nodeId)
       }
     }
@@ -102,19 +113,22 @@ export function WorkflowViewer({ workflowJson, activities, tokens = [] }: Workfl
       const isActive = activeNodeIds.has(n.id)
       const isCompleted = completedNodeIds.has(n.id)
       const isCancelled = cancelledNodeIds.has(n.id)
-
-      let className = ""
-      if (isActive) className = "ring-2 ring-green-500 ring-offset-2 animate-pulse"
-      else if (isCompleted) className = "opacity-70"
-      else if (isCancelled) className = "opacity-50 line-through"
-      else className = "opacity-40"
+      const isFailed = failedNodeIds.has(n.id)
+      const workflowState: WFNodeData["_workflowState"] = isActive
+        ? "active"
+        : isFailed
+          ? "failed"
+          : isCompleted
+            ? "completed"
+            : isCancelled
+              ? "cancelled"
+              : "idle"
 
       return {
         id: n.id,
         type: nodeData.nodeType ?? (n.type === "workflow" ? "form" : n.type) ?? "form",
         position: n.position,
-        data: nodeData,
-        className,
+        data: { ...nodeData, _workflowState: workflowState },
         selectable: false,
         draggable: false,
       }
@@ -126,15 +140,16 @@ export function WorkflowViewer({ workflowJson, activities, tokens = [] }: Workfl
       target: e.target,
       type: "workflow",
       markerEnd: { type: MarkerType.ArrowClosed },
-      data: e.data,
-      style: visitedEdgeIds.has(e.id)
-        ? { stroke: "#22c55e", strokeWidth: 2 }
-        : { stroke: "#d4d4d8", strokeWidth: 1 },
-      animated: visitedEdgeIds.has(e.id),
+      data: {
+        ...e.data,
+        readonly: true,
+        visited: visitedEdgeIds.has(e.id),
+        failed: failedNodeIds.has(e.source) || failedNodeIds.has(e.target),
+      } satisfies WFEdgeData,
     }))
 
-    return { nodes, edges }
-  }, [workflowJson, activities, tokens, useTokenMode])
+    return { nodes: applyDagreLayout(nodes, edges), edges }
+  }, [workflowJson, activities, tokens, useTokenMode, currentActivityId])
 
   const onNodeClick = useCallback((_: React.MouseEvent, node: Node) => {
     setPopoverNodeId((prev) => (prev === node.id ? null : node.id))
@@ -147,42 +162,63 @@ export function WorkflowViewer({ workflowJson, activities, tokens = [] }: Workfl
   const popoverActivities = popoverNodeId ? (activitiesByNode.get(popoverNodeId) ?? []) : []
 
   return (
-    <div className="h-[400px] w-full rounded-md border">
-      <ReactFlow
-        nodes={nodes}
-        edges={edges}
-        nodeTypes={nodeTypes as any}
-        edgeTypes={edgeTypes}
-        onNodeClick={onNodeClick}
-        onPaneClick={onPaneClick}
-        nodesDraggable={false}
-        nodesConnectable={false}
-        elementsSelectable={false}
-        fitView
-        className="bg-muted/20"
-      >
-        <Background />
-        <Controls showInteractive={false} />
-        <MiniMap
-          nodeColor={(n) => {
-            const nodeData = n.data as unknown as WFNodeData
-            if (useTokenMode) {
-              const tks = tokensByNode.get(n.id)
-              if (tks?.some((tk) => tk.status === "active")) return "#22c55e"
-              if (tks?.some((tk) => tk.status === "completed")) return "#9ca3af"
-              return NODE_COLORS[nodeData?.nodeType] ?? "#6b7280"
-            }
-            // Activity fallback
-            const acts = activitiesByNode.get(n.id)
-            if (acts?.some((a) => a.status === "completed")) return "#22c55e"
-            if (acts?.some((a) => a.status === "pending" || a.status === "in_progress")) return "#3b82f6"
-            return NODE_COLORS[nodeData?.nodeType] ?? "#6b7280"
-          }}
-          maskColor="rgba(0,0,0,0.05)"
-        />
-      </ReactFlow>
+    <div className="flex min-h-[460px] overflow-hidden rounded-2xl border border-border/55 bg-white/38">
+      <div className="min-w-0 flex-1">
+        <ReactFlow
+          nodes={nodes}
+          edges={edges}
+          nodeTypes={nodeTypes}
+          edgeTypes={edgeTypes}
+          onNodeClick={onNodeClick}
+          onPaneClick={onPaneClick}
+          nodesDraggable={false}
+          nodesConnectable={false}
+          elementsSelectable={false}
+          fitView
+          className="workflow-builder-flow"
+        >
+          <Background gap={24} size={1.2} />
+          <Controls showInteractive={false} position="bottom-left" />
+          <MiniMap
+            position="bottom-right"
+            pannable
+            zoomable
+            nodeColor={(n) => {
+              const nodeData = n.data as unknown as WFNodeData
+              if (useTokenMode) {
+                const tks = tokensByNode.get(n.id)
+                if (tks?.some((tk) => tk.status === "active")) return "#2563eb"
+                if (tks?.some((tk) => tk.status === "completed")) return "#059669"
+                if (tks?.some((tk) => tk.status === "failed")) return "#dc2626"
+              }
+              return getNodeAccent(nodeData?.nodeType)
+            }}
+            maskColor="rgba(15,23,42,0.06)"
+          />
+        </ReactFlow>
+      </div>
       {popoverNodeId && (
-        <div className="border-t bg-muted/30 p-3 max-h-48 overflow-auto">
+        <aside className="w-[340px] shrink-0 overflow-auto border-l border-border/50 bg-white/70 p-4">
+          <div className="mb-3 flex items-center justify-between gap-2">
+            {(() => {
+              const node = nodes.find((item) => item.id === popoverNodeId)
+              const data = node?.data as unknown as WFNodeData | undefined
+              return (
+                <div className="flex min-w-0 items-center gap-2">
+                  <span className="flex size-7 shrink-0 items-center justify-center rounded-lg text-white" style={{ backgroundColor: getNodeAccent(data?.nodeType) }}>
+                    <WorkflowNodeIconGlyph nodeType={data?.nodeType} />
+                  </span>
+                  <div className="min-w-0">
+                    <div className="truncate text-sm font-semibold">{data?.label ?? popoverNodeId}</div>
+                    <div className="text-xs text-muted-foreground">{data?.nodeType ? t(`workflow.node.${data.nodeType}` as const) : t("workflow.viewer.activityDetail")}</div>
+                  </div>
+                </div>
+              )
+            })()}
+            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setPopoverNodeId(null)}>
+              <X className="h-3.5 w-3.5" />
+            </Button>
+          </div>
           {popoverActivities.length === 0 ? (
             <p className="text-xs text-muted-foreground">{t("workflow.viewer.noActivities")}</p>
           ) : (
@@ -210,10 +246,7 @@ export function WorkflowViewer({ workflowJson, activities, tokens = [] }: Workfl
               ))}
             </div>
           )}
-          <button className="mt-2 text-xs text-muted-foreground underline" onClick={() => setPopoverNodeId(null)}>
-            {t("workflow.viewer.close")}
-          </button>
-        </div>
+        </aside>
       )}
     </div>
   )
