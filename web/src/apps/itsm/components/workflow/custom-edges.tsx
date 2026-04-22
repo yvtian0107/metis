@@ -5,6 +5,7 @@ import {
   type EdgeProps,
   EdgeLabelRenderer,
   MarkerType,
+  Position,
   useReactFlow,
   type Edge,
   type Node,
@@ -25,6 +26,7 @@ import { WORKFLOW_NODE_GROUPS, getNodeAccent } from "./visual-data"
 import { WorkflowNodeIconGlyph } from "./visual"
 
 let insertedNodeId = 0
+const EDGE_HANDLE_GAP = 8
 
 function getInsertedNodeId() {
   insertedNodeId += 1
@@ -62,10 +64,12 @@ function WorkflowEdgeInner({
   const { t } = useTranslation("itsm")
   const { setNodes, setEdges } = useReactFlow()
   const [edgePath, labelX, labelY] = getBezierPath({
-    sourceX: sourceX + 8,
+    sourceX: sourceX + EDGE_HANDLE_GAP,
     sourceY,
-    targetX: targetX - 8,
+    sourcePosition: Position.Right,
+    targetX: targetX - EDGE_HANDLE_GAP,
     targetY,
+    targetPosition: Position.Left,
     curvature: 0.16,
   })
 
