@@ -464,8 +464,8 @@ func (e *SmartEngine) executeParallelPlan(tx *gorm.DB, ticketID uint, plan *Deci
 			}
 		}
 
-			e.recordTimeline(tx, ticketID, &act.ID, 0, "ai_decision_executed",
-				fmt.Sprintf("AI 并行处理活动：%s（组 %s，信心 %.0f%%）", decisionActivityName(da), groupID[:8], plan.Confidence*100),
+		e.recordTimeline(tx, ticketID, &act.ID, 0, "ai_decision_executed",
+			fmt.Sprintf("AI 并行处理活动：%s（组 %s，信心 %.0f%%）", decisionActivityName(da), groupID[:8], plan.Confidence*100),
 			plan.Reasoning)
 	}
 
@@ -706,6 +706,12 @@ func (e *SmartEngine) validateDecisionPlan(tx *gorm.DB, ticketID uint, plan *Dec
 	if !AllowedSmartStepTypes[plan.NextStepType] {
 		return fmt.Errorf("next_step_type %q 不合法", plan.NextStepType)
 	}
+	if plan.NextStepType == "complete" && len(plan.Activities) > 0 {
+		return fmt.Errorf("complete 决策不能包含活动")
+	}
+	if plan.NextStepType != "complete" && len(plan.Activities) == 0 {
+		return fmt.Errorf("next_step_type %q 必须包含至少一个活动", plan.NextStepType)
+	}
 
 	// Validate activities
 	for i, a := range plan.Activities {
@@ -724,6 +730,11 @@ func (e *SmartEngine) validateDecisionPlan(tx *gorm.DB, ticketID uint, plan *Dec
 			}
 			if !user.IsActive {
 				return fmt.Errorf("activities[%d].participant_id %d 用户未激活", i, *a.ParticipantID)
+			}
+		}
+		if isHumanActivityType(a.Type) {
+			if !e.hasResolvableHumanParticipant(a) {
+				return fmt.Errorf("activities[%d] 缺少可解析的处理人", i)
 			}
 		}
 
@@ -750,6 +761,16 @@ func (e *SmartEngine) validateDecisionPlan(tx *gorm.DB, ticketID uint, plan *Dec
 	}
 
 	return nil
+}
+
+func (e *SmartEngine) hasResolvableHumanParticipant(a DecisionActivity) bool {
+	if a.ParticipantID != nil && *a.ParticipantID > 0 {
+		return true
+	}
+	if a.ParticipantType == "position_department" && a.PositionCode != "" && a.DepartmentCode != "" {
+		return true
+	}
+	return e.configProvider != nil && e.configProvider.FallbackAssigneeID() > 0
 }
 
 func (e *SmartEngine) validateNoDuplicateCompletedHumanActivity(tx *gorm.DB, ticketID uint, plan *DecisionPlan) error {
@@ -1298,7 +1319,7 @@ const agenticOutputFormat = "## 输出要求\n\n" +
 	"- participant_type: \"user\" 需填 participant_id；\"position_department\" 需填 position_code + department_code。\n" +
 	"- position_code / department_code: 当 participant_type 为 position_department 时，填写岗位编码和部门编码。\n" +
 	"- action_id: 当 type 为 \"action\" 时，填写 decision.list_actions 返回的 action id。\n" +
-		"- reasoning: 你的推理过程（会展示给管理员查看）。\n" +
+	"- reasoning: 你的推理过程（会展示给管理员查看）。\n" +
 	"- confidence: 决策信心（0.0-1.0）。越高表示越确信。"
 
 // extractWorkflowHints extracts a structured step summary from WorkflowJSON
@@ -1320,7 +1341,7 @@ func extractWorkflowHints(workflowJSON string) string {
 					PositionCode   string `json:"position_code"`
 					DepartmentCode string `json:"department_code"`
 				} `json:"participants"`
-					GatewayDirection string `json:"gateway_direction"`
+				GatewayDirection string `json:"gateway_direction"`
 				ActionID         *uint  `json:"action_id"`
 			} `json:"data"`
 		} `json:"nodes"`
@@ -1446,7 +1467,7 @@ func extractWorkflowHints(workflowJSON string) string {
 			for _, ei := range outEdges[nodeID] {
 				queue = append(queue, wf.Edges[ei].Target)
 			}
-			case "process":
+		case "process":
 			participant := describeParticipants(node.Data.Participants)
 			desc = fmt.Sprintf("%d. **处理** [%s] — %s", step, label, participant)
 			for _, ei := range outEdges[nodeID] {

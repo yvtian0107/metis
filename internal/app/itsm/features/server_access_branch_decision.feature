@@ -18,7 +18,7 @@ Feature: 生产服务器临时访问申请 — 智能引擎分支决策
     When 智能引擎执行决策循环
     Then 工单状态为 "in_progress"
     And 当前活动类型为 "process"
-    And 当前处理分配到岗位 "ops_admin"
+    And 当前处理任务分配到岗位 "ops_admin"
     When 当前活动的被分配人认领并处理完成
     And 智能引擎执行决策循环直到工单完成
     Then 工单状态为 "completed"
@@ -28,7 +28,7 @@ Feature: 生产服务器临时访问申请 — 智能引擎分支决策
     When 智能引擎执行决策循环
     Then 工单状态为 "in_progress"
     And 当前活动类型为 "process"
-    And 当前处理分配到岗位 "network_admin"
+    And 当前处理任务分配到岗位 "network_admin"
     When 当前活动的被分配人认领并处理完成
     And 智能引擎执行决策循环直到工单完成
     Then 工单状态为 "completed"
@@ -38,7 +38,7 @@ Feature: 生产服务器临时访问申请 — 智能引擎分支决策
     When 智能引擎执行决策循环
     Then 工单状态为 "in_progress"
     And 当前活动类型为 "process"
-    And 当前处理分配到岗位 "security_admin"
+    And 当前处理任务分配到岗位 "security_admin"
     When 当前活动的被分配人认领并处理完成
     And 智能引擎执行决策循环直到工单完成
     Then 工单状态为 "completed"
@@ -48,7 +48,7 @@ Feature: 生产服务器临时访问申请 — 智能引擎分支决策
     When 智能引擎执行决策循环
     Then 工单状态为 "in_progress"
     And 当前活动类型为 "process"
-    And 当前处理分配到岗位 "security_admin"
+    And 当前处理任务分配到岗位 "security_admin"
     When 当前活动的被分配人认领并处理完成
     And 智能引擎执行决策循环直到工单完成
     Then 工单状态为 "completed"
@@ -58,8 +58,8 @@ Feature: 生产服务器临时访问申请 — 智能引擎分支决策
     When 智能引擎执行决策循环
     Then 工单状态为 "in_progress"
     And 当前活动类型为 "process"
-    And 当前处理分配到岗位 "ops_admin"
-    And 当前处理仅对 "ops-operator" 可见
+    And 当前处理任务分配到岗位 "ops_admin"
+    And 当前处理任务仅对 "ops-operator" 可见
     And "network-operator" 认领当前工单应失败
     And "security-operator" 处理当前工单应失败
     When 当前活动的被分配人认领并处理完成

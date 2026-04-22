@@ -426,11 +426,8 @@ func (e *testDecisionExecutor) Execute(ctx context.Context, agentID uint, req ap
 		{Role: llm.RoleUser, Content: req.UserMessage},
 	}
 
-	var tempPtr *float32
-	if agent.Temperature != 0 {
-		temp := float32(agent.Temperature)
-		tempPtr = &temp
-	}
+	temp := float32(agent.Temperature)
+	tempPtr := &temp
 	maxTokens := agent.MaxTokens
 	if maxTokens <= 0 {
 		maxTokens = 4096
@@ -940,11 +937,11 @@ func (bc *bddContext) whenSmartEngineDecisionCycleUntilComplete() error {
 			return nil
 		}
 
-			// Between retries (attempt > 1): auto-complete any pending activities the LLM created
-			// on previous cycles, so they don't block the completion decision.
-			if attempt > 1 {
-				bc.autoProcessBlockingActivities()
-			}
+		// Between retries (attempt > 1): auto-complete any pending activities the LLM created
+		// on previous cycles, so they don't block the completion decision.
+		if attempt > 1 {
+			bc.autoProcessBlockingActivities()
+		}
 
 		ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 		var completedID *uint

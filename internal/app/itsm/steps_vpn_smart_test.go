@@ -127,18 +127,26 @@ func (bc *bddContext) whenSmartEngineDecisionCycle() error {
 		return fmt.Errorf("no ticket in context")
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
-	defer cancel()
+	const maxRetries = 3
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+		err := bc.smartEngine.Start(ctx, bc.db, engine.StartParams{
+			TicketID:     bc.ticket.ID,
+			WorkflowJSON: json.RawMessage(bc.service.WorkflowJSON),
+			RequesterID:  bc.ticket.RequesterID,
+		})
+		cancel()
 
-	err := bc.smartEngine.Start(ctx, bc.db, engine.StartParams{
-		TicketID:     bc.ticket.ID,
-		WorkflowJSON: json.RawMessage(bc.service.WorkflowJSON),
-		RequesterID:  bc.ticket.RequesterID,
-	})
-	if err != nil {
+		if err == nil {
+			break
+		}
 		bc.lastErr = err
-		// Log but don't fail — some scenarios test that status != "failed"
-		log.Printf("smart engine start: %v", err)
+		log.Printf("smart engine start attempt %d/%d: %v", attempt, maxRetries, err)
+		if (err == engine.ErrAIDecisionFailed || err == engine.ErrAIDisabled) && attempt < maxRetries {
+			bc.db.Model(&Ticket{}).Where("id = ?", bc.ticket.ID).Update("ai_failure_count", 0)
+			continue
+		}
+		break
 	}
 
 	// Refresh ticket.

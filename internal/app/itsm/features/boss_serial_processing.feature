@@ -1,4 +1,4 @@
-Feature: 高风险变更协同申请（Boss）— 两级串行处理处理
+Feature: 高风险变更协同申请（Boss）— 两级串行处理
 
   智能引擎编排"首级指定用户处理→二级部门岗位处理→完成"流程，验证混合参与者类型、复杂表单保留、处理隔离和并行工单隔离。
 
@@ -17,10 +17,10 @@ Feature: 高风险变更协同申请（Boss）— 两级串行处理处理
     Given "boss-requester-1" 已创建高风险变更工单，场景为 "requester-1"
     When 智能引擎执行决策循环
     Then 工单状态为 "in_progress"
-    And 当前处理仅对 "serial-reviewer" 可见
+    And 当前处理任务仅对 "serial-reviewer" 可见
     When 当前活动的被分配人认领并处理完成
     And 智能引擎再次执行决策循环
-    Then 当前处理分配到岗位 "ops_admin"
+    Then 当前处理任务分配到岗位 "ops_admin"
     When 当前活动的被分配人认领并处理完成
     And 智能引擎执行决策循环直到工单完成
     Then 工单状态为 "completed"
@@ -29,11 +29,11 @@ Feature: 高风险变更协同申请（Boss）— 两级串行处理处理
     Given "boss-requester-1" 已创建高风险变更工单，场景为 "requester-1"
     When 智能引擎执行决策循环
     Then 工单状态为 "in_progress"
-    And 当前处理仅对 "serial-reviewer" 可见
+    And 当前处理任务仅对 "serial-reviewer" 可见
     And "ops-handler" 认领当前工单应失败
     When 当前活动的被分配人认领并处理完成
     And 智能引擎再次执行决策循环
-    Then 当前处理分配到岗位 "ops_admin"
+    Then 当前处理任务分配到岗位 "ops_admin"
     And "serial-reviewer" 认领当前工单应失败
     When 当前活动的被分配人认领并处理完成
     And 智能引擎执行决策循环直到工单完成

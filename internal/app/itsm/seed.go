@@ -206,7 +206,7 @@ func seedMenus(db *gorm.DB) error {
 	if err := db.Where("permission = ?", "itsm:ticket:history").Delete(&model.Menu{}).Error; err != nil {
 		slog.Warn("seed: failed to remove history ticket menu", "error", err)
 	}
-		// 服务台
+	// 服务台
 	seedMenu(db, &itsmDir.ID, "服务台", model.MenuTypeMenu, "/itsm/service-desk", "MessageSquare", "itsm:service-desk:use", 0)
 
 	// 我的工单
@@ -413,8 +413,8 @@ func seedPolicies(enforcer *casbin.Enforcer) error {
 		}
 	}
 
-		return nil
-	}
+	return nil
+}
 
 func seedPriorities(db *gorm.DB) error {
 	priorities := []Priority{
@@ -488,30 +488,30 @@ func seedServiceDefinitions(db *gorm.DB) error {
 	vpnAccessFormSchema := `{"version":1,"fields":[{"key":"vpn_account","type":"text","label":"VPN账号","description":"用于登录 VPN 的账号；用户给出的邮箱可直接作为 VPN 账号。","placeholder":"例如：wenhaowu@dev.com","required":true,"validation":[{"rule":"required","message":"请输入 VPN 账号"}],"width":"half"},{"key":"device_usage","type":"textarea","label":"设备与用途说明","description":"说明访问 VPN 的设备或用途；用户已经说明用途时不必额外追问设备型号。","placeholder":"例如：线上支持用、远程办公访问内网","required":true,"validation":[{"rule":"required","message":"请输入设备与用途说明"}],"width":"full","props":{"rows":3}},{"key":"request_kind","type":"textarea","label":"访问原因","description":"申请 VPN 的业务原因，可复用用户已说明的用途或支持场景。","placeholder":"例如：线上支持、故障排查、远程办公","required":true,"validation":[{"rule":"required","message":"请输入访问原因"}],"width":"full","props":{"rows":3}}],"layout":{"columns":2,"sections":[{"title":"VPN 开通信息","fields":["vpn_account","device_usage","request_kind"]}]}}`
 
 	seeds := []serviceSeed{
-			{
-				Name:              "Copilot 账号申请",
-				Code:              "copilot-account-request",
-				Description:       "用于验证服务申请与管理员处理闭环的内置服务。",
-				CatalogCode:       "account-access:provisioning",
-				SLACode:           "rapid-workplace",
-				IntakeFormSchema:  serviceRequestFormSchema,
-				CollaborationSpec: "收集提单用户的 Github 账号信息和申请理由（可选），交给信息部 IT管理员处理。处理任务完成后结束流程。",
-			},
+		{
+			Name:              "Copilot 账号申请",
+			Code:              "copilot-account-request",
+			Description:       "用于验证服务申请与管理员处理闭环的内置服务。",
+			CatalogCode:       "account-access:provisioning",
+			SLACode:           "rapid-workplace",
+			IntakeFormSchema:  serviceRequestFormSchema,
+			CollaborationSpec: "收集提单用户的 Github 账号信息和申请理由（可选），交给信息部 IT管理员处理。处理任务完成后结束流程。",
+		},
 		{
 			Name:              "高风险变更协同申请（Boss）",
 			Code:              "boss-serial-change-request",
-				Description:       "用于在系统内直接查看复杂表单、表格明细与两级串行处理流程图的 Boss 级内置服务。",
+			Description:       "用于在系统内直接查看复杂表单、表格明细与两级串行处理流程图的 Boss 级内置服务。",
 			CatalogCode:       "application-platform:release",
 			SLACode:           "infra-change",
-				CollaborationSpec: `用户在 IT 服务台提交高风险变更协同申请。服务台需要收集申请主题、申请类别、风险等级、期望完成时间、变更开始时间、变更结束时间、影响范围、回滚要求、影响模块以及变更明细表。申请类别必须支持：生产变更(prod_change)、访问授权(access_grant)、应急支持(emergency_support)。风险等级必须支持：低(low)、中(medium)、高(high)。回滚要求必须支持：需要(required)、不需要(not_required)。影响模块必须支持多选：网关(gateway)、支付(payment)、监控(monitoring)、订单(order)。变更明细表至少包含系统、资源、权限级别、生效时段、变更理由。权限级别必须支持：只读(read)、读写(read_write)。申请提交后，先交给总部处理人岗位处理，参与者类型必须使用 position_department，部门编码使用 headquarters，岗位编码使用 serial_reviewer。总部处理人完成处理后，再交给信息部运维管理员岗位处理，参与者类型必须使用 position_department，部门编码使用 it，岗位编码使用 ops_admin。运维管理员完成处理后直接结束流程。`,
-			},
+			CollaborationSpec: `用户在 IT 服务台提交高风险变更协同申请。服务台需要收集申请主题、申请类别、风险等级、期望完成时间、变更开始时间、变更结束时间、影响范围、回滚要求、影响模块以及变更明细表。申请类别必须支持：生产变更(prod_change)、访问授权(access_grant)、应急支持(emergency_support)。风险等级必须支持：低(low)、中(medium)、高(high)。回滚要求必须支持：需要(required)、不需要(not_required)。影响模块必须支持多选：网关(gateway)、支付(payment)、监控(monitoring)、订单(order)。变更明细表至少包含系统、资源、权限级别、生效时段、变更理由。权限级别必须支持：只读(read)、读写(read_write)。申请提交后，先交给总部处理人岗位处理，参与者类型必须使用 position_department，部门编码使用 headquarters，岗位编码使用 serial_reviewer。总部处理人完成处理后，再交给信息部运维管理员岗位处理，参与者类型必须使用 position_department，部门编码使用 it，岗位编码使用 ops_admin。运维管理员完成处理后直接结束流程。`,
+		},
 		{
 			Name:              "生产数据库备份白名单临时放行申请",
 			Code:              "db-backup-whitelist-action-e2e",
-				Description:       "用于验证请求节点预检动作、处理后自动放行动作与工单闭环。",
+			Description:       "用于验证请求节点预检动作、处理后自动放行动作与工单闭环。",
 			CatalogCode:       "application-platform:database",
 			SLACode:           "infra-change",
-				CollaborationSpec: `用户提交生产数据库备份白名单临时放行申请。系统先进入申请人请求节点，并在进入节点时自动执行预检动作，校验目标数据库、运维来源 IP 和放行时间窗信息是否齐备。申请人提交后，交给信息部数据库管理员岗位处理，参与者类型必须使用 position_department，部门编码使用 it，岗位编码使用 db_admin。数据库管理员完成处理后，在离开处理节点时自动执行白名单放行动作，并在动作成功后直接结束流程。`,
+			CollaborationSpec: `用户提交生产数据库备份白名单临时放行申请。系统先进入申请人请求节点，并在进入节点时自动执行预检动作，校验目标数据库、运维来源 IP 和放行时间窗信息是否齐备。申请人提交后，交给信息部数据库管理员岗位处理，参与者类型必须使用 position_department，部门编码使用 it，岗位编码使用 db_admin。数据库管理员完成处理后，在离开处理节点时自动执行白名单放行动作，并在动作成功后直接结束流程。`,
 			Actions: []ServiceAction{
 				{
 					Name: "备份白名单预检", Code: "backup_whitelist_precheck",
@@ -521,7 +521,7 @@ func seedServiceDefinitions(db *gorm.DB) error {
 				},
 				{
 					Name: "执行备份白名单放行", Code: "backup_whitelist_apply",
-						Description: "处理完成后自动执行数据库备份白名单放行。",
+					Description: "处理完成后自动执行数据库备份白名单放行。",
 					ActionType:  "http", IsActive: true,
 					ConfigJSON: JSONField(`{"url":"/apply","method":"POST","timeout_seconds":5}`),
 				},
@@ -530,33 +530,33 @@ func seedServiceDefinitions(db *gorm.DB) error {
 		{
 			Name:              "生产服务器临时访问申请",
 			Code:              "prod-server-temporary-access",
-				Description:       "用于验证生产服务器临时访问在主机运维、网络诊断与安全审计语境下的真实分支处理。",
+			Description:       "用于验证生产服务器临时访问在主机运维、网络诊断与安全审计语境下的真实分支处理。",
 			CatalogCode:       "infra-network:compute",
 			SLACode:           "critical-business",
-				CollaborationSpec: `用户在 IT 服务台提交生产服务器临时访问申请。服务台需要收集访问服务器、访问时段、操作目的和访问原因。如果访问原因属于应用发布、进程排障、日志排查、磁盘清理、主机巡检或生产运维操作，则交给信息部运维管理员岗位处理，参与者类型必须使用 position_department，部门编码使用 it，岗位编码使用 ops_admin。如果访问原因属于网络抓包、连通性诊断、ACL 调整、负载均衡变更或防火墙策略调整，则交给信息部网络管理员岗位处理，参与者类型必须使用 position_department，部门编码使用 it，岗位编码使用 network_admin。如果访问原因属于安全审计、入侵排查、漏洞修复验证、取证分析或合规检查，则交给信息部信息安全管理员岗位处理，参与者类型必须使用 position_department，部门编码使用 it，岗位编码使用 security_admin。处理任务完成后直接结束流程。`,
+			CollaborationSpec: `用户在 IT 服务台提交生产服务器临时访问申请。服务台需要收集访问服务器、访问时段、操作目的和访问原因。如果访问原因属于应用发布、进程排障、日志排查、磁盘清理、主机巡检或生产运维操作，则交给信息部运维管理员岗位处理，参与者类型必须使用 position_department，部门编码使用 it，岗位编码使用 ops_admin。如果访问原因属于网络抓包、连通性诊断、ACL 调整、负载均衡变更或防火墙策略调整，则交给信息部网络管理员岗位处理，参与者类型必须使用 position_department，部门编码使用 it，岗位编码使用 network_admin。如果访问原因属于安全审计、入侵排查、漏洞修复验证、取证分析或合规检查，则交给信息部信息安全管理员岗位处理，参与者类型必须使用 position_department，部门编码使用 it，岗位编码使用 security_admin。处理任务完成后直接结束流程。`,
 		},
 		{
 			Name:              "VPN 开通申请",
 			Code:              "vpn-access-request",
-				Description:       "用于验证 VPN 开通申请在服务匹配、拟提单确认与分支处理下的完整闭环。",
+			Description:       "用于验证 VPN 开通申请在服务匹配、拟提单确认与分支处理下的完整闭环。",
 			CatalogCode:       "infra-network:network",
 			SLACode:           "standard",
 			IntakeFormSchema:  vpnAccessFormSchema,
-				CollaborationSpec: `用户在 IT 服务台提交 VPN 开通申请。服务台需要收集 VPN 账号、设备与用途说明、访问原因。如果访问原因属于线上支持、故障排查、生产应急或网络接入问题，则交给信息部网络管理员岗位处理，参与者类型必须使用 position_department，部门编码使用 it，岗位编码使用 network_admin。如果访问原因属于外部协作、长期远程办公、跨境访问或安全合规事项，则交给信息部信息安全管理员岗位处理，参与者类型必须使用 position_department，部门编码使用 it，岗位编码使用 security_admin。处理任务完成后直接结束流程。`,
+			CollaborationSpec: `用户在 IT 服务台提交 VPN 开通申请。服务台需要收集 VPN 账号、设备与用途说明、访问原因。如果访问原因属于线上支持、故障排查、生产应急或网络接入问题，则交给信息部网络管理员岗位处理，参与者类型必须使用 position_department，部门编码使用 it，岗位编码使用 network_admin。如果访问原因属于外部协作、长期远程办公、跨境访问或安全合规事项，则交给信息部信息安全管理员岗位处理，参与者类型必须使用 position_department，部门编码使用 it，岗位编码使用 security_admin。处理任务完成后直接结束流程。`,
 		},
 	}
 
 	for _, s := range seeds {
 		var existing ServiceDefinition
-			if err := db.Where("code = ?", s.Code).First(&existing).Error; err == nil {
-				if existing.Description != s.Description || existing.CollaborationSpec != s.CollaborationSpec {
-					if err := db.Model(&existing).Update("collaboration_spec", s.CollaborationSpec).Error; err != nil {
-						slog.Error("seed: failed to update service collaboration spec", "code", s.Code, "error", err)
-					} else {
-						slog.Info("seed: updated service collaboration spec", "code", s.Code)
-					}
-					_ = db.Model(&existing).Update("description", s.Description).Error
+		if err := db.Where("code = ?", s.Code).First(&existing).Error; err == nil {
+			if existing.Description != s.Description || existing.CollaborationSpec != s.CollaborationSpec {
+				if err := db.Model(&existing).Update("collaboration_spec", s.CollaborationSpec).Error; err != nil {
+					slog.Error("seed: failed to update service collaboration spec", "code", s.Code, "error", err)
+				} else {
+					slog.Info("seed: updated service collaboration spec", "code", s.Code)
 				}
+				_ = db.Model(&existing).Update("description", s.Description).Error
+			}
 			if s.Code == "vpn-access-request" && s.IntakeFormSchema != "" && string(existing.IntakeFormSchema) != s.IntakeFormSchema {
 				if err := db.Model(&existing).Update("intake_form_schema", JSONField(s.IntakeFormSchema)).Error; err != nil {
 					slog.Error("seed: failed to update service intake form schema", "code", s.Code, "error", err)
@@ -778,9 +778,9 @@ participants 是数组，每个元素：
 - type: "user" | "position" | "department" | "position_department" | "requester_manager"
 
 各类型的附加字段：
-- user: name（用户名或标识）
-- position: name（岗位名称）
-- department: name（部门名称）
+- user: value（用户 ID 或用户名）
+- position: value（岗位 ID 或岗位编码）
+- department: value（部门 ID 或部门编码）
 - position_department: department_code（部门编码）+ position_code（岗位编码）
 - requester_manager: 无附加字段
 
@@ -788,7 +788,7 @@ participants 是数组，每个元素：
 当提到具体岗位（如"IT主管"）时，使用 position 类型。
 当提到部门（如"IT部门"）时，使用 department 类型。
 当提到特定部门中的特定岗位（如"信息部的网络管理员"）时，使用 position_department 类型，设置 department_code 和 position_code。
-当提到具体用户（如"serial-reviewer"）时，使用 user 类型，设置 name。
+当提到具体用户（如"serial-reviewer"）时，使用 user 类型，设置 value。
 
 ## 表单字段（formSchema）格式
 

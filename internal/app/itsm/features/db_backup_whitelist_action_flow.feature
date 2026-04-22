@@ -18,7 +18,7 @@ Feature: 数据库备份白名单临时放行 — 智能引擎 Action 元调用
     When 智能引擎执行决策循环
     Then 工单状态为 "in_progress"
     And 预检动作已为当前工单触发
-    And 当前处理分配到岗位 "db_admin"
+    And 当前处理任务分配到岗位 "db_admin"
     When 当前活动的被分配人认领并处理完成
     And 智能引擎执行决策循环直到工单完成
     Then 放行动作已为当前工单触发
@@ -28,8 +28,8 @@ Feature: 数据库备份白名单临时放行 — 智能引擎 Action 元调用
     Given "db-requester-1" 已创建数据库备份白名单放行工单，场景为 "requester-1"
     When 智能引擎执行决策循环
     Then 预检动作已为当前工单触发
-    And 当前处理分配到岗位 "db_admin"
-    And 当前处理仅对 "dba-operator" 可见
+    And 当前处理任务分配到岗位 "db_admin"
+    And 当前处理任务仅对 "dba-operator" 可见
     And "ops-operator" 认领当前工单应失败
     And 放行动作未为当前工单触发
     When 当前活动的被分配人认领并处理完成
@@ -41,7 +41,7 @@ Feature: 数据库备份白名单临时放行 — 智能引擎 Action 元调用
     Given "db-requester-1" 已创建数据库备份白名单放行工单 "A"，场景为 "requester-1"
     When 智能引擎执行决策循环
     Then 预检动作已为当前工单触发
-    And 当前处理分配到岗位 "db_admin"
+    And 当前处理任务分配到岗位 "db_admin"
     When 当前活动的被分配人认领并处理完成
     And 智能引擎执行决策循环直到工单完成
     Then 放行动作已为当前工单触发
@@ -49,7 +49,7 @@ Feature: 数据库备份白名单临时放行 — 智能引擎 Action 元调用
     Given "db-requester-2" 已创建数据库备份白名单放行工单 "B"，场景为 "requester-2"
     When 智能引擎执行决策循环
     Then 预检动作已为当前工单触发
-    And 当前处理分配到岗位 "db_admin"
+    And 当前处理任务分配到岗位 "db_admin"
     When 当前活动的被分配人认领并处理完成
     And 智能引擎执行决策循环直到工单完成
     Then 放行动作已为当前工单触发
