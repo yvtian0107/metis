@@ -2,12 +2,11 @@ import { useState } from "react"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
-import { Plus, Search, Shield, Pencil, Trash2, ShieldCheck, Database } from "lucide-react"
+import { Plus, Shield, Pencil, Trash2, ShieldCheck, Database } from "lucide-react"
 import { api } from "@/lib/api"
 import { usePermission } from "@/hooks/use-permission"
 import { useListPage } from "@/hooks/use-list-page"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import {
   DataTableActions,
@@ -18,7 +17,6 @@ import {
   DataTableLoadingRow,
   DataTablePagination,
   DataTableToolbar,
-  DataTableToolbarGroup,
 } from "@/components/ui/data-table"
 import {
   Table,
@@ -37,8 +35,12 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-  AlertDialogTrigger,
 } from "@/components/ui/alert-dialog"
+import {
+  WorkspaceAlertIconAction,
+  WorkspaceIconAction,
+  WorkspaceSearchField,
+} from "@/components/workspace/primitives"
 import { formatDateTime } from "@/lib/utils"
 import { RoleSheet } from "./role-sheet"
 import { PermissionDialog } from "./permission-dialog"
@@ -85,9 +87,11 @@ export function Component() {
   }
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold">{t("roles:title")}</h2>
+    <div className="workspace-page">
+      <div className="workspace-page-header">
+        <div>
+          <h2 className="workspace-page-title">{t("roles:title")}</h2>
+        </div>
         <Button size="sm" onClick={handleCreate} disabled={!canCreate}>
           <Plus className="mr-1.5 h-4 w-4" />
           {t("roles:createRole")}
@@ -95,22 +99,14 @@ export function Component() {
       </div>
 
       <DataTableToolbar>
-        <DataTableToolbarGroup>
-          <form onSubmit={handleSearch} className="flex w-full flex-col gap-2 sm:flex-row sm:items-center">
-            <div className="relative w-full sm:max-w-sm">
-              <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-              <Input
-                placeholder={t("roles:searchPlaceholder")}
-                value={keyword}
-                onChange={(e) => setKeyword(e.target.value)}
-                className="pl-8"
-              />
-            </div>
-            <Button type="submit" variant="outline">
-              {t("common:search")}
-            </Button>
-          </form>
-        </DataTableToolbarGroup>
+        <form onSubmit={handleSearch}>
+          <WorkspaceSearchField
+            value={keyword}
+            onChange={setKeyword}
+            placeholder={t("roles:searchPlaceholder")}
+            className="sm:w-80"
+          />
+        </form>
       </DataTableToolbar>
 
       <DataTableCard>
@@ -165,33 +161,16 @@ export function Component() {
                   <DataTableActionsCell>
                     <DataTableActions>
                       {canAssign && (
-                        <Button variant="ghost" size="sm" className="px-2.5" onClick={() => setPermRole(role)}>
-                          <Shield className="mr-1 h-3.5 w-3.5" />
-                          {t("roles:permissions")}
-                        </Button>
-                      )}                      {canUpdate && (
-                        <Button variant="ghost" size="sm" className="px-2.5" onClick={() => handleEdit(role)}>
-                          <Pencil className="mr-1 h-3.5 w-3.5" />
-                          {t("common:edit")}
-                        </Button>
+                        <WorkspaceIconAction label={t("roles:permissions")} icon={Shield} onClick={() => setPermRole(role)} />
+                      )}
+                      {canUpdate && (
+                        <WorkspaceIconAction label={t("common:edit")} icon={Pencil} onClick={() => handleEdit(role)} />
                       )}
                       {canDelete && (role.isSystem ? (
-                        <Button variant="ghost" size="sm" disabled className="px-2.5 text-muted-foreground">
-                          <Trash2 className="mr-1 h-3.5 w-3.5" />
-                          {t("common:delete")}
-                        </Button>
+                        <WorkspaceIconAction label={t("common:delete")} icon={Trash2} disabled />
                       ) : (
                         <AlertDialog>
-                          <AlertDialogTrigger asChild>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="px-2.5 text-destructive hover:text-destructive"
-                            >
-                              <Trash2 className="mr-1 h-3.5 w-3.5" />
-                              {t("common:delete")}
-                            </Button>
-                          </AlertDialogTrigger>
+                          <WorkspaceAlertIconAction label={t("common:delete")} icon={Trash2} className="hover:text-destructive" />
                           <AlertDialogContent>
                             <AlertDialogHeader>
                               <AlertDialogTitle>{t("roles:confirmDeleteTitle")}</AlertDialogTitle>

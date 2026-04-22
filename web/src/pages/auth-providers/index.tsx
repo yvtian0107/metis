@@ -5,7 +5,6 @@ import { Pencil, KeyRound } from "lucide-react"
 import { useState } from "react"
 import { api } from "@/lib/api"
 import { usePermission } from "@/hooks/use-permission"
-import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
 import {
   DataTableActionsCell,
@@ -22,6 +21,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import { WorkspaceIconAction } from "@/components/workspace/primitives"
 import { addKernelNamespace } from "@/i18n"
 import zhCNAuthProviders from "@/i18n/locales/zh-CN/authProviders.json"
 import enAuthProviders from "@/i18n/locales/en/authProviders.json"
@@ -55,9 +55,11 @@ export function Component() {
   }
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold">{t("title")}</h2>
+    <div className="workspace-page">
+      <div className="workspace-page-header">
+        <div>
+          <h2 className="workspace-page-title">{t("title")}</h2>
+        </div>
       </div>
 
       <DataTableCard>
@@ -110,15 +112,7 @@ export function Component() {
                   </TableCell>
                   <DataTableActionsCell className="text-center">
                     {canUpdate && (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="px-2.5"
-                        onClick={() => handleEdit(p)}
-                      >
-                        <Pencil className="mr-1 h-3.5 w-3.5" />
-                        {t("common:edit")}
-                      </Button>
+                      <WorkspaceIconAction label={t("common:edit")} icon={Pencil} onClick={() => handleEdit(p)} />
                     )}
                   </DataTableActionsCell>
                 </TableRow>

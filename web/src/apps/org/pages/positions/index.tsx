@@ -3,14 +3,12 @@
 import { useState } from "react"
 import { useTranslation } from "react-i18next"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
-import { Plus, Search, Pencil, Trash2, Briefcase, Building2, Users } from "lucide-react"
+import { Plus, Pencil, Trash2, Briefcase, Building2, Users } from "lucide-react"
 import { usePermission } from "@/hooks/use-permission"
 import { useListPage } from "@/hooks/use-list-page"
 import { api } from "@/lib/api"
-import { cn } from "@/lib/utils"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import {
   DataTableActions,
@@ -20,6 +18,7 @@ import {
   DataTableEmptyRow,
   DataTableLoadingRow,
   DataTablePagination,
+  DataTableToolbar,
 } from "@/components/ui/data-table"
 import {
   Table,
@@ -38,9 +37,14 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-  AlertDialogTrigger,
 } from "@/components/ui/alert-dialog"
 import { PositionSheet, type PositionItem } from "../../components/position-sheet"
+import {
+  WorkspaceAlertIconAction,
+  WorkspaceBooleanStatus,
+  WorkspaceIconAction,
+  WorkspaceSearchField,
+} from "@/components/workspace/primitives"
 
 export function Component() {
   const { t } = useTranslation(["org", "common"])
@@ -98,20 +102,16 @@ export function Component() {
         )}
       </div>
 
-      <form onSubmit={handleSearch} className="flex w-full flex-col gap-2 sm:flex-row sm:items-center">
-        <div className="relative w-full sm:max-w-sm">
-          <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-          <Input
-            placeholder={t("org:positions.searchPlaceholder")}
+      <DataTableToolbar>
+        <form onSubmit={handleSearch}>
+          <WorkspaceSearchField
             value={keyword}
-            onChange={(e) => setKeyword(e.target.value)}
-            className="workspace-toolbar-input pl-8"
+            onChange={setKeyword}
+            placeholder={t("org:positions.searchPlaceholder")}
+            className="sm:w-80"
           />
-        </div>
-        <Button type="submit" variant="outline" size="sm">
-          {t("common:search")}
-        </Button>
-      </form>
+        </form>
+      </DataTableToolbar>
 
       <DataTableCard>
         <Table>
@@ -181,25 +181,20 @@ export function Component() {
                     </div>
                   </TableCell>
                   <TableCell>
-                    <Badge variant="outline" className="gap-1.5 bg-transparent font-normal">
-                      <span className={cn("h-1.5 w-1.5 rounded-full", item.isActive ? "bg-emerald-500" : "bg-muted-foreground/45")} />
-                      {item.isActive ? t("org:positions.active") : t("org:positions.inactive")}
-                    </Badge>
+                    <WorkspaceBooleanStatus
+                      active={item.isActive}
+                      activeLabel={t("org:positions.active")}
+                      inactiveLabel={t("org:positions.inactive")}
+                    />
                   </TableCell>
                   <DataTableActionsCell>
                     <DataTableActions>
                       {canUpdate && (
-                        <Button variant="ghost" size="icon-sm" onClick={() => handleEdit(item)} aria-label={t("common:edit")} title={t("common:edit")}>
-                          <Pencil className="h-3.5 w-3.5" />
-                        </Button>
+                        <WorkspaceIconAction label={t("common:edit")} icon={Pencil} onClick={() => handleEdit(item)} />
                       )}
                       {canDelete && (
                         <AlertDialog>
-                          <AlertDialogTrigger asChild>
-                            <Button variant="ghost" size="icon-sm" className="text-destructive hover:text-destructive" aria-label={t("common:delete")} title={t("common:delete")}>
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </Button>
-                          </AlertDialogTrigger>
+                          <WorkspaceAlertIconAction label={t("common:delete")} icon={Trash2} className="hover:text-destructive" />
                           <AlertDialogContent>
                             <AlertDialogHeader>
                               <AlertDialogTitle>{t("org:positions.deleteTitle")}</AlertDialogTitle>

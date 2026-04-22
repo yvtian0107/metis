@@ -26,7 +26,7 @@ import {
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader,
-  AlertDialogTitle, AlertDialogTrigger,
+  AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import {
   Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription, SheetFooter,
@@ -39,6 +39,10 @@ import {
   fetchServiceDef, fetchServiceActions,
   createServiceAction, updateServiceAction, deleteServiceAction,
 } from "../../../api"
+import {
+  WorkspaceAlertIconAction,
+  WorkspaceIconAction,
+} from "@/components/workspace/primitives"
 
 function useActionSchema() {
   const { t } = useTranslation("itsm")
@@ -171,17 +175,11 @@ export function Component() {
                   <DataTableActionsCell>
                     <DataTableActions>
                       {canUpdate && (
-                        <Button variant="ghost" size="sm" className="px-2.5" onClick={() => { setEditing(item); setFormOpen(true) }}>
-                          <Pencil className="mr-1 h-3.5 w-3.5" />{t("common:edit")}
-                        </Button>
+                        <WorkspaceIconAction label={t("common:edit")} icon={Pencil} onClick={() => { setEditing(item); setFormOpen(true) }} />
                       )}
                       {canUpdate && (
                         <AlertDialog>
-                          <AlertDialogTrigger asChild>
-                            <Button variant="ghost" size="sm" className="px-2.5 text-destructive hover:text-destructive">
-                              <Trash2 className="mr-1 h-3.5 w-3.5" />{t("common:delete")}
-                            </Button>
-                          </AlertDialogTrigger>
+                          <WorkspaceAlertIconAction label={t("common:delete")} icon={Trash2} className="hover:text-destructive" />
                           <AlertDialogContent>
                             <AlertDialogHeader>
                               <AlertDialogTitle>{t("itsm:actions.deleteTitle")}</AlertDialogTitle>

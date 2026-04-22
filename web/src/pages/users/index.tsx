@@ -2,12 +2,11 @@ import { useState } from "react"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
-import { Plus, Search, Pencil, Power, Trash2, Users, KeyRound } from "lucide-react"
+import { Plus, Pencil, Power, Trash2, Users, KeyRound } from "lucide-react"
 import { api } from "@/lib/api"
 import { usePermission } from "@/hooks/use-permission"
 import { useListPage } from "@/hooks/use-list-page"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import {
   DataTableActions,
@@ -18,7 +17,6 @@ import {
   DataTableLoadingRow,
   DataTablePagination,
   DataTableToolbar,
-  DataTableToolbarGroup,
 } from "@/components/ui/data-table"
 import {
   Tooltip,
@@ -43,8 +41,13 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-  AlertDialogTrigger,
 } from "@/components/ui/alert-dialog"
+import {
+  WorkspaceAlertIconAction,
+  WorkspaceBooleanStatus,
+  WorkspaceIconAction,
+  WorkspaceSearchField,
+} from "@/components/workspace/primitives"
 import { cn, formatDateTime } from "@/lib/utils"
 import { UserSheet } from "./user-sheet"
 import type { User } from "@/stores/auth"
@@ -167,22 +170,14 @@ export function Component() {
       </div>
 
       <DataTableToolbar>
-        <DataTableToolbarGroup>
-          <form onSubmit={handleSearch} className="flex w-full flex-col gap-2 sm:flex-row sm:items-center">
-            <div className="relative w-full sm:max-w-sm">
-              <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-              <Input
-                placeholder={t("users:searchPlaceholder")}
-                value={keyword}
-                onChange={(e) => setKeyword(e.target.value)}
-                className="pl-8"
-              />
-            </div>
-            <Button type="submit" variant="outline">
-              {t("common:search")}
-            </Button>
-          </form>
-        </DataTableToolbarGroup>
+        <form onSubmit={handleSearch}>
+          <WorkspaceSearchField
+            value={keyword}
+            onChange={setKeyword}
+            placeholder={t("users:searchPlaceholder")}
+            className="sm:w-80"
+          />
+        </form>
       </DataTableToolbar>
 
       <DataTableCard>
@@ -242,9 +237,11 @@ export function Component() {
                     </div>
                   </TableCell>
                   <TableCell className="text-center">
-                    <Badge variant={user.isActive ? "default" : "outline"}>
-                      {user.isActive ? t("common:active") : t("common:inactive")}
-                    </Badge>
+                    <WorkspaceBooleanStatus
+                      active={user.isActive}
+                      activeLabel={t("common:active")}
+                      inactiveLabel={t("common:inactive")}
+                    />
                   </TableCell>
                   <TableCell className="text-center text-sm text-muted-foreground whitespace-nowrap tabular-nums">
                     {formatDateTime(user.createdAt)}
@@ -252,39 +249,23 @@ export function Component() {
                   <DataTableActionsCell>
                     <DataTableActions>
                       {canUpdate && (
-                        <Button variant="ghost" size="sm" className="px-2.5" onClick={() => handleEdit(user)}>
-                          <Pencil className="mr-1 h-3.5 w-3.5" />
-                          {t("common:edit")}
-                        </Button>
+                        <WorkspaceIconAction label={t("common:edit")} icon={Pencil} onClick={() => handleEdit(user)} />
                       )}
                       {canUpdate && (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="px-2.5"
+                        <WorkspaceIconAction
+                          label={user.isActive ? t("common:disable") : t("common:enable")}
+                          icon={Power}
                           onClick={() =>
                             toggleActiveMutation.mutate({
                               id: user.id,
                               active: !user.isActive,
                             })
                           }
-                        >
-                          <Power className="mr-1 h-3.5 w-3.5" />
-                          {user.isActive ? t("common:disable") : t("common:enable")}
-                        </Button>
+                        />
                       )}
                       {canDelete && (
                         <AlertDialog>
-                          <AlertDialogTrigger asChild>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="px-2.5 text-destructive hover:text-destructive"
-                            >
-                              <Trash2 className="mr-1 h-3.5 w-3.5" />
-                              {t("common:delete")}
-                            </Button>
-                          </AlertDialogTrigger>
+                          <WorkspaceAlertIconAction label={t("common:delete")} icon={Trash2} className="hover:text-destructive" />
                           <AlertDialogContent>
                             <AlertDialogHeader>
                               <AlertDialogTitle>{t("users:confirmDelete")}</AlertDialogTitle>

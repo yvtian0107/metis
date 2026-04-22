@@ -27,7 +27,7 @@ import {
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader,
-  AlertDialogTitle, AlertDialogTrigger,
+  AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import {
   Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription, SheetFooter,
@@ -36,11 +36,7 @@ import {
   Form, FormControl, FormField, FormItem, FormLabel, FormMessage,
 } from "@/components/ui/form"
 import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip"
-import {
+  WorkspaceAlertIconAction,
   WorkspaceSearchField,
   WorkspaceFormSection,
   WorkspaceIconAction,
@@ -214,17 +210,7 @@ function EscalationRules({ slaId }: { slaId: number }) {
                           )}
                           {canDelete && (
                             <AlertDialog>
-                              <Tooltip>
-                                <TooltipTrigger asChild>
-                                  <AlertDialogTrigger asChild>
-                                    <Button variant="ghost" size="icon-sm" className="text-muted-foreground hover:text-destructive">
-                                      <Trash2 className="h-3.5 w-3.5" />
-                                      <span className="sr-only">{t("common:delete")}</span>
-                                    </Button>
-                                  </AlertDialogTrigger>
-                                </TooltipTrigger>
-                                <TooltipContent side="top" sideOffset={6}>{t("common:delete")}</TooltipContent>
-                              </Tooltip>
+                              <WorkspaceAlertIconAction label={t("common:delete")} icon={Trash2} className="hover:text-destructive" />
                               <AlertDialogContent>
                                 <AlertDialogHeader>
                                   <AlertDialogTitle>{t("itsm:sla.escalation.deleteTitle")}</AlertDialogTitle>
@@ -470,23 +456,9 @@ export function Component() {
                         )}
                         {canDelete && (
                           <AlertDialog>
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <AlertDialogTrigger asChild>
-                                  <Button
-                                    type="button"
-                                    variant="ghost"
-                                    size="icon-sm"
-                                    className="text-muted-foreground hover:text-destructive"
-                                    onClick={(event) => event.stopPropagation()}
-                                  >
-                                    <Trash2 className="h-3.5 w-3.5" />
-                                    <span className="sr-only">{t("common:delete")}</span>
-                                  </Button>
-                                </AlertDialogTrigger>
-                              </TooltipTrigger>
-                              <TooltipContent side="top" sideOffset={6}>{t("common:delete")}</TooltipContent>
-                            </Tooltip>
+                            <span onClick={(event) => event.stopPropagation()}>
+                              <WorkspaceAlertIconAction label={t("common:delete")} icon={Trash2} className="hover:text-destructive" />
+                            </span>
                             <AlertDialogContent>
                               <AlertDialogHeader>
                                 <AlertDialogTitle>{t("itsm:sla.deleteTitle")}</AlertDialogTitle>

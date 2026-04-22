@@ -7,6 +7,7 @@ import { Search, X } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { AlertDialogTrigger } from "@/components/ui/alert-dialog"
 import {
   Tooltip,
   TooltipContent,
@@ -128,6 +129,40 @@ function WorkspaceIconAction({
   )
 }
 
+function WorkspaceAlertIconAction({
+  label,
+  icon: Icon,
+  className,
+  disabled,
+}: {
+  label: string
+  icon: LucideIcon
+  className?: string
+  disabled?: boolean
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <AlertDialogTrigger asChild>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            className={cn("text-muted-foreground hover:text-foreground", className)}
+            disabled={disabled}
+          >
+            <Icon className="h-3.5 w-3.5" />
+            <span className="sr-only">{label}</span>
+          </Button>
+        </AlertDialogTrigger>
+      </TooltipTrigger>
+      <TooltipContent side="top" sideOffset={6}>
+        {label}
+      </TooltipContent>
+    </Tooltip>
+  )
+}
+
 function WorkspaceFormSection({
   title,
   children,
@@ -163,6 +198,7 @@ function WorkspaceColorSwatch({
 
 export {
   WorkspaceBooleanStatus,
+  WorkspaceAlertIconAction,
   WorkspaceColorSwatch,
   WorkspaceFormSection,
   WorkspaceIconAction,

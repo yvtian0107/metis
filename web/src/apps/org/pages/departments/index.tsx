@@ -2,17 +2,17 @@ import { useState, useMemo } from "react"
 import { useTranslation } from "react-i18next"
 import { useQuery } from "@tanstack/react-query"
 import { useNavigate } from "react-router"
-import { Plus, Search, Network, ChevronRight } from "lucide-react"
+import { Plus, Network, ChevronRight } from "lucide-react"
 import { usePermission } from "@/hooks/use-permission"
 import { api } from "@/lib/api"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import {
   DataTableCard,
   DataTableEmptyRow,
   DataTableLoadingRow,
+  DataTableToolbar,
 } from "@/components/ui/data-table"
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
@@ -20,6 +20,10 @@ import {
 import type { TreeNode } from "../../types"
 import { collectAllIds } from "../../types"
 import { DepartmentSheet, type DepartmentItem } from "../../components/department-sheet"
+import {
+  WorkspaceBooleanStatus,
+  WorkspaceSearchField,
+} from "@/components/workspace/primitives"
 
 interface FlatNode extends TreeNode {
   depth: number
@@ -141,10 +145,11 @@ export function Component() {
             </span>
           </TableCell>
           <TableCell className="w-[110px]">
-            <Badge variant="outline" className="gap-1.5 bg-transparent font-normal">
-              <span className={cn("h-1.5 w-1.5 rounded-full", node.isActive ? "bg-emerald-500" : "bg-muted-foreground/45")} />
-              {node.isActive ? t("org:departments.active") : t("org:departments.inactive")}
-            </Badge>
+            <WorkspaceBooleanStatus
+              active={node.isActive}
+              activeLabel={t("org:departments.active")}
+              inactiveLabel={t("org:departments.inactive")}
+            />
           </TableCell>
           <TableCell className="w-[40px]">
             <ChevronRight className="h-4 w-4 text-muted-foreground/50 transition-colors group-hover:text-foreground" />
@@ -190,15 +195,14 @@ export function Component() {
         </div>
       </div>
 
-      <div className="relative w-full sm:max-w-sm">
-        <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-        <Input
-          placeholder={t("org:departments.searchPlaceholder")}
+      <DataTableToolbar>
+        <WorkspaceSearchField
           value={keyword}
-          onChange={(e) => setKeyword(e.target.value)}
-          className="workspace-toolbar-input pl-8"
+          onChange={setKeyword}
+          placeholder={t("org:departments.searchPlaceholder")}
+          className="sm:w-80"
         />
-      </div>
+      </DataTableToolbar>
 
       <DataTableCard>
         <Table>
@@ -255,10 +259,11 @@ export function Component() {
                       </span>
                     </TableCell>
                     <TableCell className="w-[110px]">
-                      <Badge variant="outline" className="gap-1.5 bg-transparent font-normal">
-                        <span className={cn("h-1.5 w-1.5 rounded-full", item.isActive ? "bg-emerald-500" : "bg-muted-foreground/45")} />
-                        {item.isActive ? t("org:departments.active") : t("org:departments.inactive")}
-                      </Badge>
+                      <WorkspaceBooleanStatus
+                        active={item.isActive}
+                        activeLabel={t("org:departments.active")}
+                        inactiveLabel={t("org:departments.inactive")}
+                      />
                     </TableCell>
                     <TableCell className="w-[40px]">
                       <ChevronRight className="h-4 w-4 text-muted-foreground/50 transition-colors group-hover:text-foreground" />

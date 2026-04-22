@@ -6,7 +6,6 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { Upload, Trash2, FileText, Loader2 } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
-import { Badge } from "@/components/ui/badge"
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table"
@@ -17,11 +16,12 @@ import {
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader,
-  AlertDialogTitle, AlertDialogTrigger,
+  AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import {
   fetchKnowledgeDocs, uploadKnowledgeDoc, deleteKnowledgeDoc,
 } from "../api"
+import { WorkspaceAlertIconAction, WorkspaceStatus } from "@/components/workspace/primitives"
 
 function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
@@ -33,13 +33,13 @@ function ParseStatusBadge({ status }: { status: string }) {
   const { t } = useTranslation("itsm")
   switch (status) {
     case "completed":
-      return <Badge variant="default" className="bg-green-600">{t("knowledge.statusCompleted")}</Badge>
+      return <WorkspaceStatus tone="success" label={t("knowledge.statusCompleted")} />
     case "processing":
-      return <Badge variant="default" className="bg-blue-600"><Loader2 className="mr-1 h-3 w-3 animate-spin" />{t("knowledge.statusProcessing")}</Badge>
+      return <WorkspaceStatus tone="info" label={<><Loader2 className="h-3 w-3 animate-spin" />{t("knowledge.statusProcessing")}</>} />
     case "failed":
-      return <Badge variant="destructive">{t("knowledge.statusFailed")}</Badge>
+      return <WorkspaceStatus tone="danger" label={t("knowledge.statusFailed")} />
     default:
-      return <Badge variant="secondary">{t("knowledge.statusPending")}</Badge>
+      return <WorkspaceStatus tone="neutral" label={t("knowledge.statusPending")} />
   }
 }
 
@@ -175,11 +175,7 @@ export function ServiceKnowledgeCard({ serviceId, title }: { serviceId: number; 
                   <DataTableActionsCell>
                     <DataTableActions>
                       <AlertDialog>
-                        <AlertDialogTrigger asChild>
-                          <Button variant="ghost" size="sm" className="px-2.5 text-destructive hover:text-destructive">
-                            <Trash2 className="mr-1 h-3.5 w-3.5" />{t("common:delete")}
-                          </Button>
-                        </AlertDialogTrigger>
+                        <WorkspaceAlertIconAction label={t("common:delete")} icon={Trash2} className="hover:text-destructive" />
                         <AlertDialogContent>
                           <AlertDialogHeader>
                             <AlertDialogTitle>{t("itsm:knowledge.deleteTitle")}</AlertDialogTitle>

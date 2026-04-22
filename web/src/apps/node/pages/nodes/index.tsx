@@ -2,14 +2,12 @@ import { useState } from "react"
 import { useNavigate } from "react-router"
 import { useTranslation } from "react-i18next"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
-import { Plus, Search, Server, Eye, Pencil, Trash2, Copy, Check } from "lucide-react"
+import { Plus, Server, Eye, Pencil, Trash2, Copy, Check } from "lucide-react"
 import { usePermission } from "@/hooks/use-permission"
 import { useListPage } from "@/hooks/use-list-page"
 import { api } from "@/lib/api"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Badge } from "@/components/ui/badge"
 import {
   DataTableActions,
   DataTableActionsCell,
@@ -45,7 +43,6 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-  AlertDialogTrigger,
 } from "@/components/ui/alert-dialog"
 import {
   Dialog,
@@ -56,7 +53,20 @@ import {
 } from "@/components/ui/dialog"
 import { formatDateTime } from "@/lib/utils"
 import { NodeSheet, type NodeItem } from "../../components/node-sheet"
-import { NODE_STATUS_VARIANTS } from "../../constants"
+import {
+  WorkspaceAlertIconAction,
+  WorkspaceIconAction,
+  WorkspaceSearchField,
+  WorkspaceStatus,
+  type WorkspaceStatusTone,
+} from "@/components/workspace/primitives"
+
+function nodeStatusTone(status: string): WorkspaceStatusTone {
+  if (status === "online") return "success"
+  if (status === "pending") return "warning"
+  if (status === "offline") return "neutral"
+  return "info"
+}
 
 export function Component() {
   const { t } = useTranslation(["node", "common"])
@@ -121,9 +131,11 @@ export function Component() {
   }
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold">{t("node:nodes.title")}</h2>
+    <div className="workspace-page">
+      <div className="workspace-page-header">
+        <div>
+          <h2 className="workspace-page-title">{t("node:nodes.title")}</h2>
+        </div>
         {canCreate && (
           <Button size="sm" onClick={handleCreate}>
             <Plus className="mr-1.5 h-4 w-4" />
@@ -135,15 +147,12 @@ export function Component() {
       <DataTableToolbar>
         <DataTableToolbarGroup>
           <form onSubmit={handleSearch} className="flex w-full flex-col gap-2 sm:flex-row sm:items-center">
-            <div className="relative w-full sm:max-w-sm">
-              <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-              <Input
-                placeholder={t("node:nodes.searchPlaceholder")}
-                value={keyword}
-                onChange={(e) => setKeyword(e.target.value)}
-                className="pl-8"
-              />
-            </div>
+            <WorkspaceSearchField
+              value={keyword}
+              onChange={setKeyword}
+              placeholder={t("node:nodes.searchPlaceholder")}
+              className="sm:w-80"
+            />
             <Select value={statusFilter || "all"} onValueChange={handleStatusFilter}>
               <SelectTrigger className="w-full sm:w-[130px]">
                 <SelectValue placeholder={t("node:nodes.allStatus")} />
@@ -186,12 +195,11 @@ export function Component() {
               />
             ) : (
               nodes.map((item) => {
-                const variant = NODE_STATUS_VARIANTS[item.status] ?? ("secondary" as const)
                 return (
                   <TableRow key={item.id} className="cursor-pointer" onClick={() => navigate(`/node/nodes/${item.id}`)}>
                     <TableCell className="font-medium">{item.name}</TableCell>
                     <TableCell>
-                      <Badge variant={variant}>{t(`node:status.${item.status}`, item.status)}</Badge>
+                      <WorkspaceStatus tone={nodeStatusTone(item.status)} label={t(`node:status.${item.status}`, item.status)} />
                     </TableCell>
                     <TableCell className="text-sm">{item.processCount}</TableCell>
                     <TableCell className="text-sm text-muted-foreground whitespace-nowrap">
@@ -202,39 +210,23 @@ export function Component() {
                     </TableCell>
                     <DataTableActionsCell>
                       <DataTableActions>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="px-2.5"
+                        <WorkspaceIconAction
+                          label={t("node:nodes.detail")}
+                          icon={Eye}
                           onClick={(e) => { e.stopPropagation(); navigate(`/node/nodes/${item.id}`) }}
-                        >
-                          <Eye className="mr-1 h-3.5 w-3.5" />
-                          {t("node:nodes.detail")}
-                        </Button>
+                        />
                         {canUpdate && (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="px-2.5"
+                          <WorkspaceIconAction
+                            label={t("common:edit")}
+                            icon={Pencil}
                             onClick={(e) => { e.stopPropagation(); handleEdit(item) }}
-                          >
-                            <Pencil className="mr-1 h-3.5 w-3.5" />
-                            {t("common:edit")}
-                          </Button>
+                          />
                         )}
                         {canDelete && (
                           <AlertDialog>
-                            <AlertDialogTrigger asChild>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="px-2.5 text-destructive hover:text-destructive"
-                                onClick={(e) => e.stopPropagation()}
-                              >
-                                <Trash2 className="mr-1 h-3.5 w-3.5" />
-                                {t("common:delete")}
-                              </Button>
-                            </AlertDialogTrigger>
+                            <span onClick={(e) => e.stopPropagation()}>
+                              <WorkspaceAlertIconAction label={t("common:delete")} icon={Trash2} className="hover:text-destructive" />
+                            </span>
                             <AlertDialogContent onClick={(e) => e.stopPropagation()}>
                               <AlertDialogHeader>
                                 <AlertDialogTitle>{t("node:nodes.deleteTitle")}</AlertDialogTitle>

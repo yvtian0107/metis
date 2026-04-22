@@ -1,13 +1,12 @@
 import { useState } from "react"
 import { useTranslation } from "react-i18next"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { Plus, Search, Cpu, Pencil, Trash2, Server } from "lucide-react"
+import { Plus, Cpu, Pencil, Trash2, Server } from "lucide-react"
 import { usePermission } from "@/hooks/use-permission"
 import { useListPage } from "@/hooks/use-list-page"
 import { api } from "@/lib/api"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import {
   DataTableActions,
@@ -18,7 +17,6 @@ import {
   DataTableLoadingRow,
   DataTablePagination,
   DataTableToolbar,
-  DataTableToolbarGroup,
 } from "@/components/ui/data-table"
 import {
   Table,
@@ -37,7 +35,6 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-  AlertDialogTrigger,
 } from "@/components/ui/alert-dialog"
 import {
   Sheet,
@@ -49,6 +46,11 @@ import {
 import { formatDateTime } from "@/lib/utils"
 import { ProcessDefSheet, type ProcessDefItem } from "../../components/process-def-sheet"
 import { NODE_STATUS_VARIANTS, PROCESS_STATUS_VARIANTS } from "../../constants"
+import {
+  WorkspaceAlertIconAction,
+  WorkspaceIconAction,
+  WorkspaceSearchField,
+} from "@/components/workspace/primitives"
 
 const RESTART_POLICY_VARIANTS: Record<string, "default" | "secondary" | "outline"> = {
   always: "default",
@@ -114,9 +116,11 @@ export function Component() {
   }
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold">{t("node:processDefs.title")}</h2>
+    <div className="workspace-page">
+      <div className="workspace-page-header">
+        <div>
+          <h2 className="workspace-page-title">{t("node:processDefs.title")}</h2>
+        </div>
         {canCreate && (
           <Button size="sm" onClick={handleCreate}>
             <Plus className="mr-1.5 h-4 w-4" />
@@ -126,22 +130,14 @@ export function Component() {
       </div>
 
       <DataTableToolbar>
-        <DataTableToolbarGroup>
-          <form onSubmit={handleSearch} className="flex w-full flex-col gap-2 sm:flex-row sm:items-center">
-            <div className="relative w-full sm:max-w-sm">
-              <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-              <Input
-                placeholder={t("node:processDefs.searchPlaceholder")}
-                value={keyword}
-                onChange={(e) => setKeyword(e.target.value)}
-                className="pl-8"
-              />
-            </div>
-            <Button type="submit" variant="outline">
-              {t("common:search")}
-            </Button>
-          </form>
-        </DataTableToolbarGroup>
+        <form onSubmit={handleSearch}>
+          <WorkspaceSearchField
+            value={keyword}
+            onChange={setKeyword}
+            placeholder={t("node:processDefs.searchPlaceholder")}
+            className="sm:w-80"
+          />
+        </form>
       </DataTableToolbar>
 
       <DataTableCard>
@@ -190,38 +186,17 @@ export function Component() {
                     </TableCell>
                     <DataTableActionsCell>
                       <DataTableActions>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="px-2.5"
+                        <WorkspaceIconAction
+                          label={t("node:processDefs.viewNodes")}
+                          icon={Server}
                           onClick={() => { setViewingDef(item); setNodesSheetOpen(true) }}
-                        >
-                          <Server className="mr-1 h-3.5 w-3.5" />
-                          {t("node:processDefs.viewNodes")}
-                        </Button>
+                        />
                         {canUpdate && (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="px-2.5"
-                            onClick={() => handleEdit(item)}
-                          >
-                            <Pencil className="mr-1 h-3.5 w-3.5" />
-                            {t("common:edit")}
-                          </Button>
+                          <WorkspaceIconAction label={t("common:edit")} icon={Pencil} onClick={() => handleEdit(item)} />
                         )}
                         {canDelete && (
                           <AlertDialog>
-                            <AlertDialogTrigger asChild>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="px-2.5 text-destructive hover:text-destructive"
-                              >
-                                <Trash2 className="mr-1 h-3.5 w-3.5" />
-                                {t("common:delete")}
-                              </Button>
-                            </AlertDialogTrigger>
+                            <WorkspaceAlertIconAction label={t("common:delete")} icon={Trash2} className="hover:text-destructive" />
                             <AlertDialogContent>
                               <AlertDialogHeader>
                                 <AlertDialogTitle>{t("node:processDefs.deleteTitle")}</AlertDialogTitle>

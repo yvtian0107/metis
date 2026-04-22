@@ -27,7 +27,7 @@ import {
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader,
-  AlertDialogTitle, AlertDialogTrigger,
+  AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import {
   Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription, SheetFooter,
@@ -36,15 +36,12 @@ import {
   Form, FormControl, FormField, FormItem, FormLabel, FormMessage,
 } from "@/components/ui/form"
 import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip"
-import {
+  WorkspaceAlertIconAction,
   WorkspaceSearchField,
   WorkspaceFormSection,
   WorkspaceIconAction,
   WorkspaceBooleanStatus,
+  WorkspaceColorSwatch,
 } from "@/components/workspace/primitives"
 import {
   type PriorityItem, fetchPriorities, createPriority, updatePriority, deletePriority,
@@ -77,14 +74,6 @@ function formatMinutes(minutes: number, unit: string) {
 
 function isHexColor(value: string) {
   return /^#[0-9a-fA-F]{6}$/.test(value)
-}
-
-function PrioritySwatch({ color }: { color: string }) {
-  return (
-    <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border/60 bg-background/40">
-      <span className="h-4 w-4 rounded-[0.35rem] border border-black/5" style={{ backgroundColor: color }} />
-    </span>
-  )
 }
 
 export function Component() {
@@ -215,7 +204,7 @@ export function Component() {
                 <TableRow key={item.id} className="hover:bg-muted/22">
                   <TableCell>
                     <div className="flex min-w-0 items-center gap-3">
-                      <PrioritySwatch color={item.color} />
+                      <WorkspaceColorSwatch color={item.color} />
                       <div className="min-w-0">
                         <div className="font-medium text-foreground/90">{item.name}</div>
                         <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
@@ -247,17 +236,7 @@ export function Component() {
                       )}
                       {canDelete && (
                         <AlertDialog>
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <AlertDialogTrigger asChild>
-                                <Button variant="ghost" size="icon-sm" className="text-muted-foreground hover:text-destructive">
-                                  <Trash2 className="h-3.5 w-3.5" />
-                                  <span className="sr-only">{t("common:delete")}</span>
-                                </Button>
-                              </AlertDialogTrigger>
-                            </TooltipTrigger>
-                            <TooltipContent side="top" sideOffset={6}>{t("common:delete")}</TooltipContent>
-                          </Tooltip>
+                          <WorkspaceAlertIconAction label={t("common:delete")} icon={Trash2} className="hover:text-destructive" />
                           <AlertDialogContent>
                             <AlertDialogHeader>
                               <AlertDialogTitle>{t("itsm:priorities.deleteTitle")}</AlertDialogTitle>

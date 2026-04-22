@@ -1,13 +1,12 @@
 import { useState } from "react"
 import { useTranslation } from "react-i18next"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
-import { Plus, Search, Pencil, Trash2, Mail, Send } from "lucide-react"
+import { Plus, Pencil, Trash2, Mail, Send } from "lucide-react"
 import { api } from "@/lib/api"
 import { usePermission } from "@/hooks/use-permission"
 import { useListPage } from "@/hooks/use-list-page"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { Switch } from "@/components/ui/switch"
 import {
@@ -19,7 +18,6 @@ import {
   DataTableLoadingRow,
   DataTablePagination,
   DataTableToolbar,
-  DataTableToolbarGroup,
 } from "@/components/ui/data-table"
 import {
   Table,
@@ -38,8 +36,12 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-  AlertDialogTrigger,
 } from "@/components/ui/alert-dialog"
+import {
+  WorkspaceAlertIconAction,
+  WorkspaceIconAction,
+  WorkspaceSearchField,
+} from "@/components/workspace/primitives"
 import { formatDateTime } from "@/lib/utils"
 import { addKernelNamespace } from "@/i18n"
 import zhCNChannels from "@/i18n/locales/zh-CN/channels.json"
@@ -100,9 +102,11 @@ export function Component() {
   }
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold">{t("title")}</h2>
+    <div className="workspace-page">
+      <div className="workspace-page-header">
+        <div>
+          <h2 className="workspace-page-title">{t("title")}</h2>
+        </div>
         {canCreate && (
           <Button size="sm" onClick={handleCreate}>
             <Plus className="mr-1.5 h-4 w-4" />
@@ -112,22 +116,14 @@ export function Component() {
       </div>
 
       <DataTableToolbar>
-        <DataTableToolbarGroup>
-          <form onSubmit={handleSearch} className="flex w-full flex-col gap-2 sm:flex-row sm:items-center">
-            <div className="relative w-full sm:max-w-sm">
-              <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-              <Input
-                placeholder={t("searchPlaceholder")}
-                value={keyword}
-                onChange={(e) => setKeyword(e.target.value)}
-                className="pl-8"
-              />
-            </div>
-            <Button type="submit" variant="outline">
-              {t("common:search")}
-            </Button>
-          </form>
-        </DataTableToolbarGroup>
+        <form onSubmit={handleSearch}>
+          <WorkspaceSearchField
+            value={keyword}
+            onChange={setKeyword}
+            placeholder={t("searchPlaceholder")}
+            className="sm:w-80"
+          />
+        </form>
       </DataTableToolbar>
 
       <DataTableCard>
@@ -175,29 +171,14 @@ export function Component() {
                   <DataTableActionsCell>
                     <DataTableActions>
                       {canUpdate && (
-                        <Button variant="ghost" size="sm" className="px-2.5" onClick={() => handleSendTest(item.id)}>
-                          <Send className="mr-1 h-3.5 w-3.5" />
-                          {t("sendTest")}
-                        </Button>
+                        <WorkspaceIconAction label={t("sendTest")} icon={Send} onClick={() => handleSendTest(item.id)} />
                       )}
                       {canUpdate && (
-                        <Button variant="ghost" size="sm" className="px-2.5" onClick={() => handleEdit(item)}>
-                          <Pencil className="mr-1 h-3.5 w-3.5" />
-                          {t("common:edit")}
-                        </Button>
+                        <WorkspaceIconAction label={t("common:edit")} icon={Pencil} onClick={() => handleEdit(item)} />
                       )}
                       {canDelete && (
                         <AlertDialog>
-                          <AlertDialogTrigger asChild>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="px-2.5 text-destructive hover:text-destructive"
-                            >
-                              <Trash2 className="mr-1 h-3.5 w-3.5" />
-                              {t("common:delete")}
-                            </Button>
-                          </AlertDialogTrigger>
+                          <WorkspaceAlertIconAction label={t("common:delete")} icon={Trash2} className="hover:text-destructive" />
                           <AlertDialogContent>
                             <AlertDialogHeader>
                               <AlertDialogTitle>{t("confirmDeleteTitle")}</AlertDialogTitle>
