@@ -315,6 +315,7 @@ export interface TicketItem {
   assigneeName: string
   currentActivityId: number | null
   source: string
+  agentSessionId: number | null
   aiFailureCount: number
   formData: unknown
   workflowJson: unknown
@@ -399,6 +400,35 @@ export function fetchMyTickets(params: {
   p.set("pageSize", String(params.pageSize ?? 20))
   return api.get<{ items: TicketItem[]; total: number }>(
     `/api/v1/itsm/tickets/mine?${p}`,
+  )
+}
+
+// ─── Service Desk ──────────────────────────────────────
+
+export interface ServiceDeskState {
+  stage: string
+  candidate_service_ids?: number[]
+  top_match_service_id?: number
+  confirmed_service_id?: number
+  confirmation_required: boolean
+  loaded_service_id?: number
+  draft_summary?: string
+  draft_form_data?: Record<string, unknown>
+  request_text?: string
+  prefill_form_data?: Record<string, unknown>
+  draft_version: number
+  confirmed_draft_version: number
+  fields_hash?: string
+}
+
+export interface ServiceDeskSessionState {
+  state: ServiceDeskState
+  nextExpectedAction: string
+}
+
+export function fetchServiceDeskSessionState(sessionId: number) {
+  return api.get<ServiceDeskSessionState>(
+    `/api/v1/itsm/service-desk/sessions/${sessionId}/state`,
   )
 }
 

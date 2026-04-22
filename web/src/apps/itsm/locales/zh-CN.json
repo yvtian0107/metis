@@ -1,8 +1,8 @@
 {
   "menuGroup": {
-    "service": "服务",
-    "ticket": "工单",
-    "config": "配置"
+    "workspace": "工作台",
+    "serviceConfig": "服务配置",
+    "systemConfig": "系统配置"
   },
   "forms": {
     "title": "表单管理",

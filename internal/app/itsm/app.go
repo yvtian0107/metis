@@ -216,6 +216,7 @@ func (a *ITSMApp) Providers(i do.Injector) {
 	do.Provide(i, NewWorkflowGenerateHandler)
 	do.Provide(i, NewVariableHandler)
 	do.Provide(i, NewTokenHandler)
+	do.Provide(i, NewServiceDeskHandler)
 
 	// ITSM tool chain (Operator, StateStore, Registry)
 	// NOTE: TicketService is resolved lazily inside withdrawFunc to break a circular
@@ -261,6 +262,7 @@ func (a *ITSMApp) Routes(api *gin.RouterGroup) {
 	workflowGenH := do.MustInvoke[*WorkflowGenerateHandler](a.injector)
 	variableH := do.MustInvoke[*VariableHandler](a.injector)
 	tokenH := do.MustInvoke[*TokenHandler](a.injector)
+	serviceDeskH := do.MustInvoke[*ServiceDeskHandler](a.injector)
 
 	g := api.Group("/itsm")
 	{
@@ -295,6 +297,9 @@ func (a *ITSMApp) Routes(api *gin.RouterGroup) {
 
 		// Workflow Generate
 		g.POST("/workflows/generate", workflowGenH.Generate)
+
+		// Service Desk
+		g.GET("/service-desk/sessions/:sid/state", serviceDeskH.State)
 
 		// Priorities
 		g.POST("/priorities", priorityH.Create)

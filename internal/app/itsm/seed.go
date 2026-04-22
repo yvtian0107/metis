@@ -203,8 +203,31 @@ func seedMenus(db *gorm.DB) error {
 		}
 	}
 
+	// 服务台
+	seedMenu(db, &itsmDir.ID, "服务台", model.MenuTypeMenu, "/itsm/service-desk", "MessageSquare", "itsm:service-desk:use", 0)
+
+	// 我的待办
+	seedMenu(db, &itsmDir.ID, "我的待办", model.MenuTypeMenu, "/itsm/tickets/todo", "Clock", "itsm:ticket:todo", 1)
+	// 我的审批
+	seedMenu(db, &itsmDir.ID, "我的审批", model.MenuTypeMenu, "/itsm/tickets/approvals", "CheckCircle", "itsm:ticket:approvals", 2)
+	// 我的工单
+	seedMenu(db, &itsmDir.ID, "我的工单", model.MenuTypeMenu, "/itsm/tickets/mine", "User", "itsm:ticket:mine", 3)
+
+	// 全部工单
+	allTicketMenu := seedMenu(db, &itsmDir.ID, "全部工单", model.MenuTypeMenu, "/itsm/tickets", "List", "itsm:ticket:list", 4)
+	seedButtons(db, allTicketMenu, []model.Menu{
+		{Name: "创建工单", Type: model.MenuTypeButton, Permission: "itsm:ticket:create", Sort: 0},
+		{Name: "指派工单", Type: model.MenuTypeButton, Permission: "itsm:ticket:assign", Sort: 1},
+		{Name: "完结工单", Type: model.MenuTypeButton, Permission: "itsm:ticket:complete", Sort: 2},
+		{Name: "取消工单", Type: model.MenuTypeButton, Permission: "itsm:ticket:cancel", Sort: 3},
+		{Name: "工单覆写", Type: model.MenuTypeButton, Permission: "itsm:ticket:override", Sort: 4},
+	})
+
+	// 历史工单
+	seedMenu(db, &itsmDir.ID, "历史工单", model.MenuTypeMenu, "/itsm/tickets/history", "Archive", "itsm:ticket:history", 5)
+
 	// 服务目录 (unified workspace: catalogs + services)
-	serviceMenu := seedMenu(db, &itsmDir.ID, "服务目录", model.MenuTypeMenu, "/itsm/services", "Cog", "itsm:service:list", 0)
+	serviceMenu := seedMenu(db, &itsmDir.ID, "服务目录", model.MenuTypeMenu, "/itsm/services", "Cog", "itsm:service:list", 6)
 	seedButtons(db, serviceMenu, []model.Menu{
 		{Name: "新增服务", Type: model.MenuTypeButton, Permission: "itsm:service:create", Sort: 0},
 		{Name: "编辑服务", Type: model.MenuTypeButton, Permission: "itsm:service:update", Sort: 1},
@@ -214,40 +237,20 @@ func seedMenus(db *gorm.DB) error {
 		{Name: "删除分类", Type: model.MenuTypeButton, Permission: "itsm:catalog:delete", Sort: 5},
 	})
 
-	// 全部工单
-	allTicketMenu := seedMenu(db, &itsmDir.ID, "全部工单", model.MenuTypeMenu, "/itsm/tickets", "List", "itsm:ticket:list", 2)
-	seedButtons(db, allTicketMenu, []model.Menu{
-		{Name: "创建工单", Type: model.MenuTypeButton, Permission: "itsm:ticket:create", Sort: 0},
-		{Name: "指派工单", Type: model.MenuTypeButton, Permission: "itsm:ticket:assign", Sort: 1},
-		{Name: "完结工单", Type: model.MenuTypeButton, Permission: "itsm:ticket:complete", Sort: 2},
-		{Name: "取消工单", Type: model.MenuTypeButton, Permission: "itsm:ticket:cancel", Sort: 3},
-		{Name: "工单覆写", Type: model.MenuTypeButton, Permission: "itsm:ticket:override", Sort: 4},
-	})
-
-	// 我的工单
-	seedMenu(db, &itsmDir.ID, "我的工单", model.MenuTypeMenu, "/itsm/tickets/mine", "User", "itsm:ticket:mine", 3)
-	// 我的待办
-	seedMenu(db, &itsmDir.ID, "我的待办", model.MenuTypeMenu, "/itsm/tickets/todo", "Clock", "itsm:ticket:todo", 4)
-	// 历史工单
-	seedMenu(db, &itsmDir.ID, "历史工单", model.MenuTypeMenu, "/itsm/tickets/history", "Archive", "itsm:ticket:history", 5)
-
-	// 我的审批
-	seedMenu(db, &itsmDir.ID, "我的审批", model.MenuTypeMenu, "/itsm/tickets/approvals", "CheckCircle", "itsm:ticket:approvals", 6)
-
-	// 优先级管理
-	priorityMenu := seedMenu(db, &itsmDir.ID, "优先级管理", model.MenuTypeMenu, "/itsm/priorities", "Flag", "itsm:priority:list", 7)
-	seedButtons(db, priorityMenu, []model.Menu{
-		{Name: "新增优先级", Type: model.MenuTypeButton, Permission: "itsm:priority:create", Sort: 0},
-		{Name: "编辑优先级", Type: model.MenuTypeButton, Permission: "itsm:priority:update", Sort: 1},
-		{Name: "删除优先级", Type: model.MenuTypeButton, Permission: "itsm:priority:delete", Sort: 2},
-	})
-
 	// SLA 管理
-	slaMenu := seedMenu(db, &itsmDir.ID, "SLA 管理", model.MenuTypeMenu, "/itsm/sla", "Timer", "itsm:sla:list", 8)
+	slaMenu := seedMenu(db, &itsmDir.ID, "SLA 管理", model.MenuTypeMenu, "/itsm/sla", "Timer", "itsm:sla:list", 7)
 	seedButtons(db, slaMenu, []model.Menu{
 		{Name: "新增SLA", Type: model.MenuTypeButton, Permission: "itsm:sla:create", Sort: 0},
 		{Name: "编辑SLA", Type: model.MenuTypeButton, Permission: "itsm:sla:update", Sort: 1},
 		{Name: "删除SLA", Type: model.MenuTypeButton, Permission: "itsm:sla:delete", Sort: 2},
+	})
+
+	// 优先级管理
+	priorityMenu := seedMenu(db, &itsmDir.ID, "优先级管理", model.MenuTypeMenu, "/itsm/priorities", "Flag", "itsm:priority:list", 8)
+	seedButtons(db, priorityMenu, []model.Menu{
+		{Name: "新增优先级", Type: model.MenuTypeButton, Permission: "itsm:priority:create", Sort: 0},
+		{Name: "编辑优先级", Type: model.MenuTypeButton, Permission: "itsm:priority:update", Sort: 1},
+		{Name: "删除优先级", Type: model.MenuTypeButton, Permission: "itsm:priority:delete", Sort: 2},
 	})
 
 	// 引擎配置
@@ -284,9 +287,15 @@ func seedMenu(db *gorm.DB, parentID *uint, name string, menuType model.MenuType,
 			return nil
 		}
 		slog.Info("seed: created menu", "name", menu.Name, "permission", menu.Permission)
-	} else if menu.Sort != sort || (parentID != nil && (menu.ParentID == nil || *menu.ParentID != *parentID)) {
-		// Sync sort and parent if drifted
-		db.Model(&menu).Updates(map[string]any{"sort": sort, "parent_id": parentID})
+	} else if menu.Name != name || menu.Type != menuType || menu.Path != path || menu.Icon != icon || menu.Sort != sort || (parentID != nil && (menu.ParentID == nil || *menu.ParentID != *parentID)) {
+		db.Model(&menu).Updates(map[string]any{
+			"name":      name,
+			"type":      menuType,
+			"path":      path,
+			"icon":      icon,
+			"sort":      sort,
+			"parent_id": parentID,
+		})
 	}
 	return &menu
 }
@@ -338,6 +347,8 @@ func seedPolicies(enforcer *casbin.Enforcer) error {
 		{"admin", "/api/v1/itsm/engine/config", "PUT"},
 		// Workflow Generate
 		{"admin", "/api/v1/itsm/workflows/generate", "POST"},
+		// Service Desk
+		{"admin", "/api/v1/itsm/service-desk/sessions/:sid/state", "GET"},
 		// Priorities
 		{"admin", "/api/v1/itsm/priorities", "POST"},
 		{"admin", "/api/v1/itsm/priorities", "GET"},
@@ -385,6 +396,7 @@ func seedPolicies(enforcer *casbin.Enforcer) error {
 
 	menuPerms := [][]string{
 		{"admin", "itsm", "read"},
+		{"admin", "itsm:service-desk:use", "read"},
 		{"admin", "itsm:catalog:create", "read"},
 		{"admin", "itsm:catalog:update", "read"},
 		{"admin", "itsm:catalog:delete", "read"},

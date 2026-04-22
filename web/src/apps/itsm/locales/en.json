@@ -1,8 +1,8 @@
 {
   "menuGroup": {
-    "service": "Service",
-    "ticket": "Ticket",
-    "config": "Config"
+    "workspace": "Workspace",
+    "serviceConfig": "Service Config",
+    "systemConfig": "System Config"
   },
   "forms": {
     "title": "Form Management",
