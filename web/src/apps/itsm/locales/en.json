@@ -290,7 +290,7 @@
     }
   },
   "tickets": {
-    "title": "Ticket Management",
+    "title": "Ticket Monitoring",
     "mine": "My Tickets",
     "mineDesc": "Shows tickets I submitted, for tracking request progress and historical results.",
     "approvalPending": "My Tasks",

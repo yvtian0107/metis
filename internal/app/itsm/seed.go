@@ -280,16 +280,22 @@ func seedMenus(db *gorm.DB) error {
 	if err := db.Where("permission = ?", "itsm:ticket:history").Delete(&model.Menu{}).Error; err != nil {
 		slog.Warn("seed: failed to remove history ticket menu", "error", err)
 	}
+	if err := db.Where("permission IN ?", []string{
+		"itsm:ticket:todo",
+		"itsm:ticket:approvals",
+		"itsm:ticket:approval:pending",
+	}).Delete(&model.Menu{}).Error; err != nil {
+		slog.Warn("seed: failed to remove obsolete approval menus", "error", err)
+	}
 	// 服务台
 	seedMenu(db, &itsmDir.ID, "服务台", model.MenuTypeMenu, "/itsm/service-desk", "Headset", "itsm:service-desk:use", 0)
 
 	// 我的工单
 	seedMenu(db, &itsmDir.ID, "我的工单", model.MenuTypeMenu, "/itsm/tickets/mine", "User", "itsm:ticket:mine", 1)
-	seedMenu(db, &itsmDir.ID, "我的待办", model.MenuTypeMenu, "/itsm/tickets/approvals/pending", "ClipboardCheck", "itsm:ticket:approval:pending", 2)
 	seedMenu(db, &itsmDir.ID, "历史工单", model.MenuTypeMenu, "/itsm/tickets/approvals/history", "History", "itsm:ticket:approval:history", 3)
 
-	// 工单管理
-	allTicketMenu := seedMenu(db, &itsmDir.ID, "工单管理", model.MenuTypeMenu, "/itsm/tickets", "List", "itsm:ticket:list", 4)
+	// 工单监控
+	allTicketMenu := seedMenu(db, &itsmDir.ID, "工单监控", model.MenuTypeMenu, "/itsm/tickets", "List", "itsm:ticket:list", 4)
 	seedButtons(db, allTicketMenu, []model.Menu{
 		{Name: "指派工单", Type: model.MenuTypeButton, Permission: "itsm:ticket:assign", Sort: 1},
 		{Name: "取消工单", Type: model.MenuTypeButton, Permission: "itsm:ticket:cancel", Sort: 3},

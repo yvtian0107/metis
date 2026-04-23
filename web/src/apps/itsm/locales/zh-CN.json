@@ -290,7 +290,7 @@
     }
   },
   "tickets": {
-    "title": "工单管理",
+    "title": "工单监控",
     "mine": "我的工单",
     "mineDesc": "只展示我自己提交的工单，用于跟踪请求进度和历史结果。",
     "approvalPending": "我的待办",

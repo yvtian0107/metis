@@ -22,9 +22,11 @@ registerApp({
       items: [
         "itsm:ticket:list",
         "itsm:service:list",
+        "itsm:priority:list",
+        "itsm:sla:list",
       ],
     },
-    { label: "systemConfig", items: ["itsm:sla:list", "itsm:priority:list", "itsm:engine:config"] },
+    { label: "systemConfig", items: ["itsm:engine:config"] },
   ],
   routes: [
     {
