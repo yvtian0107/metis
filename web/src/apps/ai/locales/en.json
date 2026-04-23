@@ -201,6 +201,10 @@
         "name": "Smart Decision",
         "description": "Ticket context queries, knowledge search, participant resolution, and other workflow decision capabilities."
       },
+      "sla": {
+        "name": "SLA Assurance",
+        "description": "Read SLA risks and escalation rules, then write assurance audit records."
+      },
       "organization": {
         "name": "Organization",
         "description": "Query personnel, department, and position relationships."

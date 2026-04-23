@@ -338,9 +338,9 @@ function ToolRuntimeConfigForm({ tool, canUpdate }: { tool: ToolItem; canUpdate:
   })
 
   return (
-    <div className="mt-4 border-t border-border/45 pt-4">
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-        <div>
+    <div className="mt-4 overflow-hidden border-t border-border/45 pt-4">
+      <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0 flex-1">
           <p className="text-sm font-medium">{t("ai:tools.builtin.runtimeTitle")}</p>
           <p className="mt-1 text-xs leading-5 text-muted-foreground">{t("ai:tools.builtin.runtimeDesc")}</p>
         </div>
@@ -354,7 +354,7 @@ function ToolRuntimeConfigForm({ tool, canUpdate }: { tool: ToolItem; canUpdate:
           {runtimeMutation.isPending ? t("common:saving") : t("common:save")}
         </Button>
       </div>
-      <div className="grid gap-4 lg:grid-cols-2 2xl:grid-cols-[minmax(160px,200px)_minmax(200px,260px)_minmax(220px,1fr)_140px_150px] 2xl:items-start">
+      <div className="grid min-w-0 gap-4 md:grid-cols-2">
         <div className="space-y-1.5">
           <Label>{t("ai:tools.builtin.provider")}</Label>
           <Select
@@ -391,7 +391,7 @@ function ToolRuntimeConfigForm({ tool, canUpdate }: { tool: ToolItem; canUpdate:
             </SelectContent>
           </Select>
         </div>
-        <div className="space-y-2">
+        <div className="space-y-2 md:col-span-2">
           <div className="flex items-center justify-between gap-3">
             <Label>{t("ai:tools.builtin.temperature")}</Label>
             <span className="rounded-full border border-border/55 bg-background/35 px-2 py-0.5 font-mono text-[11px] text-muted-foreground">{temperature.toFixed(2)}</span>

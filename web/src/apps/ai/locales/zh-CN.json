@@ -201,6 +201,10 @@
         "name": "智能决策",
         "description": "工单上下文查询、知识搜索、参与者解析等流程决策能力。"
       },
+      "sla": {
+        "name": "SLA 保障",
+        "description": "读取 SLA 风险、升级规则并写入保障审计的服务保障能力。"
+      },
       "organization": {
         "name": "组织架构",
         "description": "查询人员、部门、岗位关系信息。"
