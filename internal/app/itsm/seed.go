@@ -281,7 +281,7 @@ func seedMenus(db *gorm.DB) error {
 		slog.Warn("seed: failed to remove history ticket menu", "error", err)
 	}
 	// 服务台
-	seedMenu(db, &itsmDir.ID, "服务台", model.MenuTypeMenu, "/itsm/service-desk", "MessageSquare", "itsm:service-desk:use", 0)
+	seedMenu(db, &itsmDir.ID, "服务台", model.MenuTypeMenu, "/itsm/service-desk", "Headset", "itsm:service-desk:use", 0)
 
 	// 我的工单
 	seedMenu(db, &itsmDir.ID, "我的工单", model.MenuTypeMenu, "/itsm/tickets/mine", "User", "itsm:ticket:mine", 1)

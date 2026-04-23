@@ -43,12 +43,14 @@ import {
   Monitor,
   Clock,
   ClipboardList,
+  ClipboardCheck,
   Fingerprint,
   Package,
   Ticket,
   Activity,
   GitBranch,
   Network,
+  History,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -95,6 +97,7 @@ const icons = {
   Monitor,
   Clock,
   ClipboardList,
+  ClipboardCheck,
   Fingerprint,
   Package,
   Building2,
@@ -103,6 +106,7 @@ const icons = {
   Activity,
   GitBranch,
   Network,
+  History,
 };
 
 function normalizeIconName(name: string): string {
