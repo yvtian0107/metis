@@ -385,8 +385,7 @@
     "serviceRequired": "请选择服务",
     "priorityRequired": "请选择优先级",
     "assigneeRequired": "请选择处理人",
-    "reasonRequired": "请输入原因",
-    "opinionRequired": "请输入处理意见"
+    "reasonRequired": "请输入原因"
   },
   "workflow": {
     "nodeTypes": "节点类型",

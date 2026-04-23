@@ -31,7 +31,6 @@ var (
 	ErrNoActiveAssignment     = errors.New("no active pending assignment for this activity")
 	ErrNotRequester           = errors.New("only the ticket requester can withdraw")
 	ErrTicketClaimed          = errors.New("ticket has been claimed and cannot be withdrawn")
-	ErrOpinionRequired        = errors.New("处理意见不能为空")
 	ErrInvalidProgressOutcome = errors.New("人工节点只能提交 approved 或 rejected")
 )
 
@@ -609,9 +608,6 @@ func (s *TicketService) validateHumanProgress(ticketID uint, activityID uint, ou
 	case "approved", "rejected":
 	default:
 		return ErrInvalidProgressOutcome
-	}
-	if opinion == "" {
-		return ErrOpinionRequired
 	}
 	return nil
 }

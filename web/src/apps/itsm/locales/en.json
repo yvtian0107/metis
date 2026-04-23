@@ -385,8 +385,7 @@
     "serviceRequired": "Service is required",
     "priorityRequired": "Priority is required",
     "assigneeRequired": "Assignee is required",
-    "reasonRequired": "Reason is required",
-    "opinionRequired": "Opinion is required"
+    "reasonRequired": "Reason is required"
   },
   "workflow": {
     "nodeTypes": "Node Types",

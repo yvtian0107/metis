@@ -147,9 +147,8 @@ function useCancelSchema() {
 }
 
 function useApprovalSchema() {
-  const { t } = useTranslation("itsm")
   return z.object({
-    opinion: z.string().min(1, t("validation.opinionRequired")),
+    opinion: z.string(),
   })
 }
 
