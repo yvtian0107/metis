@@ -271,25 +271,42 @@ func (s *ServiceDefService) computePublishHealthCheck(svc *ServiceDefinition) *S
 }
 
 func (s *ServiceDefService) checkPathEngineRisk() *ServiceHealthItem {
-	var row struct {
-		ID      uint
-		ModelID *uint
-	}
-	if err := s.db.Table("ai_agents").Where("code = ?", smartTicketPathBuilderAgentKey).Select("id, model_id").First(&row).Error; err != nil {
-		return &ServiceHealthItem{
-			Key:     "path_engine",
-			Label:   "参考路径生成",
-			Status:  "fail",
-			Message: "参考路径生成能力不存在，无法生成协作路径",
-		}
-	}
-	if row.ModelID == nil || *row.ModelID == 0 {
+	modelID := strings.TrimSpace(s.systemConfigValue(smartTicketPathModelKey))
+	if modelID == "" || modelID == "0" {
 		return &ServiceHealthItem{
 			Key:     "path_engine",
 			Label:   "参考路径生成",
 			Status:  "fail",
 			Message: "参考路径生成未配置模型，无法生成协作路径",
 		}
+	}
+	id, err := strconv.ParseUint(modelID, 10, 64)
+	if err != nil || id == 0 || s.validateEngineModel(uint(id)) != nil {
+		return &ServiceHealthItem{
+			Key:     "path_engine",
+			Label:   "参考路径生成",
+			Status:  "fail",
+			Message: "参考路径生成模型不存在或未启用，无法生成协作路径",
+		}
+	}
+	return nil
+}
+
+func (s *ServiceDefService) validateEngineModel(modelID uint) error {
+	var modelRow struct {
+		ID             uint
+		Status         string
+		ProviderStatus string
+	}
+	if err := s.db.Table("ai_models").
+		Select("ai_models.id, ai_models.status, ai_providers.status AS provider_status").
+		Joins("JOIN ai_providers ON ai_providers.id = ai_models.provider_id").
+		Where("ai_models.id = ?", modelID).
+		First(&modelRow).Error; err != nil {
+		return err
+	}
+	if modelRow.Status != ai.ModelStatusActive || modelRow.ProviderStatus != ai.ProviderStatusActive {
+		return ErrModelNotFound
 	}
 	return nil
 }

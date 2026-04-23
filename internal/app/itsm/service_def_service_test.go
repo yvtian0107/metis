@@ -226,9 +226,9 @@ func TestServiceDefServiceRefreshPublishHealthCheck_CoreFailures(t *testing.T) {
 		{
 			name: "path engine model missing",
 			setup: func(t *testing.T, db *gorm.DB, service *ServiceDefinition, serviceAgent *ai.Agent, decisionAgent *ai.Agent) {
-				if err := db.Model(&ai.Agent{}).
-					Where("code = ?", smartTicketPathBuilderAgentKey).
-					Update("model_id", gorm.Expr("NULL")).Error; err != nil {
+				if err := db.Model(&model.SystemConfig{}).
+					Where("\"key\" = ?", smartTicketPathModelKey).
+					Update("value", "0").Error; err != nil {
 					t.Fatalf("clear path engine model: %v", err)
 				}
 			},
@@ -340,23 +340,33 @@ func setServiceHealthDecisionAgent(t *testing.T, db *gorm.DB, agentID uint) {
 	}
 }
 
-func seedServiceHealthPathEngine(t *testing.T, db *gorm.DB) ai.Agent {
+func seedServiceHealthPathEngine(t *testing.T, db *gorm.DB) ai.AIModel {
 	t.Helper()
-	modelID := uint(1)
-	code := smartTicketPathBuilderAgentKey
-	agent := ai.Agent{
-		Name:       "ITSM 参考路径生成",
-		Code:       &code,
-		Type:       ai.AgentTypeInternal,
-		ModelID:    &modelID,
-		IsActive:   true,
-		Visibility: ai.AgentVisibilityTeam,
-		CreatedBy:  1,
+	provider := ai.Provider{
+		Name:     "Path Provider",
+		Type:     ai.ProviderTypeOpenAI,
+		Protocol: "openai",
+		BaseURL:  "https://example.test",
+		Status:   ai.ProviderStatusActive,
 	}
-	if err := db.Create(&agent).Error; err != nil {
-		t.Fatalf("create path engine: %v", err)
+	if err := db.Create(&provider).Error; err != nil {
+		t.Fatalf("create path provider: %v", err)
 	}
-	return agent
+	pathModel := ai.AIModel{
+		ProviderID:  provider.ID,
+		ModelID:     "path-test",
+		DisplayName: "Path Test",
+		Type:        ai.ModelTypeLLM,
+		Status:      ai.ModelStatusActive,
+	}
+	if err := db.Create(&pathModel).Error; err != nil {
+		t.Fatalf("create path model: %v", err)
+	}
+	cfg := model.SystemConfig{Key: smartTicketPathModelKey, Value: fmt.Sprintf("%d", pathModel.ID)}
+	if err := db.Save(&cfg).Error; err != nil {
+		t.Fatalf("set path model config: %v", err)
+	}
+	return pathModel
 }
 
 func validServiceHealthWorkflow(userID uint) string {

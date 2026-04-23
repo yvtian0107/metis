@@ -20,8 +20,8 @@ func NewEngineConfigHandler(i do.Injector) (*EngineConfigHandler, error) {
 	}, nil
 }
 
-func (h *EngineConfigHandler) Get(c *gin.Context) {
-	cfg, err := h.svc.GetConfig()
+func (h *EngineConfigHandler) GetSmartStaffing(c *gin.Context) {
+	cfg, err := h.svc.GetSmartStaffingConfig()
 	if err != nil {
 		handler.Fail(c, http.StatusInternalServerError, err.Error())
 		return
@@ -29,14 +29,14 @@ func (h *EngineConfigHandler) Get(c *gin.Context) {
 	handler.OK(c, cfg)
 }
 
-func (h *EngineConfigHandler) Update(c *gin.Context) {
-	var req UpdateConfigRequest
+func (h *EngineConfigHandler) UpdateSmartStaffing(c *gin.Context) {
+	var req UpdateSmartStaffingRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		handler.Fail(c, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	if err := h.svc.UpdateConfig(&req); err != nil {
+	if err := h.svc.UpdateSmartStaffingConfig(&req); err != nil {
 		if errors.Is(err, ErrModelNotFound) || errors.Is(err, ErrAgentNotFound) || errors.Is(err, ErrFallbackUserNotFound) || errors.Is(err, ErrInvalidEngineConfig) {
 			handler.Fail(c, http.StatusBadRequest, err.Error())
 			return
@@ -48,6 +48,38 @@ func (h *EngineConfigHandler) Update(c *gin.Context) {
 	c.Set("audit_action", "itsm.smart_staffing.update")
 	c.Set("audit_resource", "itsm_smart_staffing")
 	c.Set("audit_summary", "Updated ITSM smart staffing configuration")
+
+	handler.OK(c, nil)
+}
+
+func (h *EngineConfigHandler) GetEngineSettings(c *gin.Context) {
+	cfg, err := h.svc.GetEngineSettingsConfig()
+	if err != nil {
+		handler.Fail(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+	handler.OK(c, cfg)
+}
+
+func (h *EngineConfigHandler) UpdateEngineSettings(c *gin.Context) {
+	var req UpdateEngineSettingsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		handler.Fail(c, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	if err := h.svc.UpdateEngineSettingsConfig(&req); err != nil {
+		if errors.Is(err, ErrModelNotFound) || errors.Is(err, ErrAgentNotFound) || errors.Is(err, ErrFallbackUserNotFound) || errors.Is(err, ErrInvalidEngineConfig) {
+			handler.Fail(c, http.StatusBadRequest, err.Error())
+			return
+		}
+		handler.Fail(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	c.Set("audit_action", "itsm.engine_settings.update")
+	c.Set("audit_resource", "itsm_engine_settings")
+	c.Set("audit_summary", "Updated ITSM engine settings")
 
 	handler.OK(c, nil)
 }

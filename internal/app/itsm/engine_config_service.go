@@ -19,11 +19,19 @@ const (
 	smartTicketDecisionAgentKey     = "itsm.smart_ticket.decision.agent_id"
 	smartTicketSLAAssuranceAgentKey = "itsm.smart_ticket.sla_assurance.agent_id"
 	smartTicketDecisionModeKey      = "itsm.smart_ticket.decision.mode"
-	smartTicketPathMaxRetriesKey    = "itsm.smart_ticket.path.max_retries"
-	smartTicketPathTimeoutKey       = "itsm.smart_ticket.path.timeout_seconds"
-	smartTicketGuardAuditLevelKey   = "itsm.smart_ticket.guard.audit_level"
-	smartTicketGuardFallbackKey     = "itsm.smart_ticket.guard.fallback_assignee"
-	smartTicketPathBuilderAgentKey  = "itsm.path_builder"
+
+	smartTicketServiceMatcherModelKey       = "itsm.smart_ticket.service_matcher.model_id"
+	smartTicketServiceMatcherTemperatureKey = "itsm.smart_ticket.service_matcher.temperature"
+	smartTicketServiceMatcherMaxTokensKey   = "itsm.smart_ticket.service_matcher.max_tokens"
+	smartTicketServiceMatcherTimeoutKey     = "itsm.smart_ticket.service_matcher.timeout_seconds"
+
+	smartTicketPathModelKey       = "itsm.smart_ticket.path.model_id"
+	smartTicketPathTemperatureKey = "itsm.smart_ticket.path.temperature"
+	smartTicketPathMaxRetriesKey  = "itsm.smart_ticket.path.max_retries"
+	smartTicketPathTimeoutKey     = "itsm.smart_ticket.path.timeout_seconds"
+
+	smartTicketGuardAuditLevelKey = "itsm.smart_ticket.guard.audit_level"
+	smartTicketGuardFallbackKey   = "itsm.smart_ticket.guard.fallback_assignee"
 )
 
 var (
@@ -34,10 +42,11 @@ var (
 	ErrInvalidEngineConfig  = errors.New("ITSM 配置无效")
 )
 
-// EngineConfigService manages ITSM smart staffing configuration.
+// EngineConfigService manages ITSM smart staffing and model-engine runtime settings.
 type EngineConfigService struct {
 	agentSvc      *ai.AgentService
 	modelRepo     *ai.ModelRepo
+	providerSvc   *ai.ProviderService
 	sysConfigRepo *repository.SysConfigRepo
 	db            *gorm.DB
 }
@@ -47,15 +56,15 @@ func NewEngineConfigService(i do.Injector) (*EngineConfigService, error) {
 	return &EngineConfigService{
 		agentSvc:      do.MustInvoke[*ai.AgentService](i),
 		modelRepo:     do.MustInvoke[*ai.ModelRepo](i),
+		providerSvc:   do.MustInvoke[*ai.ProviderService](i),
 		sysConfigRepo: do.MustInvoke[*repository.SysConfigRepo](i),
 		db:            db.DB,
 	}, nil
 }
 
 type SmartStaffingConfig struct {
-	Posts   SmartStaffingPosts   `json:"posts"`
-	Runtime SmartStaffingRuntime `json:"runtime"`
-	Health  EngineHealth         `json:"health"`
+	Posts  SmartStaffingPosts `json:"posts"`
+	Health EngineHealth       `json:"health"`
 }
 
 type SmartStaffingPosts struct {
@@ -64,9 +73,15 @@ type SmartStaffingPosts struct {
 	SLAAssurance EngineAgentSelector  `json:"slaAssurance"`
 }
 
-type SmartStaffingRuntime struct {
-	PathBuilder EnginePathConfig  `json:"pathBuilder"`
-	Guard       EngineGuardConfig `json:"guard"`
+type EngineSettingsConfig struct {
+	Runtime EngineSettingsRuntime `json:"runtime"`
+	Health  EngineHealth          `json:"health"`
+}
+
+type EngineSettingsRuntime struct {
+	ServiceMatcher EngineServiceMatcherConfig `json:"serviceMatcher"`
+	PathBuilder    EnginePathConfig           `json:"pathBuilder"`
+	Guard          EngineGuardConfig          `json:"guard"`
 }
 
 type EngineAgentSelector struct {
@@ -79,14 +94,24 @@ type EngineDecisionConfig struct {
 	Mode string `json:"mode"`
 }
 
+type EngineModelConfig struct {
+	ModelID      uint    `json:"modelId"`
+	ProviderID   uint    `json:"providerId"`
+	ProviderName string  `json:"providerName"`
+	ModelName    string  `json:"modelName"`
+	Temperature  float64 `json:"temperature"`
+}
+
+type EngineServiceMatcherConfig struct {
+	EngineModelConfig
+	MaxTokens      int `json:"maxTokens"`
+	TimeoutSeconds int `json:"timeoutSeconds"`
+}
+
 type EnginePathConfig struct {
-	ModelID        uint    `json:"modelId"`
-	ProviderID     uint    `json:"providerId"`
-	ProviderName   string  `json:"providerName"`
-	ModelName      string  `json:"modelName"`
-	Temperature    float64 `json:"temperature"`
-	MaxRetries     int     `json:"maxRetries"`
-	TimeoutSeconds int     `json:"timeoutSeconds"`
+	EngineModelConfig
+	MaxRetries     int `json:"maxRetries"`
+	TimeoutSeconds int `json:"timeoutSeconds"`
 }
 
 type EngineGuardConfig struct {
@@ -105,7 +130,7 @@ type EngineHealthItem struct {
 	Message string `json:"message"`
 }
 
-type UpdateConfigRequest struct {
+type UpdateSmartStaffingRequest struct {
 	Posts struct {
 		Intake struct {
 			AgentID uint `json:"agentId"`
@@ -118,7 +143,16 @@ type UpdateConfigRequest struct {
 			AgentID uint `json:"agentId"`
 		} `json:"slaAssurance"`
 	} `json:"posts"`
+}
+
+type UpdateEngineSettingsRequest struct {
 	Runtime struct {
+		ServiceMatcher struct {
+			ModelID        uint    `json:"modelId"`
+			Temperature    float64 `json:"temperature"`
+			MaxTokens      int     `json:"maxTokens"`
+			TimeoutSeconds int     `json:"timeoutSeconds"`
+		} `json:"serviceMatcher"`
 		PathBuilder struct {
 			ModelID        uint    `json:"modelId"`
 			Temperature    float64 `json:"temperature"`
@@ -132,7 +166,18 @@ type UpdateConfigRequest struct {
 	} `json:"runtime"`
 }
 
-func (s *EngineConfigService) GetConfig() (*SmartStaffingConfig, error) {
+type LLMEngineRuntimeConfig struct {
+	Model          string
+	Protocol       string
+	BaseURL        string
+	APIKey         string
+	Temperature    float64
+	MaxTokens      int
+	MaxRetries     int
+	TimeoutSeconds int
+}
+
+func (s *EngineConfigService) GetSmartStaffingConfig() (*SmartStaffingConfig, error) {
 	cfg := &SmartStaffingConfig{
 		Posts: SmartStaffingPosts{
 			Intake: s.readAgentSelector(smartTicketIntakeAgentKey),
@@ -142,16 +187,12 @@ func (s *EngineConfigService) GetConfig() (*SmartStaffingConfig, error) {
 			},
 			SLAAssurance: s.readAgentSelector(smartTicketSLAAssuranceAgentKey),
 		},
-		Runtime: SmartStaffingRuntime{
-			PathBuilder: s.readPathConfig(),
-			Guard:       s.readGuardConfig(),
-		},
 	}
-	cfg.Health = s.buildHealth(cfg)
+	cfg.Health = s.buildSmartStaffingHealth(cfg)
 	return cfg, nil
 }
 
-func (s *EngineConfigService) UpdateConfig(req *UpdateConfigRequest) error {
+func (s *EngineConfigService) UpdateSmartStaffingConfig(req *UpdateSmartStaffingRequest) error {
 	if req.Posts.Intake.AgentID > 0 {
 		if err := s.validateActiveAgent(req.Posts.Intake.AgentID); err != nil {
 			return err
@@ -167,33 +208,7 @@ func (s *EngineConfigService) UpdateConfig(req *UpdateConfigRequest) error {
 			return err
 		}
 	}
-	if req.Runtime.PathBuilder.ModelID > 0 {
-		if _, err := s.modelRepo.FindByID(req.Runtime.PathBuilder.ModelID); err != nil {
-			return ErrModelNotFound
-		}
-	}
 	if err := validateDecisionMode(req.Posts.Decision.Mode); err != nil {
-		return err
-	}
-	if err := validateAuditLevel(req.Runtime.Guard.AuditLevel); err != nil {
-		return err
-	}
-	if req.Runtime.PathBuilder.Temperature < 0 || req.Runtime.PathBuilder.Temperature > 1 {
-		return fmt.Errorf("%w: 参考路径温度必须在 0 到 1 之间", ErrInvalidEngineConfig)
-	}
-	if req.Runtime.PathBuilder.MaxRetries < 0 || req.Runtime.PathBuilder.MaxRetries > 10 {
-		return fmt.Errorf("%w: 参考路径最大重试次数必须在 0 到 10 之间", ErrInvalidEngineConfig)
-	}
-	if req.Runtime.PathBuilder.TimeoutSeconds < 10 || req.Runtime.PathBuilder.TimeoutSeconds > 300 {
-		return fmt.Errorf("%w: 参考路径超时时间必须在 10 到 300 秒之间", ErrInvalidEngineConfig)
-	}
-	if req.Runtime.Guard.FallbackAssignee > 0 {
-		if err := s.validateFallbackAssignee(req.Runtime.Guard.FallbackAssignee); err != nil {
-			return err
-		}
-	}
-
-	if err := s.updatePathBuilderAgent(req.Runtime.PathBuilder.ModelID, req.Runtime.PathBuilder.Temperature); err != nil {
 		return err
 	}
 
@@ -201,39 +216,148 @@ func (s *EngineConfigService) UpdateConfig(req *UpdateConfigRequest) error {
 	s.setConfigValue(smartTicketDecisionAgentKey, strconv.FormatUint(uint64(req.Posts.Decision.AgentID), 10))
 	s.setConfigValue(smartTicketSLAAssuranceAgentKey, strconv.FormatUint(uint64(req.Posts.SLAAssurance.AgentID), 10))
 	s.setConfigValue(smartTicketDecisionModeKey, req.Posts.Decision.Mode)
+	return nil
+}
+
+func (s *EngineConfigService) GetEngineSettingsConfig() (*EngineSettingsConfig, error) {
+	cfg := &EngineSettingsConfig{
+		Runtime: EngineSettingsRuntime{
+			ServiceMatcher: s.readServiceMatcherConfig(),
+			PathBuilder:    s.readPathConfig(),
+			Guard:          s.readGuardConfig(),
+		},
+	}
+	cfg.Health = s.buildEngineSettingsHealth(cfg)
+	return cfg, nil
+}
+
+func (s *EngineConfigService) UpdateEngineSettingsConfig(req *UpdateEngineSettingsRequest) error {
+	if req.Runtime.ServiceMatcher.ModelID > 0 {
+		if err := s.validateActiveModel(req.Runtime.ServiceMatcher.ModelID); err != nil {
+			return err
+		}
+	}
+	if req.Runtime.PathBuilder.ModelID > 0 {
+		if err := s.validateActiveModel(req.Runtime.PathBuilder.ModelID); err != nil {
+			return err
+		}
+	}
+	if err := validateTemperature("服务匹配", req.Runtime.ServiceMatcher.Temperature); err != nil {
+		return err
+	}
+	if err := validateTemperature("参考路径", req.Runtime.PathBuilder.Temperature); err != nil {
+		return err
+	}
+	if req.Runtime.ServiceMatcher.MaxTokens < 256 || req.Runtime.ServiceMatcher.MaxTokens > 8192 {
+		return fmt.Errorf("%w: 服务匹配最大输出 Token 必须在 256 到 8192 之间", ErrInvalidEngineConfig)
+	}
+	if req.Runtime.ServiceMatcher.TimeoutSeconds < 5 || req.Runtime.ServiceMatcher.TimeoutSeconds > 300 {
+		return fmt.Errorf("%w: 服务匹配超时时间必须在 5 到 300 秒之间", ErrInvalidEngineConfig)
+	}
+	if req.Runtime.PathBuilder.MaxRetries < 0 || req.Runtime.PathBuilder.MaxRetries > 10 {
+		return fmt.Errorf("%w: 参考路径最大重试次数必须在 0 到 10 之间", ErrInvalidEngineConfig)
+	}
+	if req.Runtime.PathBuilder.TimeoutSeconds < 10 || req.Runtime.PathBuilder.TimeoutSeconds > 300 {
+		return fmt.Errorf("%w: 参考路径超时时间必须在 10 到 300 秒之间", ErrInvalidEngineConfig)
+	}
+	if err := validateAuditLevel(req.Runtime.Guard.AuditLevel); err != nil {
+		return err
+	}
+	if req.Runtime.Guard.FallbackAssignee > 0 {
+		if err := s.validateFallbackAssignee(req.Runtime.Guard.FallbackAssignee); err != nil {
+			return err
+		}
+	}
+
+	s.setConfigValue(smartTicketServiceMatcherModelKey, strconv.FormatUint(uint64(req.Runtime.ServiceMatcher.ModelID), 10))
+	s.setConfigValue(smartTicketServiceMatcherTemperatureKey, formatFloat(req.Runtime.ServiceMatcher.Temperature))
+	s.setConfigValue(smartTicketServiceMatcherMaxTokensKey, strconv.Itoa(req.Runtime.ServiceMatcher.MaxTokens))
+	s.setConfigValue(smartTicketServiceMatcherTimeoutKey, strconv.Itoa(req.Runtime.ServiceMatcher.TimeoutSeconds))
+	s.setConfigValue(smartTicketPathModelKey, strconv.FormatUint(uint64(req.Runtime.PathBuilder.ModelID), 10))
+	s.setConfigValue(smartTicketPathTemperatureKey, formatFloat(req.Runtime.PathBuilder.Temperature))
 	s.setConfigValue(smartTicketPathMaxRetriesKey, strconv.Itoa(req.Runtime.PathBuilder.MaxRetries))
 	s.setConfigValue(smartTicketPathTimeoutKey, strconv.Itoa(req.Runtime.PathBuilder.TimeoutSeconds))
 	s.setConfigValue(smartTicketGuardAuditLevelKey, req.Runtime.Guard.AuditLevel)
 	s.setConfigValue(smartTicketGuardFallbackKey, strconv.FormatUint(uint64(req.Runtime.Guard.FallbackAssignee), 10))
-
 	return nil
+}
+
+func (s *EngineConfigService) ServiceMatcherRuntimeConfig() (LLMEngineRuntimeConfig, error) {
+	cfg := s.readServiceMatcherConfig()
+	return s.buildLLMRuntimeConfig("服务匹配引擎", cfg.ModelID, cfg.Temperature, cfg.MaxTokens, 0, cfg.TimeoutSeconds)
+}
+
+func (s *EngineConfigService) PathBuilderRuntimeConfig() (LLMEngineRuntimeConfig, error) {
+	cfg := s.readPathConfig()
+	return s.buildLLMRuntimeConfig("参考路径生成引擎", cfg.ModelID, cfg.Temperature, 4096, cfg.MaxRetries, cfg.TimeoutSeconds)
+}
+
+func (s *EngineConfigService) buildLLMRuntimeConfig(label string, modelID uint, temperature float64, maxTokens int, maxRetries int, timeoutSeconds int) (LLMEngineRuntimeConfig, error) {
+	if modelID == 0 {
+		return LLMEngineRuntimeConfig{}, fmt.Errorf("%s未配置模型", label)
+	}
+	m, err := s.modelRepo.FindByID(modelID)
+	if err != nil || m.Status != ai.ModelStatusActive {
+		return LLMEngineRuntimeConfig{}, ErrModelNotFound
+	}
+	if m.Provider == nil || m.Provider.Status != ai.ProviderStatusActive {
+		return LLMEngineRuntimeConfig{}, ErrModelNotFound
+	}
+	apiKey, err := s.providerSvc.DecryptAPIKey(m.Provider)
+	if err != nil {
+		return LLMEngineRuntimeConfig{}, fmt.Errorf("API Key 解密失败: %w", err)
+	}
+	return LLMEngineRuntimeConfig{
+		Model:          m.ModelID,
+		Protocol:       ai.ProtocolForType(m.Provider.Type),
+		BaseURL:        m.Provider.BaseURL,
+		APIKey:         apiKey,
+		Temperature:    temperature,
+		MaxTokens:      maxTokens,
+		MaxRetries:     maxRetries,
+		TimeoutSeconds: timeoutSeconds,
+	}, nil
+}
+
+func (s *EngineConfigService) readServiceMatcherConfig() EngineServiceMatcherConfig {
+	cfg := EngineServiceMatcherConfig{
+		EngineModelConfig: EngineModelConfig{
+			ModelID:     uint(s.getConfigInt(smartTicketServiceMatcherModelKey, 0)),
+			Temperature: s.getConfigFloat(smartTicketServiceMatcherTemperatureKey, 0.2),
+		},
+		MaxTokens:      s.getConfigInt(smartTicketServiceMatcherMaxTokensKey, 1024),
+		TimeoutSeconds: s.getConfigInt(smartTicketServiceMatcherTimeoutKey, 30),
+	}
+	s.fillModelMeta(&cfg.EngineModelConfig)
+	return cfg
 }
 
 func (s *EngineConfigService) readPathConfig() EnginePathConfig {
 	cfg := EnginePathConfig{
+		EngineModelConfig: EngineModelConfig{
+			ModelID:     uint(s.getConfigInt(smartTicketPathModelKey, 0)),
+			Temperature: s.getConfigFloat(smartTicketPathTemperatureKey, 0.3),
+		},
 		MaxRetries:     s.getConfigInt(smartTicketPathMaxRetriesKey, 3),
 		TimeoutSeconds: s.getConfigInt(smartTicketPathTimeoutKey, 120),
 	}
+	s.fillModelMeta(&cfg.EngineModelConfig)
+	return cfg
+}
 
-	agent, err := s.agentSvc.GetByCode(smartTicketPathBuilderAgentKey)
-	if err != nil {
-		return cfg
+func (s *EngineConfigService) fillModelMeta(cfg *EngineModelConfig) {
+	if cfg.ModelID == 0 {
+		return
 	}
-	cfg.Temperature = agent.Temperature
-	if agent.ModelID == nil || *agent.ModelID == 0 {
-		return cfg
-	}
-	cfg.ModelID = *agent.ModelID
-	m, err := s.modelRepo.FindByID(*agent.ModelID)
+	m, err := s.modelRepo.FindByID(cfg.ModelID)
 	if err != nil {
-		return cfg
+		return
 	}
 	cfg.ModelName = m.DisplayName
 	cfg.ProviderID = m.ProviderID
 	if m.Provider != nil {
 		cfg.ProviderName = m.Provider.Name
 	}
-	return cfg
 }
 
 func (s *EngineConfigService) readGuardConfig() EngineGuardConfig {
@@ -266,6 +390,14 @@ func (s *EngineConfigService) validateActiveAgent(agentID uint) error {
 	return nil
 }
 
+func (s *EngineConfigService) validateActiveModel(modelID uint) error {
+	m, err := s.modelRepo.FindByID(modelID)
+	if err != nil || m.Status != ai.ModelStatusActive || m.Provider == nil || m.Provider.Status != ai.ProviderStatusActive {
+		return ErrModelNotFound
+	}
+	return nil
+}
+
 func (s *EngineConfigService) validateFallbackAssignee(userID uint) error {
 	var user struct{ IsActive bool }
 	if err := s.db.Table("users").Where("id = ? AND deleted_at IS NULL", userID).
@@ -276,20 +408,6 @@ func (s *EngineConfigService) validateFallbackAssignee(userID uint) error {
 		return ErrFallbackUserNotFound
 	}
 	return nil
-}
-
-func (s *EngineConfigService) updatePathBuilderAgent(modelID uint, temperature float64) error {
-	agent, err := s.agentSvc.GetByCode(smartTicketPathBuilderAgentKey)
-	if err != nil {
-		return err
-	}
-	if modelID > 0 {
-		agent.ModelID = &modelID
-	} else {
-		agent.ModelID = nil
-	}
-	agent.Temperature = temperature
-	return s.agentSvc.Update(agent)
 }
 
 func (s *EngineConfigService) getConfigValue(key, defaultVal string) string {
@@ -315,6 +433,18 @@ func (s *EngineConfigService) getConfigInt(key string, defaultVal int) int {
 	return n
 }
 
+func (s *EngineConfigService) getConfigFloat(key string, defaultVal float64) float64 {
+	v := s.getConfigValue(key, "")
+	if v == "" {
+		return defaultVal
+	}
+	n, err := strconv.ParseFloat(v, 64)
+	if err != nil {
+		return defaultVal
+	}
+	return n
+}
+
 func (s *EngineConfigService) setConfigValue(key, value string) {
 	cfg, err := s.sysConfigRepo.Get(key)
 	if err != nil {
@@ -324,7 +454,7 @@ func (s *EngineConfigService) setConfigValue(key, value string) {
 	_ = s.sysConfigRepo.Set(cfg)
 }
 
-func (s *EngineConfigService) buildHealth(cfg *SmartStaffingConfig) EngineHealth {
+func (s *EngineConfigService) buildSmartStaffingHealth(cfg *SmartStaffingConfig) EngineHealth {
 	items := []EngineHealthItem{
 		s.agentHealth("intake", "服务受理岗", cfg.Posts.Intake.AgentID, []string{
 			"itsm.service_match",
@@ -348,6 +478,13 @@ func (s *EngineConfigService) buildHealth(cfg *SmartStaffingConfig) EngineHealth
 			"sla.trigger_escalation",
 			"sla.write_timeline",
 		}),
+	}
+	return EngineHealth{Items: items}
+}
+
+func (s *EngineConfigService) buildEngineSettingsHealth(cfg *EngineSettingsConfig) EngineHealth {
+	items := []EngineHealthItem{
+		s.modelEngineHealth("serviceMatcher", "服务匹配引擎", cfg.Runtime.ServiceMatcher.EngineModelConfig, cfg.Runtime.ServiceMatcher.TimeoutSeconds),
 		s.pathHealth(cfg.Runtime.PathBuilder),
 		s.guardHealth(cfg.Runtime.Guard),
 	}
@@ -371,24 +508,38 @@ func (s *EngineConfigService) agentHealth(key, label string, agentID uint, requi
 	return EngineHealthItem{Key: key, Label: label, Status: "pass", Message: label + "已上岗"}
 }
 
+func (s *EngineConfigService) modelEngineHealth(key, label string, cfg EngineModelConfig, timeoutSeconds int) EngineHealthItem {
+	if cfg.ModelID == 0 {
+		return EngineHealthItem{Key: key, Label: label, Status: "fail", Message: label + "未配置模型"}
+	}
+	if err := s.validateActiveModel(cfg.ModelID); err != nil {
+		return EngineHealthItem{Key: key, Label: label, Status: "fail", Message: label + "模型不存在或未启用"}
+	}
+	if timeoutSeconds <= 0 {
+		return EngineHealthItem{Key: key, Label: label, Status: "fail", Message: label + "超时时间无效"}
+	}
+	return EngineHealthItem{Key: key, Label: label, Status: "pass", Message: label + "已就绪"}
+}
+
 func (s *EngineConfigService) pathHealth(path EnginePathConfig) EngineHealthItem {
-	if path.ModelID == 0 {
-		return EngineHealthItem{Key: "pathBuilder", Label: "参考路径参数", Status: "fail", Message: "参考路径生成未配置模型"}
+	base := s.modelEngineHealth("pathBuilder", "参考路径生成", path.EngineModelConfig, path.TimeoutSeconds)
+	if base.Status != "pass" {
+		return base
 	}
-	if path.MaxRetries < 0 || path.TimeoutSeconds <= 0 {
-		return EngineHealthItem{Key: "pathBuilder", Label: "参考路径参数", Status: "fail", Message: "参考路径运行参数无效"}
+	if path.MaxRetries < 0 {
+		return EngineHealthItem{Key: "pathBuilder", Label: "参考路径生成", Status: "fail", Message: "参考路径运行参数无效"}
 	}
-	return EngineHealthItem{Key: "pathBuilder", Label: "参考路径参数", Status: "pass", Message: "参考路径参数已就绪"}
+	return EngineHealthItem{Key: "pathBuilder", Label: "参考路径生成", Status: "pass", Message: "参考路径生成已就绪"}
 }
 
 func (s *EngineConfigService) guardHealth(guard EngineGuardConfig) EngineHealthItem {
 	if guard.FallbackAssignee == 0 {
-		return EngineHealthItem{Key: "guard", Label: "异常兜底参数", Status: "warn", Message: "未指定兜底处理人，异常时只能进入人工处置队列"}
+		return EngineHealthItem{Key: "guard", Label: "异常兜底与审计", Status: "warn", Message: "未指定兜底处理人，异常时只能进入人工处置队列"}
 	}
 	if err := s.validateFallbackAssignee(guard.FallbackAssignee); err != nil {
-		return EngineHealthItem{Key: "guard", Label: "异常兜底参数", Status: "fail", Message: "兜底处理人不存在或未启用"}
+		return EngineHealthItem{Key: "guard", Label: "异常兜底与审计", Status: "fail", Message: "兜底处理人不存在或未启用"}
 	}
-	return EngineHealthItem{Key: "guard", Label: "异常兜底参数", Status: "pass", Message: "异常兜底参数已就绪"}
+	return EngineHealthItem{Key: "guard", Label: "异常兜底与审计", Status: "pass", Message: "异常兜底与审计已就绪"}
 }
 
 func (s *EngineConfigService) missingAgentTools(agentID uint, required []string) []string {
@@ -432,6 +583,17 @@ func validateAuditLevel(level string) error {
 	default:
 		return fmt.Errorf("%w: 审计级别无效", ErrInvalidEngineConfig)
 	}
+}
+
+func validateTemperature(label string, value float64) error {
+	if value < 0 || value > 1 {
+		return fmt.Errorf("%w: %s温度必须在 0 到 1 之间", ErrInvalidEngineConfig, label)
+	}
+	return nil
+}
+
+func formatFloat(value float64) string {
+	return strconv.FormatFloat(value, 'f', -1, 64)
 }
 
 func (s *EngineConfigService) FallbackAssigneeID() uint {

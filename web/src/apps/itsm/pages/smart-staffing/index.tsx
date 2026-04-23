@@ -190,7 +190,6 @@ function SmartStaffingForm({ config }: { config: SmartStaffingConfig }) {
         decision: { agentId: decisionAgentId, mode: decisionMode },
         slaAssurance: { agentId: slaAssuranceAgentId },
       },
-      runtime: config.runtime,
     })
   }
 

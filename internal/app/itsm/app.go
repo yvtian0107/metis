@@ -29,18 +29,6 @@ type ITSMApp struct {
 	injector do.Injector
 }
 
-type lazyAIAgentProvider struct {
-	injector do.Injector
-}
-
-func (p *lazyAIAgentProvider) GetAgentConfig(agentID uint) (*app.AIAgentConfig, error) {
-	provider, err := do.InvokeAs[app.AIAgentProvider](p.injector)
-	if err != nil {
-		return nil, err
-	}
-	return provider.GetAgentConfig(agentID)
-}
-
 func (a *ITSMApp) Name() string { return "itsm" }
 
 // GetToolRegistry implements app.ToolRegistryProvider.
@@ -235,7 +223,7 @@ func (a *ITSMApp) Providers(i do.Injector) {
 		var ticketCreator tools.TicketCreator
 		ticketCreator = &lazyTicketCreator{injector: i}
 		configProvider := do.MustInvoke[*EngineConfigService](i)
-		matcher := NewLLMServiceMatcher(db.DB, configProvider, &lazyAIAgentProvider{injector: i}, nil)
+		matcher := NewLLMServiceMatcher(db.DB, configProvider, nil)
 		return tools.NewOperator(db.DB, resolver, orgResolver, withdrawFunc, ticketCreator, matcher), nil
 	})
 	do.Provide(i, func(i do.Injector) (*tools.SessionStateStore, error) {
@@ -292,8 +280,10 @@ func (a *ITSMApp) Routes(api *gin.RouterGroup) {
 		g.DELETE("/services/:id/knowledge-documents/:docId", knowledgeDocH.Delete)
 
 		// Smart Staffing
-		g.GET("/smart-staffing/config", engineConfigH.Get)
-		g.PUT("/smart-staffing/config", engineConfigH.Update)
+		g.GET("/smart-staffing/config", engineConfigH.GetSmartStaffing)
+		g.PUT("/smart-staffing/config", engineConfigH.UpdateSmartStaffing)
+		g.GET("/engine-settings/config", engineConfigH.GetEngineSettings)
+		g.PUT("/engine-settings/config", engineConfigH.UpdateEngineSettings)
 
 		// Workflow Generate
 		g.POST("/workflows/generate", workflowGenH.Generate)

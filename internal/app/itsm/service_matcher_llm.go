@@ -5,16 +5,16 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"gorm.io/gorm"
 
-	"metis/internal/app"
 	"metis/internal/app/itsm/tools"
 	"metis/internal/llm"
 )
 
 type ServiceMatchConfigProvider interface {
-	IntakeAgentID() uint
+	ServiceMatcherRuntimeConfig() (LLMEngineRuntimeConfig, error)
 }
 
 type LLMClientFactory func(protocol, baseURL, apiKey string) (llm.Client, error)
@@ -22,18 +22,16 @@ type LLMClientFactory func(protocol, baseURL, apiKey string) (llm.Client, error)
 type LLMServiceMatcher struct {
 	db            *gorm.DB
 	config        ServiceMatchConfigProvider
-	agentProvider app.AIAgentProvider
 	clientFactory LLMClientFactory
 }
 
-func NewLLMServiceMatcher(db *gorm.DB, config ServiceMatchConfigProvider, agentProvider app.AIAgentProvider, clientFactory LLMClientFactory) *LLMServiceMatcher {
+func NewLLMServiceMatcher(db *gorm.DB, config ServiceMatchConfigProvider, clientFactory LLMClientFactory) *LLMServiceMatcher {
 	if clientFactory == nil {
 		clientFactory = llm.NewClient
 	}
 	return &LLMServiceMatcher{
 		db:            db,
 		config:        config,
-		agentProvider: agentProvider,
 		clientFactory: clientFactory,
 	}
 }
@@ -64,20 +62,9 @@ func (m *LLMServiceMatcher) MatchServices(ctx context.Context, query string) ([]
 	if m.config == nil {
 		return nil, tools.MatchDecision{}, fmt.Errorf("service matcher config provider is not configured")
 	}
-	if m.agentProvider == nil {
-		return nil, tools.MatchDecision{}, fmt.Errorf("service matcher agent provider is not configured")
-	}
-
-	agentID := m.config.IntakeAgentID()
-	if agentID == 0 {
-		return nil, tools.MatchDecision{}, fmt.Errorf("服务受理岗未上岗")
-	}
-	agentCfg, err := m.agentProvider.GetAgentConfig(agentID)
+	engineCfg, err := m.config.ServiceMatcherRuntimeConfig()
 	if err != nil {
-		return nil, tools.MatchDecision{}, fmt.Errorf("load service desk agent config: %w", err)
-	}
-	if agentCfg == nil || agentCfg.Model == "" || agentCfg.Protocol == "" {
-		return nil, tools.MatchDecision{}, fmt.Errorf("服务受理岗上岗智能体未配置模型")
+		return nil, tools.MatchDecision{}, fmt.Errorf("load service matcher engine config: %w", err)
 	}
 
 	candidates, err := m.loadCandidates()
@@ -88,7 +75,7 @@ func (m *LLMServiceMatcher) MatchServices(ctx context.Context, query string) ([]
 		return nil, tools.MatchDecision{Kind: tools.MatchDecisionNoMatch}, nil
 	}
 
-	client, err := m.clientFactory(agentCfg.Protocol, agentCfg.BaseURL, agentCfg.APIKey)
+	client, err := m.clientFactory(engineCfg.Protocol, engineCfg.BaseURL, engineCfg.APIKey)
 	if err != nil {
 		return nil, tools.MatchDecision{}, fmt.Errorf("create service match llm client: %w", err)
 	}
@@ -99,17 +86,23 @@ func (m *LLMServiceMatcher) MatchServices(ctx context.Context, query string) ([]
 	})
 
 	var tempPtr *float32
-	if agentCfg.Temperature != 0 {
-		temp := float32(agentCfg.Temperature)
+	if engineCfg.Temperature != 0 {
+		temp := float32(engineCfg.Temperature)
 		tempPtr = &temp
 	}
-	maxTokens := agentCfg.MaxTokens
+	maxTokens := engineCfg.MaxTokens
 	if maxTokens <= 0 {
 		maxTokens = 1024
 	}
+	timeoutSeconds := engineCfg.TimeoutSeconds
+	if timeoutSeconds <= 0 {
+		timeoutSeconds = 30
+	}
+	callCtx, cancel := context.WithTimeout(ctx, time.Duration(timeoutSeconds)*time.Second)
+	defer cancel()
 
-	resp, err := client.Chat(ctx, llm.ChatRequest{
-		Model: agentCfg.Model,
+	resp, err := client.Chat(callCtx, llm.ChatRequest{
+		Model: engineCfg.Model,
 		Messages: []llm.Message{
 			{Role: llm.RoleSystem, Content: serviceMatchSystemPrompt},
 			{Role: llm.RoleUser, Content: string(userPayload)},

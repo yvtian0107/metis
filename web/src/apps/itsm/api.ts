@@ -631,6 +631,11 @@ export interface StaffingPathBuilderConfig extends EngineAgentConfig {
   timeoutSeconds: number
 }
 
+export interface StaffingServiceMatcherConfig extends EngineAgentConfig {
+  maxTokens: number
+  timeoutSeconds: number
+}
+
 export interface EngineHealthItem {
   key: string
   label: string
@@ -644,7 +649,14 @@ export interface SmartStaffingConfig {
     decision: StaffingAgentSelector & { mode: string }
     slaAssurance: StaffingAgentSelector
   }
+  health: {
+    items: EngineHealthItem[]
+  }
+}
+
+export interface EngineSettingsConfig {
   runtime: {
+    serviceMatcher: StaffingServiceMatcherConfig
     pathBuilder: StaffingPathBuilderConfig
     guard: {
       auditLevel: string
@@ -662,7 +674,11 @@ export interface SmartStaffingConfigUpdate {
     decision: { agentId: number; mode: string }
     slaAssurance: { agentId: number }
   }
+}
+
+export interface EngineSettingsConfigUpdate {
   runtime: {
+    serviceMatcher: { modelId: number; temperature: number; maxTokens: number; timeoutSeconds: number }
     pathBuilder: { modelId: number; temperature: number; maxRetries: number; timeoutSeconds: number }
     guard: { auditLevel: string; fallbackAssignee: number }
   }
@@ -674,6 +690,14 @@ export function fetchSmartStaffingConfig() {
 
 export function updateSmartStaffingConfig(data: SmartStaffingConfigUpdate) {
   return api.put("/api/v1/itsm/smart-staffing/config", data)
+}
+
+export function fetchEngineSettingsConfig() {
+  return api.get<EngineSettingsConfig>("/api/v1/itsm/engine-settings/config")
+}
+
+export function updateEngineSettingsConfig(data: EngineSettingsConfigUpdate) {
+  return api.put("/api/v1/itsm/engine-settings/config", data)
 }
 
 // ─── AI Provider / Model APIs (for smart staffing runtime) ───────

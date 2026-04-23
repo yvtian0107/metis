@@ -2,33 +2,23 @@ package itsm
 
 import (
 	"context"
-	"errors"
 	"strconv"
 	"testing"
 
 	"gorm.io/gorm"
 
-	"metis/internal/app"
 	"metis/internal/app/itsm/tools"
 	"metis/internal/llm"
 )
 
 type fakeServiceMatchConfigProvider struct {
-	intakeAgentID uint
-}
-
-func (f fakeServiceMatchConfigProvider) IntakeAgentID() uint {
-	return f.intakeAgentID
-}
-
-type fakeServiceMatchAgentProvider struct {
-	cfg *app.AIAgentConfig
+	cfg LLMEngineRuntimeConfig
 	err error
 }
 
-func (f fakeServiceMatchAgentProvider) GetAgentConfig(agentID uint) (*app.AIAgentConfig, error) {
+func (f fakeServiceMatchConfigProvider) ServiceMatcherRuntimeConfig() (LLMEngineRuntimeConfig, error) {
 	if f.err != nil {
-		return nil, f.err
+		return LLMEngineRuntimeConfig{}, f.err
 	}
 	return f.cfg, nil
 }
@@ -77,12 +67,11 @@ func seedLLMMatcherCatalogAndServices(t *testing.T, db *gorm.DB) (vpn ServiceDef
 	return vpn, copilot
 }
 
-func newTestLLMServiceMatcher(t *testing.T, client *fakeServiceMatchLLMClient, agentID uint, db *gorm.DB) *LLMServiceMatcher {
+func newTestLLMServiceMatcher(t *testing.T, client *fakeServiceMatchLLMClient, db *gorm.DB) *LLMServiceMatcher {
 	t.Helper()
 	return NewLLMServiceMatcher(
 		db,
-		fakeServiceMatchConfigProvider{intakeAgentID: agentID},
-		fakeServiceMatchAgentProvider{cfg: &app.AIAgentConfig{Model: "test-model", Protocol: llm.ProtocolOpenAI, APIKey: "key", Temperature: 0.2, MaxTokens: 128}},
+		fakeServiceMatchConfigProvider{cfg: LLMEngineRuntimeConfig{Model: "test-model", Protocol: llm.ProtocolOpenAI, APIKey: "key", Temperature: 0.2, MaxTokens: 128, TimeoutSeconds: 30}},
 		func(protocol, baseURL, apiKey string) (llm.Client, error) {
 			return client, nil
 		},
@@ -95,7 +84,7 @@ func TestLLMServiceMatcher_SelectServiceUsesOnlyChosenService(t *testing.T) {
 	client := &fakeServiceMatchLLMClient{resp: &llm.ChatResponse{
 		ToolCalls: []llm.ToolCall{{Name: "select_service", Arguments: `{"service_id":` + strconv.FormatUint(uint64(vpn.ID), 10) + `,"confidence":0.98,"reason":"用户明确要申请 VPN"}`}},
 	}}
-	matcher := newTestLLMServiceMatcher(t, client, 9, db)
+	matcher := newTestLLMServiceMatcher(t, client, db)
 
 	matches, decision, err := matcher.MatchServices(context.Background(), "我要申请VPN")
 	if err != nil {
@@ -118,7 +107,7 @@ func TestLLMServiceMatcher_NeedClarificationReturnsValidatedCandidates(t *testin
 	client := &fakeServiceMatchLLMClient{resp: &llm.ChatResponse{
 		ToolCalls: []llm.ToolCall{{Name: "need_clarification", Arguments: `{"service_ids":[` + strconv.FormatUint(uint64(vpn.ID), 10) + `,` + strconv.FormatUint(uint64(copilot.ID), 10) + `],"question":"请选择要办理 VPN 还是 Copilot 账号"}`}},
 	}}
-	matcher := newTestLLMServiceMatcher(t, client, 9, db)
+	matcher := newTestLLMServiceMatcher(t, client, db)
 
 	matches, decision, err := matcher.MatchServices(context.Background(), "我要申请账号权限")
 	if err != nil {
@@ -138,7 +127,7 @@ func TestLLMServiceMatcher_NoMatchReturnsEmptyMatches(t *testing.T) {
 	client := &fakeServiceMatchLLMClient{resp: &llm.ChatResponse{
 		ToolCalls: []llm.ToolCall{{Name: "no_match", Arguments: `{"reason":"服务目录中没有咖啡申请"}`}},
 	}}
-	matcher := newTestLLMServiceMatcher(t, client, 9, db)
+	matcher := newTestLLMServiceMatcher(t, client, db)
 
 	matches, decision, err := matcher.MatchServices(context.Background(), "我要领一杯咖啡")
 	if err != nil {
@@ -162,7 +151,7 @@ func TestLLMServiceMatcher_RejectsInvalidModelOutput(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			db := newTestDB(t)
 			seedLLMMatcherCatalogAndServices(t, db)
-			matcher := newTestLLMServiceMatcher(t, &fakeServiceMatchLLMClient{resp: tt.resp}, 9, db)
+			matcher := newTestLLMServiceMatcher(t, &fakeServiceMatchLLMClient{resp: tt.resp}, db)
 
 			if _, _, err := matcher.MatchServices(context.Background(), "我要申请VPN"); err == nil {
 				t.Fatal("expected invalid model output to fail")
@@ -171,20 +160,19 @@ func TestLLMServiceMatcher_RejectsInvalidModelOutput(t *testing.T) {
 	}
 }
 
-func TestLLMServiceMatcher_RequiresConfiguredServiceDeskAgent(t *testing.T) {
+func TestLLMServiceMatcher_RequiresConfiguredServiceMatcherEngine(t *testing.T) {
 	db := newTestDB(t)
 	seedLLMMatcherCatalogAndServices(t, db)
 	matcher := NewLLMServiceMatcher(
 		db,
-		fakeServiceMatchConfigProvider{},
-		fakeServiceMatchAgentProvider{err: errors.New("should not load agent")},
+		fakeServiceMatchConfigProvider{err: ErrModelNotFound},
 		func(protocol, baseURL, apiKey string) (llm.Client, error) {
-			t.Fatal("client factory should not be called without configured agent")
+			t.Fatal("client factory should not be called without configured engine")
 			return nil, nil
 		},
 	)
 
 	if _, _, err := matcher.MatchServices(context.Background(), "我要申请VPN"); err == nil {
-		t.Fatal("expected missing service desk agent configuration to fail")
+		t.Fatal("expected missing service matcher engine configuration to fail")
 	}
 }

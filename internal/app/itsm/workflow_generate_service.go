@@ -11,10 +11,8 @@ import (
 
 	"github.com/samber/do/v2"
 
-	"metis/internal/app/ai"
 	"metis/internal/app/itsm/engine"
 	"metis/internal/llm"
-	"metis/internal/repository"
 )
 
 var (
@@ -25,22 +23,16 @@ var (
 
 // WorkflowGenerateService handles one-shot path engine calls that turn collaboration specs into workflow JSON.
 type WorkflowGenerateService struct {
-	agentSvc      *ai.AgentService
-	modelRepo     *ai.ModelRepo
-	providerSvc   *ai.ProviderService
-	sysConfigRepo *repository.SysConfigRepo
-	actionRepo    *ServiceActionRepo
-	serviceDefSvc *ServiceDefService
+	engineConfigSvc *EngineConfigService
+	actionRepo      *ServiceActionRepo
+	serviceDefSvc   *ServiceDefService
 }
 
 func NewWorkflowGenerateService(i do.Injector) (*WorkflowGenerateService, error) {
 	return &WorkflowGenerateService{
-		agentSvc:      do.MustInvoke[*ai.AgentService](i),
-		modelRepo:     do.MustInvoke[*ai.ModelRepo](i),
-		providerSvc:   do.MustInvoke[*ai.ProviderService](i),
-		sysConfigRepo: do.MustInvoke[*repository.SysConfigRepo](i),
-		actionRepo:    do.MustInvoke[*ServiceActionRepo](i),
-		serviceDefSvc: do.MustInvoke[*ServiceDefService](i),
+		engineConfigSvc: do.MustInvoke[*EngineConfigService](i),
+		actionRepo:      do.MustInvoke[*ServiceActionRepo](i),
+		serviceDefSvc:   do.MustInvoke[*ServiceDefService](i),
 	}, nil
 }
 
@@ -65,36 +57,23 @@ func (s *WorkflowGenerateService) Generate(ctx context.Context, req *GenerateReq
 		return nil, ErrCollaborationSpecEmpty
 	}
 
-	// 1. Load path builder agent
-	agent, err := s.agentSvc.GetByCode(smartTicketPathBuilderAgentKey)
-	if err != nil {
-		return nil, ErrPathEngineNotConfigured
-	}
-	if agent.ModelID == nil || *agent.ModelID == 0 {
+	if s.engineConfigSvc == nil {
 		return nil, ErrPathEngineNotConfigured
 	}
 
-	// 2. Load model with provider
-	m, err := s.modelRepo.FindByID(*agent.ModelID)
+	// 1. Load path engine runtime settings
+	engineCfg, err := s.engineConfigSvc.PathBuilderRuntimeConfig()
 	if err != nil {
-		return nil, fmt.Errorf("模型加载失败: %w", err)
-	}
-	if m.Provider == nil {
-		return nil, fmt.Errorf("模型 %s 缺少 Provider 配置", m.DisplayName)
+		return nil, fmt.Errorf("%w: %v", ErrPathEngineNotConfigured, err)
 	}
 
-	// 3. Decrypt API key and create LLM client
-	apiKey, err := s.providerSvc.DecryptAPIKey(m.Provider)
-	if err != nil {
-		return nil, fmt.Errorf("API Key 解密失败: %w", err)
-	}
-	protocol := ai.ProtocolForType(m.Provider.Type)
-	client, err := llm.NewClient(protocol, m.Provider.BaseURL, apiKey)
+	// 2. Create LLM client
+	client, err := llm.NewClient(engineCfg.Protocol, engineCfg.BaseURL, engineCfg.APIKey)
 	if err != nil {
 		return nil, fmt.Errorf("LLM 客户端创建失败: %w", err)
 	}
 
-	// 4. Load available actions for context
+	// 3. Load available actions for context
 	var actionsContext string
 	if req.ServiceID > 0 {
 		actions, err := s.actionRepo.ListByService(req.ServiceID)
@@ -103,10 +82,10 @@ func (s *WorkflowGenerateService) Generate(ctx context.Context, req *GenerateReq
 		}
 	}
 
-	// 5. Build prompt and call LLM with retry
-	maxRetries := s.getMaxRetries()
-	temp := float32(agent.Temperature)
-	systemPrompt := agent.SystemPrompt
+	// 4. Build prompt and call LLM with retry
+	maxRetries := engineCfg.MaxRetries
+	temp := float32(engineCfg.Temperature)
+	systemPrompt := itsmPathBuilderSystemPrompt
 
 	var lastWorkflowJSON json.RawMessage
 	var lastErrors []engine.ValidationError
@@ -119,14 +98,14 @@ func (s *WorkflowGenerateService) Generate(ctx context.Context, req *GenerateReq
 			{Role: llm.RoleUser, Content: userMsg},
 		}
 
-		timeoutSec := s.getTimeoutSeconds()
+		timeoutSec := engineCfg.TimeoutSeconds
 		callCtx, cancel := context.WithTimeout(ctx, time.Duration(timeoutSec)*time.Second)
 
 		resp, err := client.Chat(callCtx, llm.ChatRequest{
-			Model:       m.ModelID,
+			Model:       engineCfg.Model,
 			Messages:    messages,
 			Temperature: &temp,
-			MaxTokens:   4096,
+			MaxTokens:   engineCfg.MaxTokens,
 		})
 		cancel()
 
@@ -287,28 +266,4 @@ func extractJSON(content string) (json.RawMessage, error) {
 	}
 
 	return nil, fmt.Errorf("无法从输出中提取有效 JSON")
-}
-
-func (s *WorkflowGenerateService) getMaxRetries() int {
-	cfg, err := s.sysConfigRepo.Get(smartTicketPathMaxRetriesKey)
-	if err != nil || cfg.Value == "" {
-		return 3
-	}
-	var n int
-	if _, err := fmt.Sscanf(cfg.Value, "%d", &n); err != nil {
-		return 3
-	}
-	return n
-}
-
-func (s *WorkflowGenerateService) getTimeoutSeconds() int {
-	cfg, err := s.sysConfigRepo.Get(smartTicketPathTimeoutKey)
-	if err != nil || cfg.Value == "" {
-		return 120
-	}
-	var n int
-	if _, err := fmt.Sscanf(cfg.Value, "%d", &n); err != nil {
-		return 120
-	}
-	return n
 }

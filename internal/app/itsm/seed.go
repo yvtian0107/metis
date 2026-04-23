@@ -443,6 +443,8 @@ func seedPolicies(enforcer *casbin.Enforcer) error {
 		// Smart Staffing
 		{"admin", "/api/v1/itsm/smart-staffing/config", "GET"},
 		{"admin", "/api/v1/itsm/smart-staffing/config", "PUT"},
+		{"admin", "/api/v1/itsm/engine-settings/config", "GET"},
+		{"admin", "/api/v1/itsm/engine-settings/config", "PUT"},
 		// Workflow Generate
 		{"admin", "/api/v1/itsm/workflows/generate", "POST"},
 		// Service Desk
@@ -741,101 +743,11 @@ func seedServiceDefinitions(db *gorm.DB) error {
 	return nil
 }
 
-// seedEngineConfig creates internal agents and default SystemConfig for smart staffing.
+// seedEngineConfig creates default SystemConfig for smart staffing and engine settings.
 func seedEngineConfig(db *gorm.DB) error {
-	type agentSeed struct {
-		Name         string
-		Code         string
-		SystemPrompt string
-		Temperature  float64
-	}
-
-	agents := []agentSeed{
-		{
-			Name:         "ITSM 参考路径生成",
-			Code:         smartTicketPathBuilderAgentKey,
-			Temperature:  0.3,
-			SystemPrompt: itsmPathBuilderSystemPrompt,
-		},
-	}
-
-	for _, a := range agents {
-		var existing struct{ ID uint }
-		if err := db.Table("ai_agents").Where("code = ?", a.Code).Select("id").First(&existing).Error; err == nil {
-			if err := db.Table("ai_agents").Where("id = ?", existing.ID).Updates(map[string]any{
-				"name":          a.Name,
-				"type":          "internal",
-				"system_prompt": a.SystemPrompt,
-				"temperature":   a.Temperature,
-				"is_active":     true,
-				"visibility":    "team",
-			}).Error; err != nil {
-				slog.Error("seed: failed to update internal agent", "code", a.Code, "error", err)
-				continue
-			}
-			slog.Info("seed: updated internal agent", "code", a.Code, "name", a.Name)
-			continue
-		}
-		if a.Code == smartTicketPathBuilderAgentKey {
-			var legacy struct{ ID uint }
-			if err := db.Table("ai_agents").Where("code = ?", "itsm.generator").Select("id").First(&legacy).Error; err == nil {
-				if err := db.Table("ai_agents").Where("id = ?", legacy.ID).Updates(map[string]any{
-					"name":          a.Name,
-					"code":          a.Code,
-					"type":          "internal",
-					"system_prompt": a.SystemPrompt,
-					"temperature":   a.Temperature,
-					"is_active":     true,
-					"visibility":    "team",
-				}).Error; err != nil {
-					slog.Error("seed: failed to migrate internal agent", "from", "itsm.generator", "to", a.Code, "error", err)
-					continue
-				}
-				slog.Info("seed: migrated internal agent", "from", "itsm.generator", "to", a.Code, "name", a.Name)
-				continue
-			}
-		}
-		if err := db.Table("ai_agents").Create(map[string]any{
-			"name":          a.Name,
-			"code":          a.Code,
-			"type":          "internal",
-			"system_prompt": a.SystemPrompt,
-			"temperature":   a.Temperature,
-			"is_active":     true,
-			"visibility":    "team",
-			"created_by":    0,
-		}).Error; err != nil {
-			slog.Error("seed: failed to create internal agent", "code", a.Code, "error", err)
-			continue
-		}
-		slog.Info("seed: created internal agent", "code", a.Code, "name", a.Name)
-	}
-	deleteLegacyPathBuilderAgent(db)
-
 	migrateSmartTicketEngineConfig(db)
 
-	defaults := map[string]string{
-		smartTicketDecisionModeKey:    "direct_first",
-		smartTicketPathMaxRetriesKey:  "3",
-		smartTicketPathTimeoutKey:     "120",
-		smartTicketGuardAuditLevelKey: "full",
-		smartTicketGuardFallbackKey:   "0",
-	}
-
-	for key, value := range defaults {
-		var existing model.SystemConfig
-		if err := db.Where("\"key\" = ?", key).First(&existing).Error; err == nil {
-			continue
-		}
-		cfg := model.SystemConfig{Key: key, Value: value}
-		if err := db.Create(&cfg).Error; err != nil {
-			slog.Error("seed: failed to create system config", "key", key, "error", err)
-			continue
-		}
-		slog.Info("seed: created system config", "key", key, "value", value)
-	}
-
-	// Seed default agent_id for intake and decision engines from preset agents.
+	// Seed default agent_id for smart staffing posts from preset agents.
 	agentDefaults := map[string]string{
 		smartTicketIntakeAgentKey:       "itsm.servicedesk",
 		smartTicketDecisionAgentKey:     "itsm.decision",
@@ -859,7 +771,38 @@ func seedEngineConfig(db *gorm.DB) error {
 		slog.Info("seed: created system config", "key", configKey, "value", value)
 	}
 
+	migrateServiceMatcherEngineConfig(db)
+	migratePathEngineAgentConfig(db)
+
+	defaults := map[string]string{
+		smartTicketDecisionModeKey:              "direct_first",
+		smartTicketServiceMatcherModelKey:       "0",
+		smartTicketServiceMatcherTemperatureKey: "0.2",
+		smartTicketServiceMatcherMaxTokensKey:   "1024",
+		smartTicketServiceMatcherTimeoutKey:     "30",
+		smartTicketPathModelKey:                 "0",
+		smartTicketPathTemperatureKey:           "0.3",
+		smartTicketPathMaxRetriesKey:            "3",
+		smartTicketPathTimeoutKey:               "120",
+		smartTicketGuardAuditLevelKey:           "full",
+		smartTicketGuardFallbackKey:             "0",
+	}
+
+	for key, value := range defaults {
+		var existing model.SystemConfig
+		if err := db.Where("\"key\" = ?", key).First(&existing).Error; err == nil {
+			continue
+		}
+		cfg := model.SystemConfig{Key: key, Value: value}
+		if err := db.Create(&cfg).Error; err != nil {
+			slog.Error("seed: failed to create system config", "key", key, "error", err)
+			continue
+		}
+		slog.Info("seed: created system config", "key", key, "value", value)
+	}
+
 	deleteLegacySmartTicketEngineConfig(db)
+	deleteLegacyPathBuilderAgents(db)
 
 	return nil
 }
@@ -893,6 +836,81 @@ func migrateSmartTicketEngineConfig(db *gorm.DB) {
 	}
 }
 
+func migrateServiceMatcherEngineConfig(db *gorm.DB) {
+	var existing model.SystemConfig
+	if err := db.Where("\"key\" = ?", smartTicketServiceMatcherModelKey).First(&existing).Error; err == nil {
+		return
+	}
+
+	agentID := uint(0)
+	var intakeConfig model.SystemConfig
+	if err := db.Where("\"key\" = ?", smartTicketIntakeAgentKey).First(&intakeConfig).Error; err == nil {
+		if id, parseErr := strconv.ParseUint(intakeConfig.Value, 10, 64); parseErr == nil {
+			agentID = uint(id)
+		}
+	}
+	var agentRow struct {
+		ID          uint
+		ModelID     *uint
+		Temperature float64
+		MaxTokens   int
+	}
+	query := db.Table("ai_agents").Select("id", "model_id", "temperature", "max_tokens")
+	var err error
+	if agentID > 0 {
+		err = query.Where("id = ?", agentID).First(&agentRow).Error
+	} else {
+		err = query.Where("code = ?", "itsm.servicedesk").First(&agentRow).Error
+	}
+	if err != nil || agentRow.ModelID == nil {
+		return
+	}
+	ensureSystemConfig(db, smartTicketServiceMatcherModelKey, strconv.FormatUint(uint64(*agentRow.ModelID), 10))
+	if agentRow.Temperature >= 0 {
+		ensureSystemConfig(db, smartTicketServiceMatcherTemperatureKey, strconv.FormatFloat(agentRow.Temperature, 'f', -1, 64))
+	}
+	if agentRow.MaxTokens > 0 {
+		ensureSystemConfig(db, smartTicketServiceMatcherMaxTokensKey, strconv.Itoa(agentRow.MaxTokens))
+	}
+	slog.Info("seed: migrated service matcher engine config from intake agent")
+}
+
+func migratePathEngineAgentConfig(db *gorm.DB) {
+	type pathAgentRow struct {
+		ID          uint
+		Code        *string
+		ModelID     *uint
+		Temperature float64
+	}
+	var rows []pathAgentRow
+	if err := db.Table("ai_agents").
+		Where("code IN ?", []string{"itsm.path_builder", "itsm.generator"}).
+		Select("id", "code", "model_id", "temperature").
+		Order("CASE WHEN code = 'itsm.path_builder' THEN 0 ELSE 1 END").
+		Find(&rows).Error; err != nil {
+		return
+	}
+	for _, row := range rows {
+		if row.ModelID != nil {
+			ensureSystemConfig(db, smartTicketPathModelKey, strconv.FormatUint(uint64(*row.ModelID), 10))
+			ensureSystemConfig(db, smartTicketPathTemperatureKey, strconv.FormatFloat(row.Temperature, 'f', -1, 64))
+			slog.Info("seed: migrated path engine config from legacy internal agent")
+			return
+		}
+	}
+}
+
+func ensureSystemConfig(db *gorm.DB, key string, value string) {
+	var existing model.SystemConfig
+	if err := db.Where("\"key\" = ?", key).First(&existing).Error; err == nil {
+		return
+	}
+	cfg := model.SystemConfig{Key: key, Value: value}
+	if err := db.Create(&cfg).Error; err != nil {
+		slog.Error("seed: failed to create system config", "key", key, "error", err)
+	}
+}
+
 func deleteLegacySmartTicketEngineConfig(db *gorm.DB) {
 	legacyKeys := []string{
 		"itsm.engine.servicedesk.agent_id",
@@ -909,26 +927,9 @@ func deleteLegacySmartTicketEngineConfig(db *gorm.DB) {
 	}
 }
 
-func deleteLegacyPathBuilderAgent(db *gorm.DB) {
-	type agentRef struct {
-		ID      uint
-		ModelID *uint
-	}
-	var current agentRef
-	if err := db.Table("ai_agents").Where("code = ?", smartTicketPathBuilderAgentKey).Select("id", "model_id").First(&current).Error; err != nil {
-		return
-	}
-	var legacy agentRef
-	if err := db.Table("ai_agents").Where("code = ?", "itsm.generator").Select("id", "model_id").First(&legacy).Error; err != nil {
-		return
-	}
-	if current.ModelID == nil && legacy.ModelID != nil {
-		if err := db.Table("ai_agents").Where("id = ?", current.ID).Update("model_id", *legacy.ModelID).Error; err != nil {
-			slog.Warn("seed: failed to preserve legacy path model", "error", err)
-		}
-	}
-	if err := db.Exec("DELETE FROM ai_agents WHERE id = ?", legacy.ID).Error; err != nil {
-		slog.Warn("seed: failed to delete legacy path agent", "error", err)
+func deleteLegacyPathBuilderAgents(db *gorm.DB) {
+	if err := db.Exec("DELETE FROM ai_agents WHERE code IN ?", []string{"itsm.path_builder", "itsm.generator"}).Error; err != nil {
+		slog.Warn("seed: failed to delete legacy path agents", "error", err)
 	}
 }
 

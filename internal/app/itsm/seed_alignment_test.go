@@ -283,9 +283,10 @@ func TestMigratePriorityCommitmentColumnsDropsLegacyColumns(t *testing.T) {
 	}
 }
 
-func TestSeedEngineConfigUpdatesExistingPathEnginePrompt(t *testing.T) {
+func TestSeedEngineConfigMigratesAndDeletesExistingPathEngineAgent(t *testing.T) {
 	db := newSeedAlignmentDB(t)
-	code := smartTicketPathBuilderAgentKey
+	code := "itsm.path_builder"
+	modelID := uint(42)
 	agent := aiapp.Agent{
 		Name:         "旧路径引擎",
 		Code:         &code,
@@ -293,6 +294,7 @@ func TestSeedEngineConfigUpdatesExistingPathEnginePrompt(t *testing.T) {
 		Visibility:   aiapp.AgentVisibilityTeam,
 		SystemPrompt: "stale prompt",
 		Temperature:  0.9,
+		ModelID:      &modelID,
 		IsActive:     false,
 	}
 	if err := db.Create(&agent).Error; err != nil {
@@ -303,15 +305,26 @@ func TestSeedEngineConfigUpdatesExistingPathEnginePrompt(t *testing.T) {
 		t.Fatalf("seed engine config: %v", err)
 	}
 
-	var got aiapp.Agent
-	if err := db.Where("code = ?", code).First(&got).Error; err != nil {
-		t.Fatalf("load path builder agent: %v", err)
+	var modelConfig coremodel.SystemConfig
+	if err := db.Where("\"key\" = ?", smartTicketPathModelKey).First(&modelConfig).Error; err != nil {
+		t.Fatalf("load path model config: %v", err)
 	}
-	if got.SystemPrompt != itsmPathBuilderSystemPrompt {
-		t.Fatalf("expected path engine prompt to be refreshed")
+	if modelConfig.Value != "42" {
+		t.Fatalf("expected path model config to be migrated, got %s", modelConfig.Value)
 	}
-	if got.Name != "ITSM 参考路径生成" || got.Temperature != 0.3 || !got.IsActive {
-		t.Fatalf("expected path engine metadata to be refreshed, got name=%q temp=%v active=%v", got.Name, got.Temperature, got.IsActive)
+	var tempConfig coremodel.SystemConfig
+	if err := db.Where("\"key\" = ?", smartTicketPathTemperatureKey).First(&tempConfig).Error; err != nil {
+		t.Fatalf("load path temperature config: %v", err)
+	}
+	if tempConfig.Value != "0.9" {
+		t.Fatalf("expected path temperature config to be migrated, got %s", tempConfig.Value)
+	}
+	var count int64
+	if err := db.Model(&aiapp.Agent{}).Where("code = ?", code).Count(&count).Error; err != nil {
+		t.Fatalf("count legacy path agent: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("expected path builder agent to be deleted")
 	}
 }
 
@@ -377,13 +390,6 @@ func TestSeedEngineConfigMigratesLegacySmartTicketConfig(t *testing.T) {
 		if count != 0 {
 			t.Fatalf("expected legacy config %s to be deleted", cfg.Key)
 		}
-	}
-	var pathAgent aiapp.Agent
-	if err := db.Where("code = ?", smartTicketPathBuilderAgentKey).First(&pathAgent).Error; err != nil {
-		t.Fatalf("load migrated path agent: %v", err)
-	}
-	if pathAgent.Name != "ITSM 参考路径生成" || pathAgent.SystemPrompt != itsmPathBuilderSystemPrompt {
-		t.Fatalf("path agent was not migrated cleanly")
 	}
 	var legacyCount int64
 	if err := db.Model(&aiapp.Agent{}).Where("code = ?", legacyCode).Count(&legacyCount).Error; err != nil {
