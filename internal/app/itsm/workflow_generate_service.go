@@ -18,7 +18,7 @@ import (
 )
 
 var (
-	ErrPathEngineNotConfigured = errors.New("参考路径生成未配置模型，请前往智能岗位页面设置")
+	ErrPathEngineNotConfigured = errors.New("参考路径生成未配置模型，请前往引擎设置页面设置")
 	ErrCollaborationSpecEmpty  = errors.New("协作规范不能为空")
 	ErrWorkflowGeneration      = errors.New("协作路径生成失败")
 )

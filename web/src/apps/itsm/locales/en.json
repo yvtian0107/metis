@@ -594,6 +594,8 @@
   "engineConfig": {
     "title": "Smart Staffing",
     "pageDesc": "Assign agents to service intake, workflow decision, and SLA assurance posts for smart ticket operations.",
+    "engineSettingsTitle": "Engine Settings",
+    "engineSettingsDesc": "Manage ITSM engine runtime parameters. This page currently covers reference path generation, fallback handling, and audit; classic engine settings can live here later.",
     "intakeTitle": "Service Intake Post",
     "intakeDesc": "Handles request recognition, service matching, field extraction, draft confirmation, and ticket creation.",
     "decisionTitle": "Workflow Decision Post",
@@ -602,6 +604,10 @@
     "slaAssuranceDesc": "Watches SLA risk and breach events, then triggers notification, reassignment, or priority escalation by configured rules.",
     "runtimeTitle": "Runtime Parameters",
     "runtimeDesc": "Keeps path generation, retries, timeouts, audit level, and fallback handling below the staffing layer.",
+    "pathBuilderTitle": "Reference Path Generation",
+    "pathBuilderDesc": "Generates reference paths and strategy sketches from collaboration specs for pre-publish guidance and runtime hints.",
+    "guardTitle": "Fallback and Audit",
+    "guardDesc": "Controls audit detail and assigns a fallback owner when smart decisions fail or no one takes over.",
     "provider": "Provider",
     "providerPlaceholder": "Select Provider",
     "model": "Model",
@@ -626,6 +632,7 @@
     "logSummary": "Summary",
     "logOff": "Off",
     "saveSuccess": "Smart staffing configuration saved",
+    "engineSaveSuccess": "Engine settings saved",
     "noProviders": "No AI Providers configured. Please add one in the AI module first.",
     "goToProviders": "Go to Providers",
     "status": {

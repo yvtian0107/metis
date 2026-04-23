@@ -2,26 +2,21 @@ import { useMemo, useState } from "react"
 import type { ComponentType, ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
-import { Activity, Bot, CheckCircle2, ExternalLink, Route, Save, ShieldCheck, TriangleAlert, XCircle } from "lucide-react"
+import { Activity, Bot, CheckCircle2, ExternalLink, Save, ShieldCheck, TriangleAlert, XCircle } from "lucide-react"
 import { toast } from "sonner"
 import { useNavigate } from "react-router"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardTitle } from "@/components/ui/card"
-import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Slider } from "@/components/ui/slider"
 import {
   type AgentItem,
   type EngineHealthItem,
   type SmartStaffingConfig,
   type SmartStaffingConfigUpdate,
   fetchAgents,
-  fetchModels,
-  fetchProviders,
   fetchSmartStaffingConfig,
-  fetchUsers,
   updateSmartStaffingConfig,
 } from "../../api"
 
@@ -120,117 +115,6 @@ function AgentField({
   )
 }
 
-function PathEngineFields({
-  providerId,
-  modelId,
-  temperature,
-  maxRetries,
-  timeoutSeconds,
-  onProviderChange,
-  onModelChange,
-  onTemperatureChange,
-  onMaxRetriesChange,
-  onTimeoutSecondsChange,
-}: {
-  providerId: number
-  modelId: number
-  temperature: number
-  maxRetries: number
-  timeoutSeconds: number
-  onProviderChange: (id: number) => void
-  onModelChange: (id: number) => void
-  onTemperatureChange: (v: number) => void
-  onMaxRetriesChange: (v: number) => void
-  onTimeoutSecondsChange: (v: number) => void
-}) {
-  const { t } = useTranslation("itsm")
-  const navigate = useNavigate()
-
-  const { data: providers = [] } = useQuery({
-    queryKey: ["ai-providers"],
-    queryFn: fetchProviders,
-  })
-
-  const { data: models = [] } = useQuery({
-    queryKey: ["ai-models", providerId],
-    queryFn: () => fetchModels(providerId),
-    enabled: providerId > 0,
-  })
-
-  if (providers.length === 0) {
-    return (
-      <Alert>
-        <AlertDescription className="flex items-center justify-between gap-4">
-          <span>{t("engineConfig.noProviders")}</span>
-          <Button variant="link" size="sm" className="h-auto p-0" onClick={() => navigate("/ai/providers")}>
-            {t("engineConfig.goToProviders")}
-            <ExternalLink className="ml-1 h-3 w-3" />
-          </Button>
-        </AlertDescription>
-      </Alert>
-    )
-  }
-
-  return (
-    <div className="grid gap-4 xl:grid-cols-[minmax(190px,230px)_minmax(220px,280px)_minmax(220px,1fr)_minmax(120px,150px)_minmax(150px,190px)] xl:items-start">
-      <div className="space-y-1.5">
-        <Label>{t("engineConfig.provider")}</Label>
-        <Select
-          value={providerId ? String(providerId) : ""}
-          onValueChange={(v) => {
-            onProviderChange(Number(v))
-            onModelChange(0)
-          }}
-        >
-          <SelectTrigger className="w-full">
-            <SelectValue placeholder={t("engineConfig.providerPlaceholder")} />
-          </SelectTrigger>
-          <SelectContent>
-            {providers.map((p) => (
-              <SelectItem key={p.id} value={String(p.id)}>
-                {p.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
-      <div className="space-y-1.5">
-        <Label>{t("engineConfig.model")}</Label>
-        <Select value={modelId ? String(modelId) : ""} onValueChange={(v) => onModelChange(Number(v))} disabled={!providerId}>
-          <SelectTrigger className="w-full">
-            <SelectValue placeholder={t("engineConfig.modelPlaceholder")} />
-          </SelectTrigger>
-          <SelectContent>
-            {models.map((m) => (
-              <SelectItem key={m.id} value={String(m.id)}>
-                {m.displayName}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
-      <div className="space-y-2">
-        <div className="flex items-center justify-between gap-3">
-          <Label>{t("engineConfig.temperature")}</Label>
-          <span className="font-mono text-xs text-muted-foreground">{temperature.toFixed(2)}</span>
-        </div>
-        <Slider min={0} max={1} step={0.05} value={[temperature]} onValueChange={([v]) => onTemperatureChange(v)} />
-      </div>
-      <div className="space-y-1.5">
-        <Label>{t("engineConfig.maxRetries")}</Label>
-        <Input type="number" min={0} max={10} value={maxRetries} onChange={(e) => onMaxRetriesChange(Number(e.target.value))} />
-      </div>
-      <div className="space-y-1.5">
-        <Label>{t("engineConfig.timeoutSeconds")}</Label>
-        <div className="flex items-center gap-2">
-          <Input type="number" min={10} max={300} value={timeoutSeconds} onChange={(e) => onTimeoutSecondsChange(Number(e.target.value))} />
-          <span className="text-xs text-muted-foreground">{t("engineConfig.seconds")}</span>
-        </div>
-      </div>
-    </div>
-  )
-}
-
 function StaffingSection({
   icon,
   title,
@@ -271,13 +155,6 @@ function configFormKey(config: SmartStaffingConfig) {
     config.posts.decision.agentId,
     config.posts.decision.mode,
     config.posts.slaAssurance.agentId,
-    config.runtime.pathBuilder.providerId,
-    config.runtime.pathBuilder.modelId,
-    config.runtime.pathBuilder.temperature,
-    config.runtime.pathBuilder.maxRetries,
-    config.runtime.pathBuilder.timeoutSeconds,
-    config.runtime.guard.auditLevel,
-    config.runtime.guard.fallbackAssignee,
   ].join(":")
 }
 
@@ -289,11 +166,6 @@ function SmartStaffingForm({ config }: { config: SmartStaffingConfig }) {
     queryKey: ["ai-agents-for-smart-staffing"],
     queryFn: fetchAgents,
     select: (list) => list.filter((a) => a.type === "assistant" && a.isActive),
-  })
-
-  const { data: fallbackUsers = [] } = useQuery({
-    queryKey: ["users-for-smart-staffing-fallback"],
-    queryFn: () => fetchUsers(),
   })
 
   const healthByKey = useMemo(() => {
@@ -308,15 +180,6 @@ function SmartStaffingForm({ config }: { config: SmartStaffingConfig }) {
   const [decisionAgentId, setDecisionAgentId] = useState(config.posts.decision.agentId)
   const [decisionMode, setDecisionMode] = useState(config.posts.decision.mode || "direct_first")
   const [slaAssuranceAgentId, setSlaAssuranceAgentId] = useState(config.posts.slaAssurance.agentId)
-  const [pathProviderId, setPathProviderId] = useState(config.runtime.pathBuilder.providerId)
-  const [pathModelId, setPathModelId] = useState(config.runtime.pathBuilder.modelId)
-  const [pathTemperature, setPathTemperature] = useState(config.runtime.pathBuilder.temperature)
-  const [pathMaxRetries, setPathMaxRetries] = useState(config.runtime.pathBuilder.maxRetries)
-  const [pathTimeoutSeconds, setPathTimeoutSeconds] = useState(config.runtime.pathBuilder.timeoutSeconds)
-  const [auditLevel, setAuditLevel] = useState(config.runtime.guard.auditLevel)
-  const [fallbackAssignee, setFallbackAssignee] = useState(config.runtime.guard.fallbackAssignee)
-
-  const fallbackUserKnown = fallbackAssignee === 0 || fallbackUsers.some((u) => u.id === fallbackAssignee)
 
   const saveMut = useMutation({
     mutationFn: (data: SmartStaffingConfigUpdate) => updateSmartStaffingConfig(data),
@@ -334,15 +197,7 @@ function SmartStaffingForm({ config }: { config: SmartStaffingConfig }) {
         decision: { agentId: decisionAgentId, mode: decisionMode },
         slaAssurance: { agentId: slaAssuranceAgentId },
       },
-      runtime: {
-        pathBuilder: {
-          modelId: pathModelId,
-          temperature: pathTemperature,
-          maxRetries: pathMaxRetries,
-          timeoutSeconds: pathTimeoutSeconds,
-        },
-        guard: { auditLevel, fallbackAssignee },
-      },
+      runtime: config.runtime,
     })
   }
 
@@ -359,7 +214,7 @@ function SmartStaffingForm({ config }: { config: SmartStaffingConfig }) {
         </Button>
       </div>
 
-      <div className="grid gap-4 xl:grid-cols-3">
+      <div className="grid max-w-[1480px] gap-4 lg:grid-cols-2 2xl:grid-cols-3">
         <StaffingSection
           icon={Bot}
           title={t("itsm:engineConfig.intakeTitle")}
@@ -401,74 +256,6 @@ function SmartStaffingForm({ config }: { config: SmartStaffingConfig }) {
           <AgentField agentId={slaAssuranceAgentId} agents={agents} onAgentChange={setSlaAssuranceAgentId} />
         </StaffingSection>
       </div>
-
-      <Card className="gap-0 overflow-hidden py-0">
-        <div className="flex flex-col gap-3 border-b border-border/45 px-5 py-4 lg:flex-row lg:items-start lg:justify-between">
-          <div className="flex min-w-0 gap-3">
-            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border bg-muted/45">
-              <Route className="h-4.5 w-4.5 text-foreground" />
-            </div>
-            <div className="min-w-0">
-              <CardTitle className="text-sm">{t("itsm:engineConfig.runtimeTitle")}</CardTitle>
-              <CardDescription className="mt-1 text-xs leading-5">{t("itsm:engineConfig.runtimeDesc")}</CardDescription>
-            </div>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <EngineStatus status={statusFromHealth(healthByKey.get("pathBuilder"))} label={healthByKey.get("pathBuilder")?.label} />
-            <EngineStatus status={statusFromHealth(healthByKey.get("guard"))} label={healthByKey.get("guard")?.label} />
-          </div>
-        </div>
-        <CardContent className="space-y-5 px-5 py-4">
-          <PathEngineFields
-            providerId={pathProviderId}
-            modelId={pathModelId}
-            temperature={pathTemperature}
-            maxRetries={pathMaxRetries}
-            timeoutSeconds={pathTimeoutSeconds}
-            onProviderChange={setPathProviderId}
-            onModelChange={setPathModelId}
-            onTemperatureChange={setPathTemperature}
-            onMaxRetriesChange={setPathMaxRetries}
-            onTimeoutSecondsChange={setPathTimeoutSeconds}
-          />
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-[minmax(180px,240px)_minmax(220px,300px)]">
-            <div className="space-y-1.5">
-              <Label>{t("itsm:engineConfig.auditLevel")}</Label>
-              <Select value={auditLevel} onValueChange={setAuditLevel}>
-                <SelectTrigger className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="full">{t("itsm:engineConfig.logFull")}</SelectItem>
-                  <SelectItem value="summary">{t("itsm:engineConfig.logSummary")}</SelectItem>
-                  <SelectItem value="off">{t("itsm:engineConfig.logOff")}</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-1.5">
-              <Label>{t("itsm:engineConfig.fallbackAssignee")}</Label>
-              <Select value={String(fallbackAssignee)} onValueChange={(v) => setFallbackAssignee(Number(v))}>
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder={t("itsm:engineConfig.fallbackAssigneePlaceholder")} />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="0">{t("itsm:engineConfig.fallbackAssigneeNone")}</SelectItem>
-                  {!fallbackUserKnown && (
-                    <SelectItem value={String(fallbackAssignee)}>
-                      {t("itsm:engineConfig.fallbackAssigneeUnknown", { id: fallbackAssignee })}
-                    </SelectItem>
-                  )}
-                  {fallbackUsers.map((user) => (
-                    <SelectItem key={user.id} value={String(user.id)}>
-                      {user.username}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
     </div>
   )
 }

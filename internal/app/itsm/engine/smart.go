@@ -572,7 +572,7 @@ func (e *SmartEngine) tryFallbackAssignment(tx *gorm.DB, ticketID uint, activity
 	if err := tx.Table("users").Where("id = ? AND deleted_at IS NULL", fallbackID).
 		Select("username, is_active").First(&user).Error; err != nil || !user.IsActive {
 		e.recordTimeline(tx, ticketID, &activityID, 0, "participant_fallback_warning",
-			fmt.Sprintf("兜底处理人无效（ID=%d），请检查智能岗位", fallbackID), "")
+			fmt.Sprintf("兜底处理人无效（ID=%d），请检查引擎设置", fallbackID), "")
 		return
 	}
 

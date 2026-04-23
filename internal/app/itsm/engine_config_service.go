@@ -31,7 +31,7 @@ var (
 	ErrModelNotFound        = errors.New("模型不存在或已停用")
 	ErrAgentNotFound        = errors.New("智能体不存在或已停用")
 	ErrFallbackUserNotFound = errors.New("兜底处理人不存在或已停用")
-	ErrInvalidEngineConfig  = errors.New("智能岗位配置无效")
+	ErrInvalidEngineConfig  = errors.New("ITSM 配置无效")
 )
 
 // EngineConfigService manages ITSM smart staffing configuration.

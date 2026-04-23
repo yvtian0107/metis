@@ -350,6 +350,8 @@ func seedMenus(db *gorm.DB) error {
 
 	// 智能岗位
 	seedMenu(db, &itsmDir.ID, "智能岗位", model.MenuTypeMenu, "/itsm/smart-staffing", "Briefcase", "itsm:smart-staffing:config", 10)
+	// 引擎设置
+	seedMenu(db, &itsmDir.ID, "引擎设置", model.MenuTypeMenu, "/itsm/engine-settings", "Settings", "itsm:engine-settings:config", 11)
 	db.Where("permission = ?", "itsm:engine:config").Delete(&model.Menu{})
 
 	// 表单管理 - migrated away: remove menu and buttons
@@ -508,6 +510,7 @@ func seedPolicies(enforcer *casbin.Enforcer) error {
 		{"admin", "itsm:sla:update", "read"},
 		{"admin", "itsm:sla:delete", "read"},
 		{"admin", "itsm:smart-staffing:config", "read"},
+		{"admin", "itsm:engine-settings:config", "read"},
 	}
 
 	allPolicies := append(policies, menuPerms...)

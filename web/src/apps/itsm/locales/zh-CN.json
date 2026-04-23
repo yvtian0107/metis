@@ -594,6 +594,8 @@
   "engineConfig": {
     "title": "智能岗位",
     "pageDesc": "配置服务受理、流程决策和 SLA 保障三个岗位，让合适的智能体上岗处理智能工单。",
+    "engineSettingsTitle": "引擎设置",
+    "engineSettingsDesc": "管理 ITSM 引擎运行参数；当前包含参考路径生成、异常兜底与审计，后续经典引擎设置也放在这里。",
     "intakeTitle": "服务受理岗",
     "intakeDesc": "负责诉求识别、服务匹配、字段整理、草稿确认和建单。",
     "decisionTitle": "流程决策岗",
@@ -602,6 +604,10 @@
     "slaAssuranceDesc": "监听 SLA 风险和超时事件，按已配置规则触发通知、改派或提优先级。",
     "runtimeTitle": "运行参数",
     "runtimeDesc": "收敛参考路径生成、重试超时、审计级别和异常兜底，不作为独立岗位。",
+    "pathBuilderTitle": "参考路径生成",
+    "pathBuilderDesc": "把协作规范生成参考路径/策略草图，用于服务发布前的路径建议与运行提示。",
+    "guardTitle": "异常兜底与审计",
+    "guardDesc": "控制运行记录粒度，并在智能决策异常或无人接管时指定兜底处理人。",
     "provider": "Provider",
     "providerPlaceholder": "选择 Provider",
     "model": "模型",
@@ -626,6 +632,7 @@
     "logSummary": "仅摘要",
     "logOff": "关闭",
     "saveSuccess": "智能岗位配置已保存",
+    "engineSaveSuccess": "引擎设置已保存",
     "noProviders": "尚未配置 AI Provider，请先前往 AI 模块添加",
     "goToProviders": "前往配置",
     "status": {
