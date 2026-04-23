@@ -89,6 +89,7 @@ func (a *AIApp) Providers(i do.Injector) {
 	do.Provide(i, NewKnowledgeCompileService)
 	// Tool registry
 	do.Provide(i, NewToolRepo)
+	do.Provide(i, NewToolRuntimeService)
 	do.Provide(i, NewToolService)
 	do.Provide(i, NewToolHandler)
 	do.Provide(i, NewMCPServerRepo)
@@ -248,6 +249,7 @@ func (a *AIApp) Routes(api *gin.RouterGroup) {
 	{
 		tools.GET("", toolH.List)
 		tools.PUT("/:id", toolH.Update)
+		tools.PATCH("/:id/runtime", toolH.UpdateRuntime)
 	}
 
 	capabilitySetH := do.MustInvoke[*CapabilitySetHandler](a.injector)

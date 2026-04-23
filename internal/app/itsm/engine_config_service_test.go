@@ -36,6 +36,8 @@ func newEngineConfigTestService(t *testing.T) (*EngineConfigService, *database.D
 	do.Provide(injector, aiapp.NewProviderRepo)
 	do.ProvideValue(injector, crypto.EncryptionKey(crypto.DeriveKey("test-secret")))
 	do.Provide(injector, aiapp.NewProviderService)
+	do.Provide(injector, aiapp.NewToolRepo)
+	do.Provide(injector, aiapp.NewToolRuntimeService)
 	do.Provide(injector, NewEngineConfigService)
 	return do.MustInvoke[*EngineConfigService](injector), &database.DB{DB: db}
 }
@@ -79,6 +81,10 @@ func TestEngineConfigServiceReadsAndUpdatesSmartStaffingAndEngineSettings(t *tes
 	if err := db.Model(&aiapp.Agent{}).Where("id IN ?", []uint{intakeAgent.ID, decisionAgent.ID, slaAssuranceAgent.ID}).Update("model_id", model.ID).Error; err != nil {
 		t.Fatalf("bind staffing agent models: %v", err)
 	}
+	if err := db.Table("ai_tools").Where("name = ?", "itsm.service_match").Update("runtime_config",
+		`{"modelId":`+strconv.FormatUint(uint64(model.ID), 10)+`,"temperature":0.2,"maxTokens":1024,"timeoutSeconds":30}`).Error; err != nil {
+		t.Fatalf("configure service match tool runtime: %v", err)
+	}
 
 	fallback := coremodel.User{Username: "fallback", IsActive: true}
 	if err := db.Create(&fallback).Error; err != nil {
@@ -95,10 +101,6 @@ func TestEngineConfigServiceReadsAndUpdatesSmartStaffingAndEngineSettings(t *tes
 	}
 
 	var engineReq UpdateEngineSettingsRequest
-	engineReq.Runtime.ServiceMatcher.ModelID = model.ID
-	engineReq.Runtime.ServiceMatcher.Temperature = 0.15
-	engineReq.Runtime.ServiceMatcher.MaxTokens = 768
-	engineReq.Runtime.ServiceMatcher.TimeoutSeconds = 35
 	engineReq.Runtime.PathBuilder.ModelID = model.ID
 	engineReq.Runtime.PathBuilder.Temperature = 0.25
 	engineReq.Runtime.PathBuilder.MaxRetries = 4
@@ -124,9 +126,6 @@ func TestEngineConfigServiceReadsAndUpdatesSmartStaffingAndEngineSettings(t *tes
 	if err != nil {
 		t.Fatalf("get engine settings config: %v", err)
 	}
-	if engineSettings.Runtime.ServiceMatcher.ModelID != model.ID || engineSettings.Runtime.ServiceMatcher.ProviderID != provider.ID || engineSettings.Runtime.ServiceMatcher.MaxTokens != 768 || engineSettings.Runtime.ServiceMatcher.TimeoutSeconds != 35 {
-		t.Fatalf("unexpected service matcher config: %+v", engineSettings.Runtime.ServiceMatcher)
-	}
 	if engineSettings.Runtime.PathBuilder.ModelID != model.ID || engineSettings.Runtime.PathBuilder.ProviderID != provider.ID || engineSettings.Runtime.PathBuilder.MaxRetries != 4 || engineSettings.Runtime.PathBuilder.TimeoutSeconds != 90 {
 		t.Fatalf("unexpected path config: %+v", engineSettings.Runtime.PathBuilder)
 	}
@@ -135,20 +134,16 @@ func TestEngineConfigServiceReadsAndUpdatesSmartStaffingAndEngineSettings(t *tes
 	}
 
 	expectedKeys := map[string]string{
-		smartTicketIntakeAgentKey:               strconv.FormatUint(uint64(intakeAgent.ID), 10),
-		smartTicketDecisionAgentKey:             strconv.FormatUint(uint64(decisionAgent.ID), 10),
-		smartTicketSLAAssuranceAgentKey:         strconv.FormatUint(uint64(slaAssuranceAgent.ID), 10),
-		smartTicketDecisionModeKey:              "ai_only",
-		smartTicketServiceMatcherModelKey:       strconv.FormatUint(uint64(model.ID), 10),
-		smartTicketServiceMatcherTemperatureKey: "0.15",
-		smartTicketServiceMatcherMaxTokensKey:   "768",
-		smartTicketServiceMatcherTimeoutKey:     "35",
-		smartTicketPathModelKey:                 strconv.FormatUint(uint64(model.ID), 10),
-		smartTicketPathTemperatureKey:           "0.25",
-		smartTicketPathMaxRetriesKey:            "4",
-		smartTicketPathTimeoutKey:               "90",
-		smartTicketGuardAuditLevelKey:           "summary",
-		smartTicketGuardFallbackKey:             strconv.FormatUint(uint64(fallback.ID), 10),
+		smartTicketIntakeAgentKey:       strconv.FormatUint(uint64(intakeAgent.ID), 10),
+		smartTicketDecisionAgentKey:     strconv.FormatUint(uint64(decisionAgent.ID), 10),
+		smartTicketSLAAssuranceAgentKey: strconv.FormatUint(uint64(slaAssuranceAgent.ID), 10),
+		smartTicketDecisionModeKey:      "ai_only",
+		smartTicketPathModelKey:         strconv.FormatUint(uint64(model.ID), 10),
+		smartTicketPathTemperatureKey:   "0.25",
+		smartTicketPathMaxRetriesKey:    "4",
+		smartTicketPathTimeoutKey:       "90",
+		smartTicketGuardAuditLevelKey:   "summary",
+		smartTicketGuardFallbackKey:     strconv.FormatUint(uint64(fallback.ID), 10),
 	}
 	for key, value := range expectedKeys {
 		var cfg coremodel.SystemConfig
@@ -164,8 +159,6 @@ func TestEngineConfigServiceReadsAndUpdatesSmartStaffingAndEngineSettings(t *tes
 func TestEngineConfigServiceRejectsInvalidFallbackAssignee(t *testing.T) {
 	svc, _ := newEngineConfigTestService(t)
 	var req UpdateEngineSettingsRequest
-	req.Runtime.ServiceMatcher.MaxTokens = 1024
-	req.Runtime.ServiceMatcher.TimeoutSeconds = 30
 	req.Runtime.PathBuilder.MaxRetries = 3
 	req.Runtime.PathBuilder.TimeoutSeconds = 120
 	req.Runtime.Guard.AuditLevel = "full"

@@ -302,7 +302,6 @@ func seedMenus(db *gorm.DB) error {
 	if err := db.Where("permission IN ?", []string{
 		"itsm:ticket:todo",
 		"itsm:ticket:approvals",
-		"itsm:ticket:approval:pending",
 	}).Delete(&model.Menu{}).Error; err != nil {
 		slog.Warn("seed: failed to remove obsolete approval menus", "error", err)
 	}
@@ -311,6 +310,7 @@ func seedMenus(db *gorm.DB) error {
 
 	// 我的工单
 	seedMenu(db, &itsmDir.ID, "我的工单", model.MenuTypeMenu, "/itsm/tickets/mine", "User", "itsm:ticket:mine", 1)
+	seedMenu(db, &itsmDir.ID, "我的待办", model.MenuTypeMenu, "/itsm/tickets/approvals/pending", "ClipboardCheck", "itsm:ticket:approval:pending", 2)
 	seedMenu(db, &itsmDir.ID, "历史工单", model.MenuTypeMenu, "/itsm/tickets/approvals/history", "History", "itsm:ticket:approval:history", 3)
 
 	// 工单监控
@@ -367,7 +367,7 @@ func seedMenus(db *gorm.DB) error {
 
 func seedMenu(db *gorm.DB, parentID *uint, name string, menuType model.MenuType, path, icon, permission string, sort int) *model.Menu {
 	var menu model.Menu
-	if tx := db.Where("permission = ?", permission).Limit(1).Find(&menu); tx.Error != nil {
+	if tx := db.Unscoped().Where("permission = ?", permission).Limit(1).Find(&menu); tx.Error != nil {
 		slog.Error("seed: failed to query menu", "permission", permission, "error", tx.Error)
 		return nil
 	} else if tx.RowsAffected == 0 {
@@ -385,17 +385,38 @@ func seedMenu(db *gorm.DB, parentID *uint, name string, menuType model.MenuType,
 			return nil
 		}
 		slog.Info("seed: created menu", "name", menu.Name, "permission", menu.Permission)
-	} else if menu.Name != name || menu.Type != menuType || menu.Path != path || menu.Icon != icon || menu.Sort != sort || (parentID != nil && (menu.ParentID == nil || *menu.ParentID != *parentID)) {
-		db.Model(&menu).Updates(map[string]any{
-			"name":      name,
-			"type":      menuType,
-			"path":      path,
-			"icon":      icon,
-			"sort":      sort,
-			"parent_id": parentID,
-		})
+	} else if menu.DeletedAt.Valid || menu.Name != name || menu.Type != menuType || menu.Path != path || menu.Icon != icon || menu.Sort != sort || !sameMenuParent(menu.ParentID, parentID) {
+		if err := db.Unscoped().Model(&menu).Updates(map[string]any{
+			"name":       name,
+			"type":       menuType,
+			"path":       path,
+			"icon":       icon,
+			"sort":       sort,
+			"parent_id":  parentID,
+			"deleted_at": nil,
+		}).Error; err != nil {
+			slog.Error("seed: failed to update menu", "permission", permission, "error", err)
+			return nil
+		}
+		menu.Name = name
+		menu.Type = menuType
+		menu.Path = path
+		menu.Icon = icon
+		menu.Sort = sort
+		menu.ParentID = parentID
+		menu.DeletedAt.Valid = false
 	}
 	return &menu
+}
+
+func sameMenuParent(a *uint, b *uint) bool {
+	if a == nil && b == nil {
+		return true
+	}
+	if a == nil || b == nil {
+		return false
+	}
+	return *a == *b
 }
 
 func seedButtons(db *gorm.DB, parent *model.Menu, buttons []model.Menu) {
@@ -771,21 +792,17 @@ func seedEngineConfig(db *gorm.DB) error {
 		slog.Info("seed: created system config", "key", configKey, "value", value)
 	}
 
-	migrateServiceMatcherEngineConfig(db)
 	migratePathEngineAgentConfig(db)
+	seedServiceMatchToolRuntime(db)
 
 	defaults := map[string]string{
-		smartTicketDecisionModeKey:              "direct_first",
-		smartTicketServiceMatcherModelKey:       "0",
-		smartTicketServiceMatcherTemperatureKey: "0.2",
-		smartTicketServiceMatcherMaxTokensKey:   "1024",
-		smartTicketServiceMatcherTimeoutKey:     "30",
-		smartTicketPathModelKey:                 "0",
-		smartTicketPathTemperatureKey:           "0.3",
-		smartTicketPathMaxRetriesKey:            "3",
-		smartTicketPathTimeoutKey:               "120",
-		smartTicketGuardAuditLevelKey:           "full",
-		smartTicketGuardFallbackKey:             "0",
+		smartTicketDecisionModeKey:    "direct_first",
+		smartTicketPathModelKey:       "0",
+		smartTicketPathTemperatureKey: "0.3",
+		smartTicketPathMaxRetriesKey:  "3",
+		smartTicketPathTimeoutKey:     "120",
+		smartTicketGuardAuditLevelKey: "full",
+		smartTicketGuardFallbackKey:   "0",
 	}
 
 	for key, value := range defaults {
@@ -802,6 +819,7 @@ func seedEngineConfig(db *gorm.DB) error {
 	}
 
 	deleteLegacySmartTicketEngineConfig(db)
+	deleteLegacyServiceMatcherEngineConfig(db)
 	deleteLegacyPathBuilderAgents(db)
 
 	return nil
@@ -836,45 +854,6 @@ func migrateSmartTicketEngineConfig(db *gorm.DB) {
 	}
 }
 
-func migrateServiceMatcherEngineConfig(db *gorm.DB) {
-	var existing model.SystemConfig
-	if err := db.Where("\"key\" = ?", smartTicketServiceMatcherModelKey).First(&existing).Error; err == nil {
-		return
-	}
-
-	agentID := uint(0)
-	var intakeConfig model.SystemConfig
-	if err := db.Where("\"key\" = ?", smartTicketIntakeAgentKey).First(&intakeConfig).Error; err == nil {
-		if id, parseErr := strconv.ParseUint(intakeConfig.Value, 10, 64); parseErr == nil {
-			agentID = uint(id)
-		}
-	}
-	var agentRow struct {
-		ID          uint
-		ModelID     *uint
-		Temperature float64
-		MaxTokens   int
-	}
-	query := db.Table("ai_agents").Select("id", "model_id", "temperature", "max_tokens")
-	var err error
-	if agentID > 0 {
-		err = query.Where("id = ?", agentID).First(&agentRow).Error
-	} else {
-		err = query.Where("code = ?", "itsm.servicedesk").First(&agentRow).Error
-	}
-	if err != nil || agentRow.ModelID == nil {
-		return
-	}
-	ensureSystemConfig(db, smartTicketServiceMatcherModelKey, strconv.FormatUint(uint64(*agentRow.ModelID), 10))
-	if agentRow.Temperature >= 0 {
-		ensureSystemConfig(db, smartTicketServiceMatcherTemperatureKey, strconv.FormatFloat(agentRow.Temperature, 'f', -1, 64))
-	}
-	if agentRow.MaxTokens > 0 {
-		ensureSystemConfig(db, smartTicketServiceMatcherMaxTokensKey, strconv.Itoa(agentRow.MaxTokens))
-	}
-	slog.Info("seed: migrated service matcher engine config from intake agent")
-}
-
 func migratePathEngineAgentConfig(db *gorm.DB) {
 	type pathAgentRow struct {
 		ID          uint
@@ -898,6 +877,44 @@ func migratePathEngineAgentConfig(db *gorm.DB) {
 			return
 		}
 	}
+}
+
+func seedServiceMatchToolRuntime(db *gorm.DB) {
+	if !db.Migrator().HasTable("ai_tools") || !db.Migrator().HasColumn("ai_tools", "runtime_config") {
+		return
+	}
+	var toolRow struct {
+		ID            uint
+		RuntimeConfig string
+	}
+	if err := db.Table("ai_tools").Where("name = ?", "itsm.service_match").Select("id", "runtime_config").First(&toolRow).Error; err != nil {
+		return
+	}
+	if toolRow.RuntimeConfig != "" && toolRow.RuntimeConfig != `{"modelId":0,"temperature":0.2,"maxTokens":1024,"timeoutSeconds":30}` {
+		return
+	}
+	var agentRow struct {
+		ModelID     *uint
+		Temperature float64
+		MaxTokens   int
+	}
+	if err := db.Table("ai_agents").Where("code = ?", "itsm.servicedesk").Select("model_id", "temperature", "max_tokens").First(&agentRow).Error; err != nil || agentRow.ModelID == nil {
+		return
+	}
+	maxTokens := agentRow.MaxTokens
+	if maxTokens < 256 || maxTokens > 8192 {
+		maxTokens = 1024
+	}
+	timeoutSeconds := 30
+	runtimeConfig := `{"modelId":` + strconv.FormatUint(uint64(*agentRow.ModelID), 10) +
+		`,"temperature":` + strconv.FormatFloat(agentRow.Temperature, 'f', -1, 64) +
+		`,"maxTokens":` + strconv.Itoa(maxTokens) +
+		`,"timeoutSeconds":` + strconv.Itoa(timeoutSeconds) + `}`
+	if err := db.Table("ai_tools").Where("id = ?", toolRow.ID).Update("runtime_config", runtimeConfig).Error; err != nil {
+		slog.Warn("seed: failed to seed service match tool runtime", "error", err)
+		return
+	}
+	slog.Info("seed: seeded service match tool runtime from service desk agent")
 }
 
 func ensureSystemConfig(db *gorm.DB, key string, value string) {
@@ -924,6 +941,18 @@ func deleteLegacySmartTicketEngineConfig(db *gorm.DB) {
 	}
 	if err := db.Where("\"key\" IN ?", legacyKeys).Delete(&model.SystemConfig{}).Error; err != nil {
 		slog.Warn("seed: failed to delete legacy smart ticket engine config", "error", err)
+	}
+}
+
+func deleteLegacyServiceMatcherEngineConfig(db *gorm.DB) {
+	keys := []string{
+		"itsm.smart_ticket.service_matcher.model_id",
+		"itsm.smart_ticket.service_matcher.temperature",
+		"itsm.smart_ticket.service_matcher.max_tokens",
+		"itsm.smart_ticket.service_matcher.timeout_seconds",
+	}
+	if err := db.Where("\"key\" IN ?", keys).Delete(&model.SystemConfig{}).Error; err != nil {
+		slog.Warn("seed: failed to delete legacy service matcher engine config", "error", err)
 	}
 }
 

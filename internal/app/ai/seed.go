@@ -651,6 +651,7 @@ func seedAI(db *gorm.DB, enforcer *casbin.Enforcer) error {
 		// Tools
 		{"admin", "/api/v1/ai/tools", "GET"},
 		{"admin", "/api/v1/ai/tools/:id", "PUT"},
+		{"admin", "/api/v1/ai/tools/:id/runtime", "PATCH"},
 		{"admin", "/api/v1/ai/capability-sets", "GET"},
 		// MCP Servers
 		{"admin", "/api/v1/ai/mcp-servers", "GET"},

@@ -20,11 +20,6 @@ const (
 	smartTicketSLAAssuranceAgentKey = "itsm.smart_ticket.sla_assurance.agent_id"
 	smartTicketDecisionModeKey      = "itsm.smart_ticket.decision.mode"
 
-	smartTicketServiceMatcherModelKey       = "itsm.smart_ticket.service_matcher.model_id"
-	smartTicketServiceMatcherTemperatureKey = "itsm.smart_ticket.service_matcher.temperature"
-	smartTicketServiceMatcherMaxTokensKey   = "itsm.smart_ticket.service_matcher.max_tokens"
-	smartTicketServiceMatcherTimeoutKey     = "itsm.smart_ticket.service_matcher.timeout_seconds"
-
 	smartTicketPathModelKey       = "itsm.smart_ticket.path.model_id"
 	smartTicketPathTemperatureKey = "itsm.smart_ticket.path.temperature"
 	smartTicketPathMaxRetriesKey  = "itsm.smart_ticket.path.max_retries"
@@ -47,16 +42,19 @@ type EngineConfigService struct {
 	agentSvc      *ai.AgentService
 	modelRepo     *ai.ModelRepo
 	providerSvc   *ai.ProviderService
+	toolRuntime   *ai.ToolRuntimeService
 	sysConfigRepo *repository.SysConfigRepo
 	db            *gorm.DB
 }
 
 func NewEngineConfigService(i do.Injector) (*EngineConfigService, error) {
 	db := do.MustInvoke[*database.DB](i)
+	toolRuntime, _ := do.Invoke[*ai.ToolRuntimeService](i)
 	return &EngineConfigService{
 		agentSvc:      do.MustInvoke[*ai.AgentService](i),
 		modelRepo:     do.MustInvoke[*ai.ModelRepo](i),
 		providerSvc:   do.MustInvoke[*ai.ProviderService](i),
+		toolRuntime:   toolRuntime,
 		sysConfigRepo: do.MustInvoke[*repository.SysConfigRepo](i),
 		db:            db.DB,
 	}, nil
@@ -79,9 +77,8 @@ type EngineSettingsConfig struct {
 }
 
 type EngineSettingsRuntime struct {
-	ServiceMatcher EngineServiceMatcherConfig `json:"serviceMatcher"`
-	PathBuilder    EnginePathConfig           `json:"pathBuilder"`
-	Guard          EngineGuardConfig          `json:"guard"`
+	PathBuilder EnginePathConfig  `json:"pathBuilder"`
+	Guard       EngineGuardConfig `json:"guard"`
 }
 
 type EngineAgentSelector struct {
@@ -100,12 +97,6 @@ type EngineModelConfig struct {
 	ProviderName string  `json:"providerName"`
 	ModelName    string  `json:"modelName"`
 	Temperature  float64 `json:"temperature"`
-}
-
-type EngineServiceMatcherConfig struct {
-	EngineModelConfig
-	MaxTokens      int `json:"maxTokens"`
-	TimeoutSeconds int `json:"timeoutSeconds"`
 }
 
 type EnginePathConfig struct {
@@ -147,12 +138,6 @@ type UpdateSmartStaffingRequest struct {
 
 type UpdateEngineSettingsRequest struct {
 	Runtime struct {
-		ServiceMatcher struct {
-			ModelID        uint    `json:"modelId"`
-			Temperature    float64 `json:"temperature"`
-			MaxTokens      int     `json:"maxTokens"`
-			TimeoutSeconds int     `json:"timeoutSeconds"`
-		} `json:"serviceMatcher"`
 		PathBuilder struct {
 			ModelID        uint    `json:"modelId"`
 			Temperature    float64 `json:"temperature"`
@@ -222,9 +207,8 @@ func (s *EngineConfigService) UpdateSmartStaffingConfig(req *UpdateSmartStaffing
 func (s *EngineConfigService) GetEngineSettingsConfig() (*EngineSettingsConfig, error) {
 	cfg := &EngineSettingsConfig{
 		Runtime: EngineSettingsRuntime{
-			ServiceMatcher: s.readServiceMatcherConfig(),
-			PathBuilder:    s.readPathConfig(),
-			Guard:          s.readGuardConfig(),
+			PathBuilder: s.readPathConfig(),
+			Guard:       s.readGuardConfig(),
 		},
 	}
 	cfg.Health = s.buildEngineSettingsHealth(cfg)
@@ -232,27 +216,13 @@ func (s *EngineConfigService) GetEngineSettingsConfig() (*EngineSettingsConfig, 
 }
 
 func (s *EngineConfigService) UpdateEngineSettingsConfig(req *UpdateEngineSettingsRequest) error {
-	if req.Runtime.ServiceMatcher.ModelID > 0 {
-		if err := s.validateActiveModel(req.Runtime.ServiceMatcher.ModelID); err != nil {
-			return err
-		}
-	}
 	if req.Runtime.PathBuilder.ModelID > 0 {
 		if err := s.validateActiveModel(req.Runtime.PathBuilder.ModelID); err != nil {
 			return err
 		}
 	}
-	if err := validateTemperature("服务匹配", req.Runtime.ServiceMatcher.Temperature); err != nil {
-		return err
-	}
 	if err := validateTemperature("参考路径", req.Runtime.PathBuilder.Temperature); err != nil {
 		return err
-	}
-	if req.Runtime.ServiceMatcher.MaxTokens < 256 || req.Runtime.ServiceMatcher.MaxTokens > 8192 {
-		return fmt.Errorf("%w: 服务匹配最大输出 Token 必须在 256 到 8192 之间", ErrInvalidEngineConfig)
-	}
-	if req.Runtime.ServiceMatcher.TimeoutSeconds < 5 || req.Runtime.ServiceMatcher.TimeoutSeconds > 300 {
-		return fmt.Errorf("%w: 服务匹配超时时间必须在 5 到 300 秒之间", ErrInvalidEngineConfig)
 	}
 	if req.Runtime.PathBuilder.MaxRetries < 0 || req.Runtime.PathBuilder.MaxRetries > 10 {
 		return fmt.Errorf("%w: 参考路径最大重试次数必须在 0 到 10 之间", ErrInvalidEngineConfig)
@@ -269,10 +239,6 @@ func (s *EngineConfigService) UpdateEngineSettingsConfig(req *UpdateEngineSettin
 		}
 	}
 
-	s.setConfigValue(smartTicketServiceMatcherModelKey, strconv.FormatUint(uint64(req.Runtime.ServiceMatcher.ModelID), 10))
-	s.setConfigValue(smartTicketServiceMatcherTemperatureKey, formatFloat(req.Runtime.ServiceMatcher.Temperature))
-	s.setConfigValue(smartTicketServiceMatcherMaxTokensKey, strconv.Itoa(req.Runtime.ServiceMatcher.MaxTokens))
-	s.setConfigValue(smartTicketServiceMatcherTimeoutKey, strconv.Itoa(req.Runtime.ServiceMatcher.TimeoutSeconds))
 	s.setConfigValue(smartTicketPathModelKey, strconv.FormatUint(uint64(req.Runtime.PathBuilder.ModelID), 10))
 	s.setConfigValue(smartTicketPathTemperatureKey, formatFloat(req.Runtime.PathBuilder.Temperature))
 	s.setConfigValue(smartTicketPathMaxRetriesKey, strconv.Itoa(req.Runtime.PathBuilder.MaxRetries))
@@ -280,11 +246,6 @@ func (s *EngineConfigService) UpdateEngineSettingsConfig(req *UpdateEngineSettin
 	s.setConfigValue(smartTicketGuardAuditLevelKey, req.Runtime.Guard.AuditLevel)
 	s.setConfigValue(smartTicketGuardFallbackKey, strconv.FormatUint(uint64(req.Runtime.Guard.FallbackAssignee), 10))
 	return nil
-}
-
-func (s *EngineConfigService) ServiceMatcherRuntimeConfig() (LLMEngineRuntimeConfig, error) {
-	cfg := s.readServiceMatcherConfig()
-	return s.buildLLMRuntimeConfig("服务匹配引擎", cfg.ModelID, cfg.Temperature, cfg.MaxTokens, 0, cfg.TimeoutSeconds)
 }
 
 func (s *EngineConfigService) PathBuilderRuntimeConfig() (LLMEngineRuntimeConfig, error) {
@@ -317,19 +278,6 @@ func (s *EngineConfigService) buildLLMRuntimeConfig(label string, modelID uint, 
 		MaxRetries:     maxRetries,
 		TimeoutSeconds: timeoutSeconds,
 	}, nil
-}
-
-func (s *EngineConfigService) readServiceMatcherConfig() EngineServiceMatcherConfig {
-	cfg := EngineServiceMatcherConfig{
-		EngineModelConfig: EngineModelConfig{
-			ModelID:     uint(s.getConfigInt(smartTicketServiceMatcherModelKey, 0)),
-			Temperature: s.getConfigFloat(smartTicketServiceMatcherTemperatureKey, 0.2),
-		},
-		MaxTokens:      s.getConfigInt(smartTicketServiceMatcherMaxTokensKey, 1024),
-		TimeoutSeconds: s.getConfigInt(smartTicketServiceMatcherTimeoutKey, 30),
-	}
-	s.fillModelMeta(&cfg.EngineModelConfig)
-	return cfg
 }
 
 func (s *EngineConfigService) readPathConfig() EnginePathConfig {
@@ -484,7 +432,6 @@ func (s *EngineConfigService) buildSmartStaffingHealth(cfg *SmartStaffingConfig)
 
 func (s *EngineConfigService) buildEngineSettingsHealth(cfg *EngineSettingsConfig) EngineHealth {
 	items := []EngineHealthItem{
-		s.modelEngineHealth("serviceMatcher", "服务匹配引擎", cfg.Runtime.ServiceMatcher.EngineModelConfig, cfg.Runtime.ServiceMatcher.TimeoutSeconds),
 		s.pathHealth(cfg.Runtime.PathBuilder),
 		s.guardHealth(cfg.Runtime.Guard),
 	}
@@ -505,7 +452,24 @@ func (s *EngineConfigService) agentHealth(key, label string, agentID uint, requi
 	if missing := s.missingAgentTools(agentID, requiredTools); len(missing) > 0 {
 		return EngineHealthItem{Key: key, Label: label, Status: "fail", Message: label + "工具缺失：" + missing[0]}
 	}
+	if requiresTool(requiredTools, "itsm.service_match") {
+		if s.toolRuntime == nil {
+			return EngineHealthItem{Key: key, Label: label, Status: "fail", Message: "服务匹配 Tool 运行时不可用，请前往 AI Tools 配置"}
+		}
+		if _, err := s.toolRuntime.LLMRuntimeConfig("itsm.service_match"); err != nil {
+			return EngineHealthItem{Key: key, Label: label, Status: "fail", Message: "服务匹配 Tool 未就绪，请前往 AI Tools 配置：" + err.Error()}
+		}
+	}
 	return EngineHealthItem{Key: key, Label: label, Status: "pass", Message: label + "已上岗"}
+}
+
+func requiresTool(required []string, name string) bool {
+	for _, item := range required {
+		if item == name {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *EngineConfigService) modelEngineHealth(key, label string, cfg EngineModelConfig, timeoutSeconds int) EngineHealthItem {

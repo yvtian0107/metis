@@ -11,10 +11,12 @@ import (
 
 // ITSMTool defines a tool that ITSM registers into the ai_tools table.
 type ITSMTool struct {
-	Name             string
-	DisplayName      string
-	Description      string
-	ParametersSchema json.RawMessage
+	Name                string
+	DisplayName         string
+	Description         string
+	ParametersSchema    json.RawMessage
+	RuntimeConfigSchema json.RawMessage
+	RuntimeConfig       json.RawMessage
 }
 
 // AllTools returns the ITSM tool definitions.
@@ -31,6 +33,19 @@ func AllTools() []ITSMTool {
 				},
 				"required": ["query"]
 			}`),
+			RuntimeConfigSchema: json.RawMessage(`{
+				"type": "object",
+				"kind": "llm",
+				"title": "服务匹配运行时",
+				"properties": {
+					"modelId": {"type": "integer", "title": "模型", "minimum": 1},
+					"temperature": {"type": "number", "title": "温度", "minimum": 0, "maximum": 1, "default": 0.2},
+					"maxTokens": {"type": "integer", "title": "最大 Token", "minimum": 256, "maximum": 8192, "default": 1024},
+					"timeoutSeconds": {"type": "integer", "title": "超时时间", "minimum": 5, "maximum": 300, "default": 30}
+				},
+				"required": ["modelId", "temperature", "maxTokens", "timeoutSeconds"]
+			}`),
+			RuntimeConfig: json.RawMessage(`{"modelId":0,"temperature":0.2,"maxTokens":1024,"timeoutSeconds":30}`),
 		},
 		{
 			Name:        "itsm.service_confirm",
@@ -255,10 +270,16 @@ func SeedTools(db *gorm.DB) error {
 		if err := db.Table("ai_tools").Where("name = ?", tool.Name).Select("id").First(&existing).Error; err == nil {
 			// Update existing
 			db.Table("ai_tools").Where("id = ?", existing.ID).Updates(map[string]any{
-				"display_name":      tool.DisplayName,
-				"description":       tool.Description,
-				"parameters_schema": string(tool.ParametersSchema),
+				"display_name":          tool.DisplayName,
+				"description":           tool.Description,
+				"parameters_schema":     string(tool.ParametersSchema),
+				"runtime_config_schema": string(tool.RuntimeConfigSchema),
 			})
+			if len(tool.RuntimeConfig) > 0 {
+				db.Table("ai_tools").
+					Where("id = ? AND (runtime_config IS NULL OR runtime_config = '')", existing.ID).
+					Update("runtime_config", string(tool.RuntimeConfig))
+			}
 			slog.Info("ITSM tools seed: updated tool", "name", tool.Name)
 		} else {
 			// Create new
@@ -269,12 +290,14 @@ func SeedTools(db *gorm.DB) error {
 				toolkit = "sla"
 			}
 			if err := db.Table("ai_tools").Create(map[string]any{
-				"toolkit":           toolkit,
-				"name":              tool.Name,
-				"display_name":      tool.DisplayName,
-				"description":       tool.Description,
-				"parameters_schema": string(tool.ParametersSchema),
-				"is_active":         true,
+				"toolkit":               toolkit,
+				"name":                  tool.Name,
+				"display_name":          tool.DisplayName,
+				"description":           tool.Description,
+				"parameters_schema":     string(tool.ParametersSchema),
+				"runtime_config_schema": string(tool.RuntimeConfigSchema),
+				"runtime_config":        string(tool.RuntimeConfig),
+				"is_active":             true,
 			}).Error; err != nil {
 				slog.Error("ITSM tools seed: failed to create tool", "name", tool.Name, "error", err)
 				continue

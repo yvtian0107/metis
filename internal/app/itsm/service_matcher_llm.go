@@ -9,12 +9,13 @@ import (
 
 	"gorm.io/gorm"
 
+	aiapp "metis/internal/app/ai"
 	"metis/internal/app/itsm/tools"
 	"metis/internal/llm"
 )
 
 type ServiceMatchConfigProvider interface {
-	ServiceMatcherRuntimeConfig() (LLMEngineRuntimeConfig, error)
+	LLMRuntimeConfig(toolName string) (aiapp.LLMToolRuntimeConfig, error)
 }
 
 type LLMClientFactory func(protocol, baseURL, apiKey string) (llm.Client, error)
@@ -62,9 +63,9 @@ func (m *LLMServiceMatcher) MatchServices(ctx context.Context, query string) ([]
 	if m.config == nil {
 		return nil, tools.MatchDecision{}, fmt.Errorf("service matcher config provider is not configured")
 	}
-	engineCfg, err := m.config.ServiceMatcherRuntimeConfig()
+	engineCfg, err := m.config.LLMRuntimeConfig("itsm.service_match")
 	if err != nil {
-		return nil, tools.MatchDecision{}, fmt.Errorf("load service matcher engine config: %w", err)
+		return nil, tools.MatchDecision{}, fmt.Errorf("load service match tool runtime: %w", err)
 	}
 
 	candidates, err := m.loadCandidates()

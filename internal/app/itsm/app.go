@@ -12,6 +12,7 @@ import (
 	"gorm.io/gorm"
 
 	"metis/internal/app"
+	aiapp "metis/internal/app/ai"
 	"metis/internal/app/itsm/engine"
 	"metis/internal/app/itsm/tools"
 	"metis/internal/database"
@@ -222,8 +223,8 @@ func (a *ITSMApp) Providers(i do.Injector) {
 		// TicketCreator is resolved lazily (same pattern as withdrawFunc) to break circular dep.
 		var ticketCreator tools.TicketCreator
 		ticketCreator = &lazyTicketCreator{injector: i}
-		configProvider := do.MustInvoke[*EngineConfigService](i)
-		matcher := NewLLMServiceMatcher(db.DB, configProvider, nil)
+		runtimeProvider := do.MustInvoke[*aiapp.ToolRuntimeService](i)
+		matcher := NewLLMServiceMatcher(db.DB, runtimeProvider, nil)
 		return tools.NewOperator(db.DB, resolver, orgResolver, withdrawFunc, ticketCreator, matcher), nil
 	})
 	do.Provide(i, func(i do.Injector) (*tools.SessionStateStore, error) {

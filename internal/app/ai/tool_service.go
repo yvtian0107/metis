@@ -14,12 +14,14 @@ var (
 
 type ToolService struct {
 	repo       *ToolRepo
+	runtimeSvc *ToolRuntimeService
 	registries []ToolHandlerRegistry
 }
 
 func NewToolService(i do.Injector) (*ToolService, error) {
 	return &ToolService{
 		repo:       do.MustInvoke[*ToolRepo](i),
+		runtimeSvc: do.MustInvoke[*ToolRuntimeService](i),
 		registries: collectToolRegistries(i),
 	}, nil
 }
@@ -87,5 +89,16 @@ func (s *ToolService) responseForTool(t Tool) (ToolResponse, error) {
 }
 
 func (s *ToolService) availabilityForTool(t Tool) toolAvailability {
-	return classifyToolAvailability(t, hasToolHandler(s.registries, t.Name))
+	availability := classifyToolAvailability(t, hasToolHandler(s.registries, t.Name))
+	if availability.Status != ToolAvailabilityAvailable || len(t.RuntimeConfigSchema) == 0 {
+		return availability
+	}
+	if err := s.runtimeSvc.ValidateRuntimeConfig(t); err != nil {
+		return toolAvailability{
+			IsExecutable: false,
+			Status:       ToolAvailabilityNeedsConfig,
+			Reason:       err.Error(),
+		}
+	}
+	return availability
 }

@@ -30,6 +30,7 @@ func newTestDB(t *testing.T) *gorm.DB {
 		&ai.Agent{},
 		&ai.Provider{},
 		&ai.AIModel{},
+		&model.Menu{},
 		&model.SystemConfig{},
 		&model.User{},
 	); err != nil {

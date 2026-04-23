@@ -12,12 +12,14 @@ import (
 )
 
 type ToolHandler struct {
-	svc *ToolService
+	svc        *ToolService
+	runtimeSvc *ToolRuntimeService
 }
 
 func NewToolHandler(i do.Injector) (*ToolHandler, error) {
 	return &ToolHandler{
-		svc: do.MustInvoke[*ToolService](i),
+		svc:        do.MustInvoke[*ToolService](i),
+		runtimeSvc: do.MustInvoke[*ToolRuntimeService](i),
 	}, nil
 }
 
@@ -91,6 +93,35 @@ func (h *ToolHandler) Update(c *gin.Context) {
 	c.Set("audit_resource", "ai_tool")
 	c.Set("audit_resource_id", strconv.Itoa(int(t.ID)))
 	c.Set("audit_summary", "Toggled tool: "+t.Name)
+
+	handler.OK(c, t)
+}
+
+func (h *ToolHandler) UpdateRuntime(c *gin.Context) {
+	id, _ := strconv.Atoi(c.Param("id"))
+	var req UpdateToolRuntimeRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		handler.Fail(c, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	t, err := h.runtimeSvc.UpdateRuntimeConfig(uint(id), req.RuntimeConfig)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrToolNotFound):
+			handler.Fail(c, http.StatusNotFound, err.Error())
+		case errors.Is(err, ErrToolRuntimeNotConfigured), errors.Is(err, ErrToolRuntimeInvalid), errors.Is(err, ErrModelNotFound):
+			handler.Fail(c, http.StatusBadRequest, err.Error())
+		default:
+			handler.Fail(c, http.StatusInternalServerError, err.Error())
+		}
+		return
+	}
+
+	c.Set("audit_action", "tool.runtime.update")
+	c.Set("audit_resource", "ai_tool")
+	c.Set("audit_resource_id", strconv.Itoa(int(t.ID)))
+	c.Set("audit_summary", "Updated tool runtime: "+t.Name)
 
 	handler.OK(c, t)
 }

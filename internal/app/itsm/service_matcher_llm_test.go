@@ -7,18 +7,19 @@ import (
 
 	"gorm.io/gorm"
 
+	aiapp "metis/internal/app/ai"
 	"metis/internal/app/itsm/tools"
 	"metis/internal/llm"
 )
 
 type fakeServiceMatchConfigProvider struct {
-	cfg LLMEngineRuntimeConfig
+	cfg aiapp.LLMToolRuntimeConfig
 	err error
 }
 
-func (f fakeServiceMatchConfigProvider) ServiceMatcherRuntimeConfig() (LLMEngineRuntimeConfig, error) {
+func (f fakeServiceMatchConfigProvider) LLMRuntimeConfig(toolName string) (aiapp.LLMToolRuntimeConfig, error) {
 	if f.err != nil {
-		return LLMEngineRuntimeConfig{}, f.err
+		return aiapp.LLMToolRuntimeConfig{}, f.err
 	}
 	return f.cfg, nil
 }
@@ -71,7 +72,7 @@ func newTestLLMServiceMatcher(t *testing.T, client *fakeServiceMatchLLMClient, d
 	t.Helper()
 	return NewLLMServiceMatcher(
 		db,
-		fakeServiceMatchConfigProvider{cfg: LLMEngineRuntimeConfig{Model: "test-model", Protocol: llm.ProtocolOpenAI, APIKey: "key", Temperature: 0.2, MaxTokens: 128, TimeoutSeconds: 30}},
+		fakeServiceMatchConfigProvider{cfg: aiapp.LLMToolRuntimeConfig{Model: "test-model", Protocol: llm.ProtocolOpenAI, APIKey: "key", Temperature: 0.2, MaxTokens: 128, TimeoutSeconds: 30}},
 		func(protocol, baseURL, apiKey string) (llm.Client, error) {
 			return client, nil
 		},

@@ -631,11 +631,6 @@ export interface StaffingPathBuilderConfig extends EngineAgentConfig {
   timeoutSeconds: number
 }
 
-export interface StaffingServiceMatcherConfig extends EngineAgentConfig {
-  maxTokens: number
-  timeoutSeconds: number
-}
-
 export interface EngineHealthItem {
   key: string
   label: string
@@ -656,7 +651,6 @@ export interface SmartStaffingConfig {
 
 export interface EngineSettingsConfig {
   runtime: {
-    serviceMatcher: StaffingServiceMatcherConfig
     pathBuilder: StaffingPathBuilderConfig
     guard: {
       auditLevel: string
@@ -678,7 +672,6 @@ export interface SmartStaffingConfigUpdate {
 
 export interface EngineSettingsConfigUpdate {
   runtime: {
-    serviceMatcher: { modelId: number; temperature: number; maxTokens: number; timeoutSeconds: number }
     pathBuilder: { modelId: number; temperature: number; maxRetries: number; timeoutSeconds: number }
     guard: { auditLevel: string; fallbackAssignee: number }
   }

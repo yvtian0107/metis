@@ -15,6 +15,7 @@ const (
 const (
 	ToolAvailabilityAvailable     = "available"
 	ToolAvailabilityInactive      = "inactive"
+	ToolAvailabilityNeedsConfig   = "needs_config"
 	ToolAvailabilityUnimplemented = "unimplemented"
 	ToolAvailabilityRiskDisabled  = "risk_disabled"
 )
@@ -44,30 +45,34 @@ const (
 
 type Tool struct {
 	model.BaseModel
-	Toolkit          string         `json:"toolkit" gorm:"size:64;not null;default:'';index"`
-	Name             string         `json:"name" gorm:"size:64;uniqueIndex;not null"`
-	DisplayName      string         `json:"displayName" gorm:"size:128;not null"`
-	Description      string         `json:"description" gorm:"type:text"`
-	ParametersSchema model.JSONText `json:"parametersSchema" gorm:"type:text"`
-	IsActive         bool           `json:"isActive" gorm:"not null;default:true"`
+	Toolkit             string         `json:"toolkit" gorm:"size:64;not null;default:'';index"`
+	Name                string         `json:"name" gorm:"size:64;uniqueIndex;not null"`
+	DisplayName         string         `json:"displayName" gorm:"size:128;not null"`
+	Description         string         `json:"description" gorm:"type:text"`
+	ParametersSchema    model.JSONText `json:"parametersSchema" gorm:"type:text"`
+	RuntimeConfigSchema model.JSONText `json:"runtimeConfigSchema" gorm:"type:text"`
+	RuntimeConfig       model.JSONText `json:"runtimeConfig" gorm:"type:text"`
+	IsActive            bool           `json:"isActive" gorm:"not null;default:true"`
 }
 
 func (Tool) TableName() string { return "ai_tools" }
 
 type ToolResponse struct {
-	ID                 uint            `json:"id"`
-	Toolkit            string          `json:"toolkit"`
-	Name               string          `json:"name"`
-	DisplayName        string          `json:"displayName"`
-	Description        string          `json:"description"`
-	ParametersSchema   json.RawMessage `json:"parametersSchema"`
-	IsActive           bool            `json:"isActive"`
-	IsExecutable       bool            `json:"isExecutable"`
-	AvailabilityStatus string          `json:"availabilityStatus"`
-	AvailabilityReason string          `json:"availabilityReason,omitempty"`
-	BoundAgentCount    int64           `json:"boundAgentCount"`
-	CreatedAt          time.Time       `json:"createdAt"`
-	UpdatedAt          time.Time       `json:"updatedAt"`
+	ID                  uint            `json:"id"`
+	Toolkit             string          `json:"toolkit"`
+	Name                string          `json:"name"`
+	DisplayName         string          `json:"displayName"`
+	Description         string          `json:"description"`
+	ParametersSchema    json.RawMessage `json:"parametersSchema"`
+	RuntimeConfigSchema json.RawMessage `json:"runtimeConfigSchema,omitempty"`
+	RuntimeConfig       json.RawMessage `json:"runtimeConfig,omitempty"`
+	IsActive            bool            `json:"isActive"`
+	IsExecutable        bool            `json:"isExecutable"`
+	AvailabilityStatus  string          `json:"availabilityStatus"`
+	AvailabilityReason  string          `json:"availabilityReason,omitempty"`
+	BoundAgentCount     int64           `json:"boundAgentCount"`
+	CreatedAt           time.Time       `json:"createdAt"`
+	UpdatedAt           time.Time       `json:"updatedAt"`
 }
 
 func (t *Tool) ToResponse() ToolResponse {
@@ -75,18 +80,28 @@ func (t *Tool) ToResponse() ToolResponse {
 	if len(params) == 0 {
 		params = json.RawMessage("{}")
 	}
+	runtimeSchema := json.RawMessage(t.RuntimeConfigSchema)
+	if len(runtimeSchema) == 0 {
+		runtimeSchema = nil
+	}
+	runtimeConfig := json.RawMessage(t.RuntimeConfig)
+	if len(runtimeConfig) == 0 {
+		runtimeConfig = nil
+	}
 	return ToolResponse{
-		ID:                 t.ID,
-		Toolkit:            t.Toolkit,
-		Name:               t.Name,
-		DisplayName:        t.DisplayName,
-		Description:        t.Description,
-		ParametersSchema:   params,
-		IsActive:           t.IsActive,
-		IsExecutable:       t.IsActive,
-		AvailabilityStatus: ToolAvailabilityAvailable,
-		CreatedAt:          t.CreatedAt,
-		UpdatedAt:          t.UpdatedAt,
+		ID:                  t.ID,
+		Toolkit:             t.Toolkit,
+		Name:                t.Name,
+		DisplayName:         t.DisplayName,
+		Description:         t.Description,
+		ParametersSchema:    params,
+		RuntimeConfigSchema: runtimeSchema,
+		RuntimeConfig:       runtimeConfig,
+		IsActive:            t.IsActive,
+		IsExecutable:        t.IsActive,
+		AvailabilityStatus:  ToolAvailabilityAvailable,
+		CreatedAt:           t.CreatedAt,
+		UpdatedAt:           t.UpdatedAt,
 	}
 }
 
