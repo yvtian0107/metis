@@ -9,6 +9,7 @@
     "lint": "eslint .",
     "test": "bun test src",
     "test:e2e": "playwright test",
+    "test:e2e:agentic-itsm": "playwright test e2e/agentic-itsm-login.spec.ts",
     "preview": "vite preview"
   },
   "dependencies": {

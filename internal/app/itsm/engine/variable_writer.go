@@ -119,7 +119,7 @@ func fieldTypeToValueType(fieldType string, hasOptions bool) string {
 		return "boolean"
 	case "date", "datetime":
 		return "date"
-	case "multi_select", "date_range":
+	case "multi_select", "date_range", "table":
 		return "json"
 	default:
 		return "string"

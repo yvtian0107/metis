@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"metis/internal/app"
+	"metis/internal/app/itsm/form"
 )
 
 // ToolHandler handles execution of a single tool call.
@@ -166,13 +167,16 @@ type ServiceDetail struct {
 
 // FormField describes one field on a service request form.
 type FormField struct {
-	Key         string       `json:"key"`
-	Label       string       `json:"label"`
-	Type        string       `json:"type"` // text, select, radio, checkbox, date, textarea, table
-	Description string       `json:"description,omitempty"`
-	Placeholder string       `json:"placeholder,omitempty"`
-	Required    bool         `json:"required"`
-	Options     []FormOption `json:"options,omitempty"`
+	Key          string                `json:"key"`
+	Label        string                `json:"label"`
+	Type         string                `json:"type"`
+	Description  string                `json:"description,omitempty"`
+	Placeholder  string                `json:"placeholder,omitempty"`
+	DefaultValue any                   `json:"defaultValue,omitempty"`
+	Required     bool                  `json:"required"`
+	Validation   []form.ValidationRule `json:"validation,omitempty"`
+	Options      []FormOption          `json:"options,omitempty"`
+	Props        map[string]any        `json:"props,omitempty"`
 }
 
 // FormOption describes one selectable option on a service request form.
@@ -595,18 +599,20 @@ func validateDraftData(detail *ServiceDetail, formData map[string]any) ([]DraftW
 	var warnings []DraftWarning
 	var missingRequired []FieldCollectionItem
 	blocking := false
+	missingKeys := map[string]struct{}{}
+	warnedFields := map[string]struct{}{}
 
 	for _, f := range detail.FormFields {
 		raw, ok := formData[f.Key]
-		value := strings.TrimSpace(fmt.Sprintf("%v", raw))
 		item := FieldCollectionItem{
 			Key:      f.Key,
 			Label:    f.Label,
 			Type:     f.Type,
 			Required: f.Required,
 		}
-		if f.Required && (!ok || raw == nil || value == "") {
+		if f.Required && (!ok || isDraftEmptyValue(raw)) {
 			blocking = true
+			missingKeys[f.Key] = struct{}{}
 			missingRequired = append(missingRequired, item)
 			warnings = append(warnings, DraftWarning{
 				Type:    "missing_required",
@@ -615,8 +621,15 @@ func validateDraftData(detail *ServiceDetail, formData map[string]any) ([]DraftW
 			})
 			continue
 		}
+		value := ""
+		if s, ok := raw.(string); ok {
+			value = strings.TrimSpace(s)
+		} else if raw != nil {
+			value = strings.TrimSpace(fmt.Sprintf("%v", raw))
+		}
 		if value != "" && isEmailSemanticField(f) && !isEmailValue(value) {
 			blocking = true
+			missingKeys[f.Key] = struct{}{}
 			missingRequired = append(missingRequired, item)
 			warnings = append(warnings, DraftWarning{
 				Type:    "invalid_email",
@@ -625,7 +638,7 @@ func validateDraftData(detail *ServiceDetail, formData map[string]any) ([]DraftW
 			})
 			continue
 		}
-		if value == "" || (f.Type != "select" && f.Type != "radio") {
+		if value == "" || (f.Type != form.FieldSelect && f.Type != form.FieldRadio) {
 			continue
 		}
 
@@ -666,6 +679,8 @@ func validateDraftData(detail *ServiceDetail, formData map[string]any) ([]DraftW
 				Message:        fmt.Sprintf("%s 是单选字段，但草稿中包含多个值，请确认最终选择。", f.Label),
 				ResolvedValues: resolvedValues,
 			})
+			blocking = true
+			warnedFields[f.Key] = struct{}{}
 		}
 
 		for _, item := range values {
@@ -675,6 +690,7 @@ func validateDraftData(detail *ServiceDetail, formData map[string]any) ([]DraftW
 			}
 			if _, ok := allowed[item]; !ok {
 				blocking = true
+				warnedFields[f.Key] = struct{}{}
 				warnings = append(warnings, DraftWarning{
 					Type:    "invalid_option",
 					Field:   f.Key,
@@ -683,7 +699,85 @@ func validateDraftData(detail *ServiceDetail, formData map[string]any) ([]DraftW
 			}
 		}
 	}
+
+	schema := schemaFromToolFields(detail.FormFields)
+	for _, err := range form.ValidateFormData(schema, formData) {
+		if _, alreadyMissing := missingKeys[err.Field]; alreadyMissing {
+			continue
+		}
+		if _, alreadyWarned := warnedFields[err.Field]; alreadyWarned {
+			continue
+		}
+		blocking = true
+		warningType := "invalid_field_value"
+		if fieldByKey(detail.FormFields, err.Field).Key != "" && strings.Contains(err.Message, "不在可选项中") {
+			warningType = "invalid_option"
+		}
+		warnings = append(warnings, DraftWarning{
+			Type:    warningType,
+			Field:   err.Field,
+			Message: err.Message,
+		})
+	}
 	return warnings, missingRequired, blocking
+}
+
+func isDraftEmptyValue(val any) bool {
+	if val == nil {
+		return true
+	}
+	switch v := val.(type) {
+	case string:
+		return strings.TrimSpace(v) == ""
+	case []string:
+		return len(v) == 0
+	case []any:
+		return len(v) == 0
+	case map[string]any:
+		if len(v) == 0 {
+			return true
+		}
+		for _, item := range v {
+			if !isDraftEmptyValue(item) {
+				return false
+			}
+		}
+		return true
+	default:
+		return false
+	}
+}
+
+func schemaFromToolFields(fields []FormField) form.FormSchema {
+	schema := form.FormSchema{Version: 1, Fields: make([]form.FormField, 0, len(fields))}
+	for _, f := range fields {
+		options := make([]form.FieldOption, 0, len(f.Options))
+		for _, opt := range f.Options {
+			options = append(options, form.FieldOption{Label: opt.Label, Value: opt.Value})
+		}
+		schema.Fields = append(schema.Fields, form.FormField{
+			Key:          f.Key,
+			Type:         f.Type,
+			Label:        f.Label,
+			Placeholder:  f.Placeholder,
+			Description:  f.Description,
+			DefaultValue: f.DefaultValue,
+			Required:     f.Required,
+			Validation:   f.Validation,
+			Options:      options,
+			Props:        f.Props,
+		})
+	}
+	return schema
+}
+
+func fieldByKey(fields []FormField, key string) FormField {
+	for _, f := range fields {
+		if f.Key == key {
+			return f
+		}
+	}
+	return FormField{}
 }
 
 func isEmailSemanticField(field FormField) bool {
@@ -1117,6 +1211,10 @@ func serviceLoadHandler(op ServiceDeskOperator, store StateStore) ToolHandler {
 
 		if state.LoadedServiceID == resolvedServiceID &&
 			(state.Stage == "service_loaded" || state.Stage == "awaiting_confirmation" || state.Stage == "confirmed") {
+			if state.FieldsHash != detail.FieldsHash {
+				state.FieldsHash = detail.FieldsHash
+				state.ConfirmedDraftVersion = 0
+			}
 			state.PrefillFormData = detail.PrefillSuggestions
 			if err := store.SaveState(sid, state); err != nil {
 				return nil, fmt.Errorf("save state: %w", err)
@@ -1268,6 +1366,13 @@ func draftConfirmHandler(op ServiceDeskOperator, store StateStore) ToolHandler {
 			}
 			if detail.FieldsHash != state.FieldsHash {
 				return nil, fmt.Errorf("服务表单字段已变更，请重新调用 service_load")
+			}
+			warnings, _, blocking := validateDraftData(detail, state.DraftFormData)
+			if blocking {
+				if len(warnings) > 0 {
+					return nil, fmt.Errorf("草稿表单校验失败：%s", warnings[0].Message)
+				}
+				return nil, fmt.Errorf("草稿表单校验失败，请重新调用 draft_prepare")
 			}
 		}
 

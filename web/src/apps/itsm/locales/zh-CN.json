@@ -90,7 +90,8 @@
       "date_range": "日期范围",
       "user_picker": "人员选择",
       "dept_picker": "部门选择",
-      "rich_text": "富文本"
+      "rich_text": "富文本",
+      "table": "表格"
     }
   },
   "catalogs": {

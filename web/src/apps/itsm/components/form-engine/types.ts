@@ -41,6 +41,7 @@ export type FieldType =
   | "user_picker"
   | "dept_picker"
   | "rich_text"
+  | "table"
 
 export interface ValidationRule {
   rule: "required" | "minLength" | "maxLength" | "min" | "max" | "pattern" | "email" | "url"
@@ -51,6 +52,16 @@ export interface ValidationRule {
 export interface FieldOption {
   label: string
   value: string | number | boolean
+}
+
+export interface TableColumn {
+  key: string
+  type: Exclude<FieldType, "table" | "rich_text">
+  label: string
+  placeholder?: string
+  required?: boolean
+  validation?: ValidationRule[]
+  options?: FieldOption[]
 }
 
 export interface VisibilityRule {

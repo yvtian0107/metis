@@ -66,7 +66,7 @@ func (c *FalkorDBClient) Available() bool {
 
 // Shutdown closes the FalkorDB connection.
 func (c *FalkorDBClient) Shutdown() error {
-	if c.db != nil {
+	if c != nil && c.db != nil && c.db.Conn != nil {
 		return c.db.Conn.Close()
 	}
 	return nil

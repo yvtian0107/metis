@@ -5,7 +5,7 @@ import (
 	"fmt"
 )
 
-// Supported field types (15 types).
+// Supported field types.
 const (
 	FieldText        = "text"
 	FieldTextarea    = "textarea"
@@ -23,6 +23,7 @@ const (
 	FieldUserPicker  = "user_picker"
 	FieldDeptPicker  = "dept_picker"
 	FieldRichText    = "rich_text"
+	FieldTable       = "table"
 )
 
 var allowedFieldTypes = map[string]bool{
@@ -31,7 +32,7 @@ var allowedFieldTypes = map[string]bool{
 	FieldMultiSelect: true, FieldRadio: true, FieldCheckbox: true,
 	FieldSwitch: true, FieldDate: true, FieldDatetime: true,
 	FieldDateRange: true, FieldUserPicker: true, FieldDeptPicker: true,
-	FieldRichText: true,
+	FieldRichText: true, FieldTable: true,
 }
 
 // Supported validation rule names.
@@ -50,21 +51,21 @@ type FormSchema struct {
 
 // FormField defines a single field in the form.
 type FormField struct {
-	Key          string                 `json:"key"`
-	Type         string                 `json:"type"`
-	Label        string                 `json:"label"`
-	Placeholder  string                 `json:"placeholder,omitempty"`
-	Description  string                 `json:"description,omitempty"`
-	DefaultValue any                    `json:"defaultValue,omitempty"`
-	Required     bool                   `json:"required,omitempty"`
-	Disabled     bool                   `json:"disabled,omitempty"`
-	Validation   []ValidationRule       `json:"validation,omitempty"`
-	Options      []FieldOption          `json:"options,omitempty"`
-	Visibility   *VisibilityRule        `json:"visibility,omitempty"`
-	Binding      string                 `json:"binding,omitempty"`
-	Permissions  map[string]string      `json:"permissions,omitempty"`
-	Width        string                 `json:"width,omitempty"`
-	Props        map[string]any         `json:"props,omitempty"`
+	Key          string            `json:"key"`
+	Type         string            `json:"type"`
+	Label        string            `json:"label"`
+	Placeholder  string            `json:"placeholder,omitempty"`
+	Description  string            `json:"description,omitempty"`
+	DefaultValue any               `json:"defaultValue,omitempty"`
+	Required     bool              `json:"required,omitempty"`
+	Disabled     bool              `json:"disabled,omitempty"`
+	Validation   []ValidationRule  `json:"validation,omitempty"`
+	Options      []FieldOption     `json:"options,omitempty"`
+	Visibility   *VisibilityRule   `json:"visibility,omitempty"`
+	Binding      string            `json:"binding,omitempty"`
+	Permissions  map[string]string `json:"permissions,omitempty"`
+	Width        string            `json:"width,omitempty"`
+	Props        map[string]any    `json:"props,omitempty"`
 }
 
 // ValidationRule defines a validation constraint on a field.
@@ -78,6 +79,17 @@ type ValidationRule struct {
 type FieldOption struct {
 	Label string `json:"label"`
 	Value any    `json:"value"`
+}
+
+// TableColumn defines one editable column for a table field.
+type TableColumn struct {
+	Key         string           `json:"key"`
+	Type        string           `json:"type"`
+	Label       string           `json:"label"`
+	Placeholder string           `json:"placeholder,omitempty"`
+	Required    bool             `json:"required,omitempty"`
+	Validation  []ValidationRule `json:"validation,omitempty"`
+	Options     []FieldOption    `json:"options,omitempty"`
 }
 
 // VisibilityRule controls conditional field visibility.
@@ -130,8 +142,6 @@ func ParseSchema(raw json.RawMessage) (*FormSchema, error) {
 }
 
 // ValidateSchema checks the structural integrity of a FormSchema.
-// It verifies: version, field key uniqueness, field type validity,
-// layout field references, and validation rule names.
 func ValidateSchema(schema FormSchema) []ValidationError {
 	var errs []ValidationError
 
@@ -165,14 +175,10 @@ func ValidateSchema(schema FormSchema) []ValidationError {
 			errs = append(errs, ValidationError{Field: prefix + ".type", Message: fmt.Sprintf("unknown field type: %s", f.Type)})
 		}
 
-		// Check validation rules
-		for j, r := range f.Validation {
-			if !allowedValidationRules[r.Rule] {
-				errs = append(errs, ValidationError{
-					Field:   fmt.Sprintf("%s.validation[%d].rule", prefix, j),
-					Message: fmt.Sprintf("unknown validation rule: %s", r.Rule),
-				})
-			}
+		errs = append(errs, validateValidationRules(prefix+".validation", f.Validation)...)
+		errs = append(errs, validateOptions(prefix, f.Type, f.Options)...)
+		if f.Type == FieldTable {
+			errs = append(errs, validateTableColumns(prefix, f)...)
 		}
 	}
 
@@ -195,4 +201,99 @@ func ValidateSchema(schema FormSchema) []ValidationError {
 	}
 
 	return errs
+}
+
+func validateValidationRules(prefix string, rules []ValidationRule) []ValidationError {
+	var errs []ValidationError
+	for j, r := range rules {
+		if !allowedValidationRules[r.Rule] {
+			errs = append(errs, ValidationError{
+				Field:   fmt.Sprintf("%s[%d].rule", prefix, j),
+				Message: fmt.Sprintf("unknown validation rule: %s", r.Rule),
+			})
+		}
+	}
+	return errs
+}
+
+func validateOptions(prefix, fieldType string, options []FieldOption) []ValidationError {
+	needsOptions := fieldType == FieldSelect || fieldType == FieldRadio || fieldType == FieldMultiSelect
+	if needsOptions && len(options) == 0 {
+		return []ValidationError{{Field: prefix + ".options", Message: fmt.Sprintf("%s field must define options", fieldType)}}
+	}
+	if len(options) == 0 {
+		return nil
+	}
+	seen := make(map[string]bool, len(options))
+	var errs []ValidationError
+	for i, opt := range options {
+		optPrefix := fmt.Sprintf("%s.options[%d]", prefix, i)
+		if opt.Label == "" {
+			errs = append(errs, ValidationError{Field: optPrefix + ".label", Message: "option label must not be empty"})
+		}
+		if opt.Value == nil || fmt.Sprintf("%v", opt.Value) == "" {
+			errs = append(errs, ValidationError{Field: optPrefix + ".value", Message: "option value must not be empty"})
+			continue
+		}
+		value := fmt.Sprintf("%v", opt.Value)
+		if seen[value] {
+			errs = append(errs, ValidationError{Field: optPrefix + ".value", Message: fmt.Sprintf("duplicate option value: %s", value)})
+			continue
+		}
+		seen[value] = true
+	}
+	return errs
+}
+
+func validateTableColumns(prefix string, field FormField) []ValidationError {
+	columns, err := TableColumns(field)
+	if err != nil {
+		return []ValidationError{{Field: prefix + ".props.columns", Message: err.Error()}}
+	}
+	if len(columns) == 0 {
+		return []ValidationError{{Field: prefix + ".props.columns", Message: "table field must define columns"}}
+	}
+	seen := make(map[string]bool, len(columns))
+	var errs []ValidationError
+	for i, col := range columns {
+		colPrefix := fmt.Sprintf("%s.props.columns[%d]", prefix, i)
+		if col.Key == "" {
+			errs = append(errs, ValidationError{Field: colPrefix + ".key", Message: "column key must not be empty"})
+		} else if seen[col.Key] {
+			errs = append(errs, ValidationError{Field: colPrefix + ".key", Message: fmt.Sprintf("duplicate column key: %s", col.Key)})
+		} else {
+			seen[col.Key] = true
+		}
+		if col.Label == "" {
+			errs = append(errs, ValidationError{Field: colPrefix + ".label", Message: "column label must not be empty"})
+		}
+		if col.Type == FieldTable || col.Type == FieldRichText {
+			errs = append(errs, ValidationError{Field: colPrefix + ".type", Message: fmt.Sprintf("table column does not support type: %s", col.Type)})
+		} else if !allowedFieldTypes[col.Type] {
+			errs = append(errs, ValidationError{Field: colPrefix + ".type", Message: fmt.Sprintf("unknown column type: %s", col.Type)})
+		}
+		errs = append(errs, validateValidationRules(colPrefix+".validation", col.Validation)...)
+		errs = append(errs, validateOptions(colPrefix, col.Type, col.Options)...)
+	}
+	return errs
+}
+
+// TableColumns returns the typed column definitions stored in field.props.columns.
+func TableColumns(field FormField) ([]TableColumn, error) {
+	if field.Props == nil {
+		return nil, fmt.Errorf("table field must define props.columns")
+	}
+	raw, ok := field.Props["columns"]
+	if !ok || raw == nil {
+		return nil, fmt.Errorf("table field must define props.columns")
+	}
+	b, err := json.Marshal(raw)
+	if err != nil {
+		return nil, fmt.Errorf("marshal table columns: %w", err)
+	}
+	var columns []TableColumn
+	if err := json.Unmarshal(b, &columns); err != nil {
+		return nil, fmt.Errorf("invalid table columns: %w", err)
+	}
+	return columns, nil
 }

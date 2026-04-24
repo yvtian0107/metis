@@ -69,3 +69,96 @@ func TestValidateFormDataAcceptsValidValues(t *testing.T) {
 		t.Fatalf("expected valid data, got %+v", errs)
 	}
 }
+
+func TestValidateFormDataStructuredValues(t *testing.T) {
+	schema := FormSchema{
+		Version: 1,
+		Fields: []FormField{
+			{Key: "tags", Type: FieldMultiSelect, Label: "标签", Required: true, Options: []FieldOption{{Label: "VPN", Value: "vpn"}, {Label: "网络", Value: "network"}}},
+			{Key: "agree", Type: FieldCheckbox, Label: "同意", Required: true},
+			{Key: "systems", Type: FieldCheckbox, Label: "系统", Required: true, Options: []FieldOption{{Label: "ERP", Value: "erp"}}},
+			{Key: "range", Type: FieldDateRange, Label: "日期范围", Required: true},
+			{Key: "items", Type: FieldTable, Label: "明细", Required: true, Props: map[string]any{
+				"columns": []TableColumn{
+					{Key: "name", Type: FieldText, Label: "名称", Required: true},
+					{Key: "kind", Type: FieldSelect, Label: "类型", Required: true, Options: []FieldOption{{Label: "网络", Value: "network"}}},
+				},
+			}},
+		},
+	}
+
+	tests := []struct {
+		name string
+		data map[string]any
+		want string
+	}{
+		{
+			name: "empty array fails required",
+			data: map[string]any{"tags": []any{}},
+			want: "tags",
+		},
+		{
+			name: "multi select must be array",
+			data: map[string]any{"tags": "vpn", "agree": true, "systems": []any{"erp"}, "range": map[string]any{"start": "2026-01-01", "end": "2026-01-02"}, "items": []any{map[string]any{"name": "A", "kind": "network"}}},
+			want: "tags",
+		},
+		{
+			name: "multi select option membership",
+			data: map[string]any{"tags": []any{"bad"}, "agree": true, "systems": []any{"erp"}, "range": map[string]any{"start": "2026-01-01", "end": "2026-01-02"}, "items": []any{map[string]any{"name": "A", "kind": "network"}}},
+			want: "tags",
+		},
+		{
+			name: "checkbox without options must be boolean",
+			data: map[string]any{"tags": []any{"vpn"}, "agree": "yes", "systems": []any{"erp"}, "range": map[string]any{"start": "2026-01-01", "end": "2026-01-02"}, "items": []any{map[string]any{"name": "A", "kind": "network"}}},
+			want: "agree",
+		},
+		{
+			name: "checkbox with options must be array",
+			data: map[string]any{"tags": []any{"vpn"}, "agree": true, "systems": "erp", "range": map[string]any{"start": "2026-01-01", "end": "2026-01-02"}, "items": []any{map[string]any{"name": "A", "kind": "network"}}},
+			want: "systems",
+		},
+		{
+			name: "date range requires start and end",
+			data: map[string]any{"tags": []any{"vpn"}, "agree": true, "systems": []any{"erp"}, "range": map[string]any{"start": "2026-01-01"}, "items": []any{map[string]any{"name": "A", "kind": "network"}}},
+			want: "range",
+		},
+		{
+			name: "table must be row array",
+			data: map[string]any{"tags": []any{"vpn"}, "agree": true, "systems": []any{"erp"}, "range": map[string]any{"start": "2026-01-01", "end": "2026-01-02"}, "items": map[string]any{"name": "A"}},
+			want: "items",
+		},
+		{
+			name: "table column required",
+			data: map[string]any{"tags": []any{"vpn"}, "agree": true, "systems": []any{"erp"}, "range": map[string]any{"start": "2026-01-01", "end": "2026-01-02"}, "items": []any{map[string]any{"kind": "network"}}},
+			want: "items[0].name",
+		},
+		{
+			name: "table column option membership",
+			data: map[string]any{"tags": []any{"vpn"}, "agree": true, "systems": []any{"erp"}, "range": map[string]any{"start": "2026-01-01", "end": "2026-01-02"}, "items": []any{map[string]any{"name": "A", "kind": "bad"}}},
+			want: "items[0].kind",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			errs := ValidateFormData(schema, tt.data)
+			if len(errs) == 0 {
+				t.Fatalf("expected validation error for %s", tt.want)
+			}
+			if errs[0].Field != tt.want {
+				t.Fatalf("first error field = %s, want %s; all=%+v", errs[0].Field, tt.want, errs)
+			}
+		})
+	}
+
+	valid := map[string]any{
+		"tags":    []any{"vpn", "network"},
+		"agree":   true,
+		"systems": []any{"erp"},
+		"range":   map[string]any{"start": "2026-01-01", "end": "2026-01-02"},
+		"items":   []any{map[string]any{"name": "A", "kind": "network"}},
+	}
+	if errs := ValidateFormData(schema, valid); len(errs) != 0 {
+		t.Fatalf("expected structured values to be valid, got %+v", errs)
+	}
+}

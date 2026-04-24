@@ -35,9 +35,10 @@ const (
 func runSeedDevCommand(args []string) {
 	fs := flag.NewFlagSet("seed-dev", flag.ExitOnError)
 	configPath := fs.String("config", "config.yml", "path to config file")
+	envPath := fs.String("env", devAIConfigPath, "path to dev environment file")
 	fs.Parse(args)
 
-	if err := runSeedDev(*configPath, devAIConfigPath); err != nil {
+	if err := runSeedDev(*configPath, *envPath); err != nil {
 		slog.Error("seed-dev failed", "error", err)
 		os.Exit(1)
 	}

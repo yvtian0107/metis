@@ -50,6 +50,14 @@ export function FormDesigner({ schema, onChange }: FormDesignerProps) {
         required: false,
         width: columns === 1 ? "full" : columns === 2 ? "half" : "third",
       }
+      if (type === "table") {
+        newField.props = {
+          columns: [
+            { key: "name", label: "名称", type: "text", required: true },
+            { key: "description", label: "说明", type: "text", required: false },
+          ],
+        }
+      }
       const nextFields = [...fields, newField]
       const nextLayout = schema.layout?.sections.length
         ? {

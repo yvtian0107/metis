@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"metis/internal/app"
+	"metis/internal/app/itsm/form"
 )
 
 // memStateStore is an in-memory StateStore for testing.
@@ -528,6 +529,73 @@ func TestDraftPrepare_BlocksFreeTextForVPNRequestKind(t *testing.T) {
 	}
 	if len(resp.Warnings) != 1 || resp.Warnings[0].Type != "invalid_option" || resp.Warnings[0].Field != "request_kind" {
 		t.Fatalf("expected invalid_option for request_kind, got %+v", resp.Warnings)
+	}
+}
+
+func TestDraftPrepare_BlocksInvalidStructuredFields(t *testing.T) {
+	store := newMemStateStore()
+	op := &stubOperator{detail: &ServiceDetail{
+		ServiceID: 9,
+		Name:      "复杂表单",
+		FormFields: []FormField{
+			{Key: "title", Label: "标题", Type: form.FieldText, Required: true},
+			{Key: "tags", Label: "标签", Type: form.FieldMultiSelect, Required: true, Options: []FormOption{{Label: "VPN", Value: "vpn"}}},
+			{Key: "items", Label: "明细", Type: form.FieldTable, Required: true, Props: map[string]any{"columns": []form.TableColumn{
+				{Key: "name", Type: form.FieldText, Label: "名称", Required: true},
+				{Key: "kind", Type: form.FieldSelect, Label: "类型", Required: true, Options: []form.FieldOption{{Label: "网络", Value: "network"}}},
+			}}},
+		},
+		FieldsHash: "complex123",
+	}}
+	store.states[1] = &ServiceDeskState{Stage: "service_loaded", LoadedServiceID: 9, FieldsHash: "complex123"}
+	ctx := context.WithValue(context.Background(), app.SessionIDKey, uint(1))
+
+	tests := []struct {
+		name string
+		data map[string]any
+		want string
+	}{
+		{
+			name: "multi select text",
+			data: map[string]any{"title": "申请", "tags": "vpn", "items": []any{map[string]any{"name": "A", "kind": "network"}}},
+			want: "tags",
+		},
+		{
+			name: "table shape",
+			data: map[string]any{"title": "申请", "tags": []any{"vpn"}, "items": map[string]any{"name": "A"}},
+			want: "items",
+		},
+		{
+			name: "table column required",
+			data: map[string]any{"title": "申请", "tags": []any{"vpn"}, "items": []any{map[string]any{"kind": "network"}}},
+			want: "items[0].name",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			args, _ := json.Marshal(map[string]any{"summary": "复杂表单", "form_data": tt.data})
+			result, err := draftPrepareHandler(op, store)(ctx, 1, args)
+			if err != nil {
+				t.Fatalf("prepare draft: %v", err)
+			}
+			var resp struct {
+				OK                   bool `json:"ok"`
+				ReadyForConfirmation bool `json:"ready_for_confirmation"`
+				Warnings             []struct {
+					Field string `json:"field"`
+				} `json:"warnings"`
+			}
+			if err := json.Unmarshal(result, &resp); err != nil {
+				t.Fatalf("unmarshal response: %v", err)
+			}
+			if resp.OK || resp.ReadyForConfirmation {
+				t.Fatalf("expected invalid structured field to block draft, got %s", string(result))
+			}
+			if len(resp.Warnings) == 0 || resp.Warnings[0].Field != tt.want {
+				t.Fatalf("expected first warning field %s, got %+v", tt.want, resp.Warnings)
+			}
+		})
 	}
 }
 

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useCallback } from "react"
 import { useForm, Controller } from "react-hook-form"
 import { cn } from "@/lib/utils"
 import { renderField } from "./field-renderers"
-import { buildZodSchema } from "./build-zod-schema"
+import { buildZodSchema, defaultValueForField } from "./build-zod-schema"
 import { useFieldVisibility } from "./use-visibility"
 import type { FormRendererProps, FormField } from "./types"
 
@@ -24,9 +24,9 @@ export function FormRenderer({
     const defaults: Record<string, unknown> = {}
     for (const field of schema.fields) {
       if (mode === "create") {
-        defaults[field.key] = field.defaultValue ?? ""
+        defaults[field.key] = defaultValueForField(field)
       } else {
-        defaults[field.key] = data?.[field.key] ?? ""
+        defaults[field.key] = data?.[field.key] ?? defaultValueForField(field)
       }
     }
     return defaults
@@ -53,9 +53,9 @@ export function FormRenderer({
     const vals: Record<string, unknown> = {}
     for (const field of schema.fields) {
       if (mode === "create") {
-        vals[field.key] = field.defaultValue ?? ""
+        vals[field.key] = defaultValueForField(field)
       } else {
-        vals[field.key] = data?.[field.key] ?? ""
+        vals[field.key] = data?.[field.key] ?? defaultValueForField(field)
       }
     }
     form.reset(vals)

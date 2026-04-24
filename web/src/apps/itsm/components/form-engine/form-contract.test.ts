@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { buildZodSchema } from "./build-zod-schema"
+import { buildZodSchema, defaultValueForField } from "./build-zod-schema"
 import { getVisibleFields } from "./use-visibility"
 import type { FormSchema } from "./types"
 
@@ -42,16 +42,56 @@ describe("form engine contract", () => {
     const schema: FormSchema = {
       version: 1,
       fields: [
-        { key: "tags", type: "multi_select", label: "标签", required: true },
+        { key: "tags", type: "multi_select", label: "标签", required: true, options: [{ label: "VPN", value: "vpn" }] },
         { key: "agree", type: "checkbox", label: "同意" },
+        { key: "systems", type: "checkbox", label: "系统", required: true, options: [{ label: "ERP", value: "erp" }] },
         { key: "switcher", type: "switch", label: "开关" },
       ],
     }
 
-    const zodSchema = buildZodSchema(schema, new Set(["tags", "agree", "switcher"]))
+    const zodSchema = buildZodSchema(schema, new Set(["tags", "agree", "systems", "switcher"]))
 
-    expect(zodSchema.safeParse({ tags: [], agree: true, switcher: false }).success).toBe(false)
-    expect(zodSchema.safeParse({ tags: ["vpn"], agree: false, switcher: true }).success).toBe(true)
+    expect(zodSchema.safeParse({ tags: [], agree: true, systems: ["erp"], switcher: false }).success).toBe(false)
+    expect(zodSchema.safeParse({ tags: ["bad"], agree: true, systems: ["erp"], switcher: false }).success).toBe(false)
+    expect(zodSchema.safeParse({ tags: ["vpn"], agree: "true", systems: ["erp"], switcher: true }).success).toBe(false)
+    expect(zodSchema.safeParse({ tags: ["vpn"], agree: false, systems: "erp", switcher: true }).success).toBe(false)
+    expect(zodSchema.safeParse({ tags: ["vpn"], agree: false, systems: ["erp"], switcher: true }).success).toBe(true)
+  })
+
+  test("handles date range and table fields", () => {
+    const schema: FormSchema = {
+      version: 1,
+      fields: [
+        { key: "range", type: "date_range", label: "日期范围", required: true },
+        {
+          key: "items",
+          type: "table",
+          label: "明细",
+          required: true,
+          props: {
+            columns: [
+              { key: "name", type: "text", label: "名称", required: true },
+              { key: "kind", type: "select", label: "类型", required: true, options: [{ label: "网络", value: "network" }] },
+            ],
+          },
+        },
+      ],
+    }
+
+    const zodSchema = buildZodSchema(schema, new Set(["range", "items"]))
+    expect(zodSchema.safeParse({ range: {}, items: [] }).success).toBe(false)
+    expect(zodSchema.safeParse({ range: { start: "2026-01-01", end: "" }, items: [{ name: "A", kind: "network" }] }).success).toBe(false)
+    expect(zodSchema.safeParse({ range: { start: "2026-01-01", end: "2026-01-02" }, items: [{ kind: "network" }] }).success).toBe(false)
+    expect(zodSchema.safeParse({ range: { start: "2026-01-01", end: "2026-01-02" }, items: [{ name: "A", kind: "bad" }] }).success).toBe(false)
+    expect(zodSchema.safeParse({ range: { start: "2026-01-01", end: "2026-01-02" }, items: [{ name: "A", kind: "network" }] }).success).toBe(true)
+  })
+
+  test("builds stable default values by field type", () => {
+    expect(defaultValueForField({ key: "tags", type: "multi_select", label: "标签" })).toEqual([])
+    expect(defaultValueForField({ key: "range", type: "date_range", label: "日期范围" })).toEqual({ start: "", end: "" })
+    expect(defaultValueForField({ key: "items", type: "table", label: "明细" })).toEqual([])
+    expect(defaultValueForField({ key: "agree", type: "checkbox", label: "同意" })).toBe(false)
+    expect(defaultValueForField({ key: "count", type: "number", label: "数量" })).toBeUndefined()
   })
 
   test("computes visibility with and/or logic", () => {

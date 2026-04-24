@@ -266,6 +266,41 @@ METIS_DEV_AI_API_KEY=sk-dev
 	}
 }
 
+func TestRunSeedDevUsesExplicitEnvPath(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	envPath := filepath.Join(dir, "custom.dev.env")
+	if err := os.WriteFile(envPath, []byte(`
+METIS_DEV_AI_PROVIDER_NAME=Custom Dev Provider
+METIS_DEV_AI_BASE_URL=https://api.example.com/v1
+METIS_DEV_AI_API_KEY=sk-custom-dev
+`), 0600); err != nil {
+		t.Fatalf("write custom env: %v", err)
+	}
+
+	if err := runSeedDev("config.yml", envPath); err != nil {
+		t.Fatalf("seed-dev with explicit env: %v", err)
+	}
+
+	cfg, err := config.Load("config.yml")
+	if err != nil {
+		t.Fatalf("load generated config: %v", err)
+	}
+	db, err := database.Open(cfg.DBDriver, cfg.DBDSN)
+	if err != nil {
+		t.Fatalf("open generated db: %v", err)
+	}
+	defer db.Shutdown()
+
+	var providerCount int64
+	if err := db.Model(&ai.Provider{}).Where("name = ?", "Custom Dev Provider").Count(&providerCount).Error; err != nil {
+		t.Fatalf("count custom dev providers: %v", err)
+	}
+	if providerCount != 1 {
+		t.Fatalf("provider count = %d, want 1", providerCount)
+	}
+}
+
 func TestMaybeRunSeedDevAutoInstallsWhenEnvDevExists(t *testing.T) {
 	dir := t.TempDir()
 	t.Chdir(dir)

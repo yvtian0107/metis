@@ -2,7 +2,7 @@ import { useTranslation } from "react-i18next"
 import {
   Type, AlignLeft, Hash, Mail, Link, ChevronDown, ListChecks,
   CircleDot, CheckSquare, ToggleLeft, Calendar, CalendarRange,
-  User, Building2, FileText,
+  User, Building2, FileText, Table2,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import type { FieldType } from "../types"
@@ -51,6 +51,7 @@ const groups: { key: string; items: PaletteItem[] }[] = [
       { type: "user_picker", icon: User },
       { type: "dept_picker", icon: Building2 },
       { type: "rich_text", icon: FileText },
+      { type: "table", icon: Table2 },
     ],
   },
 ]

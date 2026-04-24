@@ -47,13 +47,14 @@ func main() {
 			// Known flags — fall through to normal startup
 		default:
 			if os.Args[1][0] != '-' {
-				fmt.Fprintf(os.Stderr, "unknown command: %s\nUsage: server [seed|seed-dev] [-config path] [-host addr] [-port num]\n", os.Args[1])
+				fmt.Fprintf(os.Stderr, "unknown command: %s\nUsage: server [seed|seed-dev] [-config path] [-dev-env path] [-host addr] [-port num]\n", os.Args[1])
 				os.Exit(1)
 			}
 		}
 	}
 
 	configPath := flag.String("config", "config.yml", "path to config file")
+	devEnvPath := flag.String("dev-env", devAIConfigPath, "path to dev environment file")
 	host := flag.String("host", "0.0.0.0", "server host")
 	port := flag.String("port", "8080", "server port")
 	flag.Parse()
@@ -64,7 +65,7 @@ func main() {
 		slog.Error("failed to load config", "error", err)
 		os.Exit(1)
 	}
-	if ran, err := maybeRunSeedDev(*configPath, devAIConfigPath, cfg); err != nil {
+	if ran, err := maybeRunSeedDev(*configPath, *devEnvPath, cfg); err != nil {
 		slog.Error("seed-dev auto install failed", "error", err)
 		os.Exit(1)
 	} else if ran {
@@ -182,7 +183,7 @@ func main() {
 			}
 		}
 
-		if err := runDevBootstrap(db.DB, cfg, devAIConfigPath); err != nil {
+		if err := runDevBootstrap(db.DB, cfg, *devEnvPath); err != nil {
 			slog.Error("dev bootstrap failed", "error", err)
 			os.Exit(1)
 		}

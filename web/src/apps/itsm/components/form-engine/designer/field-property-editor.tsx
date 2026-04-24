@@ -7,7 +7,7 @@ import { Label } from "@/components/ui/label"
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select"
-import type { FormField, FieldType, ValidationRule, VisibilityCondition } from "../types"
+import type { FieldOption, FormField, FieldType, TableColumn, ValidationRule, VisibilityCondition } from "../types"
 
 interface FieldPropertyEditorProps {
   field: FormField
@@ -16,6 +16,11 @@ interface FieldPropertyEditorProps {
 }
 
 const NEEDS_OPTIONS: FieldType[] = ["select", "multi_select", "radio", "checkbox"]
+const TABLE_COLUMN_TYPES: TableColumn["type"][] = [
+  "text", "textarea", "number", "email", "url", "select", "multi_select",
+  "radio", "checkbox", "switch", "date", "datetime", "date_range",
+  "user_picker", "dept_picker",
+]
 
 const VALIDATION_RULE_TYPES = [
   "required", "minLength", "maxLength", "min", "max", "pattern", "email", "url",
@@ -25,11 +30,34 @@ const OPERATORS = [
   "equals", "not_equals", "in", "not_in", "is_empty", "is_not_empty",
 ] as const
 
+function formatColumnOptions(options?: FieldOption[]) {
+  return (options ?? []).map((option) => `${option.label}:${String(option.value)}`).join(", ")
+}
+
+function parseColumnOptions(input: string): FieldOption[] {
+  return input
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .map((item) => {
+      const [label, ...rest] = item.split(":")
+      const value = rest.join(":").trim() || label.trim()
+      return { label: label.trim(), value }
+    })
+    .filter((option) => option.label && String(option.value))
+}
+
 export function FieldPropertyEditor({ field, allFields, onChange }: FieldPropertyEditorProps) {
   const { t } = useTranslation("itsm")
 
   function update(patch: Partial<FormField>) {
     onChange({ ...field, ...patch })
+  }
+
+  const columns = Array.isArray(field.props?.columns) ? field.props.columns as TableColumn[] : []
+
+  function updateColumns(next: TableColumn[]) {
+    update({ props: { ...(field.props ?? {}), columns: next } })
   }
 
   return (
@@ -138,6 +166,95 @@ export function FieldPropertyEditor({ field, allFields, onChange }: FieldPropert
               >
                 <Trash2 className="h-3 w-3" />
               </Button>
+            </div>
+          ))}
+        </section>
+      )}
+
+      {field.type === "table" && (
+        <section className="space-y-2 rounded-xl border border-border/60 bg-white/70 p-3">
+          <div className="flex items-center justify-between">
+            <Label className="text-xs font-medium">表格列</Label>
+            <Button
+              variant="ghost" size="sm" className="h-6 px-2 text-xs"
+              onClick={() => {
+                const key = `col_${Date.now()}`
+                updateColumns([...columns, { key, label: "新列", type: "text", required: false }])
+              }}
+            >
+              <Plus className="h-3 w-3 mr-1" />添加列
+            </Button>
+          </div>
+          {columns.map((column, i) => (
+            <div key={`${column.key}-${i}`} className="space-y-1.5 rounded-md border border-border/55 p-2">
+              <div className="flex items-center gap-1.5">
+                <Input
+                  className="h-7 flex-1 text-xs"
+                  placeholder="key"
+                  value={column.key}
+                  onChange={(e) => {
+                    const next = [...columns]
+                    next[i] = { ...column, key: e.target.value }
+                    updateColumns(next)
+                  }}
+                />
+                <Input
+                  className="h-7 flex-1 text-xs"
+                  placeholder="label"
+                  value={column.label}
+                  onChange={(e) => {
+                    const next = [...columns]
+                    next[i] = { ...column, label: e.target.value }
+                    updateColumns(next)
+                  }}
+                />
+                <Button
+                  variant="ghost" size="icon" className="h-6 w-6 shrink-0 text-destructive"
+                  onClick={() => updateColumns(columns.filter((_, j) => j !== i))}
+                >
+                  <Trash2 className="h-3 w-3" />
+                </Button>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <Select
+                  value={column.type}
+                  onValueChange={(v) => {
+                    const next = [...columns]
+                    next[i] = { ...column, type: v as TableColumn["type"] }
+                    updateColumns(next)
+                  }}
+                >
+                  <SelectTrigger className="h-7 flex-1 text-xs"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {TABLE_COLUMN_TYPES.map((type) => (
+                      <SelectItem key={type} value={type}>{t(`forms.type.${type}`)}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Label className="flex items-center gap-1.5 text-xs">
+                  <Switch
+                    checked={!!column.required}
+                    onCheckedChange={(checked) => {
+                      const next = [...columns]
+                      next[i] = { ...column, required: checked }
+                      updateColumns(next)
+                    }}
+                  />
+                  必填
+                </Label>
+              </div>
+              {NEEDS_OPTIONS.includes(column.type) && (
+                <Input
+                  className="h-7 text-xs"
+                  placeholder="选项，格式：显示名:value, 显示名:value"
+                  value={formatColumnOptions(column.options)}
+                  onChange={(e) => {
+                    const next = [...columns]
+                    next[i] = { ...column, options: parseColumnOptions(e.target.value) }
+                    updateColumns(next)
+                  }}
+                />
+              )}
             </div>
           ))}
         </section>

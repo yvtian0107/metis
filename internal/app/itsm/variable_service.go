@@ -70,7 +70,7 @@ func InferValueType(fieldType string, hasOptions bool) string {
 		return ValueTypeBoolean
 	case form.FieldDate, form.FieldDatetime:
 		return ValueTypeDate
-	case form.FieldMultiSelect, form.FieldDateRange:
+	case form.FieldMultiSelect, form.FieldDateRange, form.FieldTable:
 		return ValueTypeJSON
 	default:
 		return ValueTypeString

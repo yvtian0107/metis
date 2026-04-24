@@ -30,6 +30,7 @@ import {
   ListChecks,
   Mail,
   Plus,
+  Table2,
   Trash2,
   ToggleLeft,
   Type,
@@ -92,6 +93,7 @@ const FIELD_GROUPS: { key: string; items: Array<{ type: FieldType; icon: Element
       { type: "user_picker", icon: User },
       { type: "dept_picker", icon: Building2 },
       { type: "rich_text", icon: FileText },
+      { type: "table", icon: Table2 },
     ],
   },
 ]
@@ -155,6 +157,14 @@ export function FormComposer({ schema, onChange, title, emptyHint }: FormCompose
       label: t(`forms.type.${type}`),
       required: false,
       width: "full",
+    }
+    if (type === "table") {
+      nextField.props = {
+        columns: [
+          { key: "name", label: "名称", type: "text", required: true },
+          { key: "description", label: "说明", type: "text", required: false },
+        ],
+      }
     }
     updateFields([...current.fields, nextField])
     setSelectedFieldKey(key)

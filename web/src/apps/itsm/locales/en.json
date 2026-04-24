@@ -90,7 +90,8 @@
       "date_range": "Date Range",
       "user_picker": "User Picker",
       "dept_picker": "Dept Picker",
-      "rich_text": "Rich Text"
+      "rich_text": "Rich Text",
+      "table": "Table"
     }
   },
   "catalogs": {

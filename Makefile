@@ -34,6 +34,9 @@ endif
 web-install:
 	cd ./web && $(BUN) install
 
+test-e2e-agentic-itsm: web-full-registry
+	BUN="$(BUN)" $(BUN) scripts/e2e-agentic-itsm.mjs
+
 # --- Development ---
 
 dev: web-full-registry
@@ -213,7 +216,7 @@ test-bdd-vpn:
 	ITSM_BDD_PATHS=features/vpn_classic_flow.feature,features/vpn_dialog_coverage.feature,features/vpn_dialog_validation.feature,features/vpn_draft_recovery.feature,features/vpn_e2e_dialog_flow.feature,features/vpn_participant_validation.feature,features/vpn_smart_engine_deterministic.feature,features/vpn_smart_flow.feature,features/vpn_ticket_withdraw.feature \
 	go test ./internal/app/itsm/ -run TestBDD -v -timeout 20m
 
-.PHONY: web-full-registry web-build web-install web-dev dev stop-all build run release release-license build-license build-sidecar release-sidecar refer-clone seed seed-dev clean push test test-license test-fuzz test-llm test-pretty test-cover test-report test-llm-report test-bdd test-bdd-vpn
+.PHONY: web-full-registry web-build web-install test-e2e-agentic-itsm web-dev dev stop-all build run release release-license build-license build-sidecar release-sidecar refer-clone seed seed-dev clean push test test-license test-fuzz test-llm test-pretty test-cover test-report test-llm-report test-bdd test-bdd-vpn
 
 # Backward-compat aliases
 license: build-license
