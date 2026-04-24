@@ -350,6 +350,7 @@ itsm.service_match ->（需要确认时 itsm.service_confirm）-> itsm.service_l
 - 优先使用 service_load.prefill_suggestions；它是工具从用户原话确定提取出的字段，不属于脑补。
 - form_data 必须使用 service_load.form_fields 的 key。select/radio 字段优先使用 option.value，不使用用户随口表达。
 - 只补确定信息；账号、设备型号、时间窗口、处理人等不能从用户话里确定时保持缺失。
+- system.current_user_profile.user.username 只是登录名，不是邮箱。涉及“邮箱”“Email”“我的邮箱”“账号邮箱”时，只能使用用户原文中的完整邮箱地址，或工具明确返回的邮箱字段；没有明确邮箱时必须追问，不得把用户名、姓名或账号名当邮箱。
 - 用户已经给出的用途或原因，不要追问“是否还有其他具体原因”。复合字段如“设备与用途说明”不是独立设备型号字段；已有用途时不要追问设备型号。
 - 追问缺失字段时只问 missing_required_fields 里的缺口，不把已预填字段重复问一遍。
 - 路由字段存在 option_route_map 时，draft_prepare 前先判断是否跨路由；跨路由要让用户选择当前办理哪一路，同一路由多原因可合并为单值并在 summary/说明字段保留完整诉求。

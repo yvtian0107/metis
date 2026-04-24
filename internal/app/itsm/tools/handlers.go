@@ -594,18 +594,29 @@ func validateDraftData(detail *ServiceDetail, formData map[string]any) ([]DraftW
 	for _, f := range detail.FormFields {
 		raw, ok := formData[f.Key]
 		value := strings.TrimSpace(fmt.Sprintf("%v", raw))
+		item := FieldCollectionItem{
+			Key:      f.Key,
+			Label:    f.Label,
+			Type:     f.Type,
+			Required: f.Required,
+		}
 		if f.Required && (!ok || raw == nil || value == "") {
 			blocking = true
-			missingRequired = append(missingRequired, FieldCollectionItem{
-				Key:      f.Key,
-				Label:    f.Label,
-				Type:     f.Type,
-				Required: f.Required,
-			})
+			missingRequired = append(missingRequired, item)
 			warnings = append(warnings, DraftWarning{
 				Type:    "missing_required",
 				Field:   f.Key,
 				Message: fmt.Sprintf("缺少必填字段：%s", f.Label),
+			})
+			continue
+		}
+		if value != "" && isEmailSemanticField(f) && !isEmailValue(value) {
+			blocking = true
+			missingRequired = append(missingRequired, item)
+			warnings = append(warnings, DraftWarning{
+				Type:    "invalid_email",
+				Field:   f.Key,
+				Message: fmt.Sprintf("%s 需要完整邮箱地址，不能用用户名代替邮箱", f.Label),
 			})
 			continue
 		}
@@ -667,6 +678,18 @@ func validateDraftData(detail *ServiceDetail, formData map[string]any) ([]DraftW
 		}
 	}
 	return warnings, missingRequired, blocking
+}
+
+func isEmailSemanticField(field FormField) bool {
+	if strings.EqualFold(field.Type, "email") {
+		return true
+	}
+	semantic := strings.ToLower(field.Key + " " + field.Label + " " + field.Description + " " + field.Placeholder)
+	return strings.Contains(semantic, "email") || strings.Contains(semantic, "邮箱")
+}
+
+func isEmailValue(value string) bool {
+	return emailPattern.FindString(value) == value
 }
 
 func buildPrefillSuggestions(requestText string, fields []FormField) map[string]any {

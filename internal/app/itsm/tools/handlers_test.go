@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"metis/internal/app"
@@ -361,6 +362,96 @@ func TestDraftPrepare_UsesPrefillSuggestionsBeforeRequiredValidation(t *testing.
 		resp.FormData["device_usage"] != "线上支持用" ||
 		resp.FormData["request_kind"] != "线上支持用" {
 		t.Fatalf("expected complete form data from prefill, got %+v", resp.FormData)
+	}
+}
+
+func TestDraftPrepare_BlocksUsernameForEmailSemanticAccountField(t *testing.T) {
+	store := newMemStateStore()
+	op := &stubOperator{detail: vpnServiceDetail(5)}
+	store.states[1] = &ServiceDeskState{
+		Stage:           "service_loaded",
+		LoadedServiceID: 5,
+		FieldsHash:      "vpn123",
+	}
+	ctx := context.WithValue(context.Background(), app.SessionIDKey, uint(1))
+
+	result, err := draftPrepareHandler(op, store)(ctx, 1, []byte(`{
+		"summary":"VPN 开通申请 - 线上支持用",
+		"form_data":{
+			"vpn_account":"admin",
+			"device_usage":"线上支持用",
+			"request_kind":"线上支持用"
+		}
+	}`))
+	if err != nil {
+		t.Fatalf("prepare draft: %v", err)
+	}
+
+	var resp struct {
+		OK                    bool `json:"ok"`
+		ReadyForConfirmation  bool `json:"ready_for_confirmation"`
+		MissingRequiredFields []struct {
+			Key string `json:"key"`
+		} `json:"missing_required_fields"`
+		Warnings []struct {
+			Type    string `json:"type"`
+			Field   string `json:"field"`
+			Message string `json:"message"`
+		} `json:"warnings"`
+	}
+	if err := json.Unmarshal(result, &resp); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if resp.OK || resp.ReadyForConfirmation {
+		t.Fatalf("expected username-as-email to block draft, got %s", string(result))
+	}
+	if len(resp.MissingRequiredFields) != 1 || resp.MissingRequiredFields[0].Key != "vpn_account" {
+		t.Fatalf("expected vpn_account to be returned as missing, got %+v", resp.MissingRequiredFields)
+	}
+	if len(resp.Warnings) != 1 || resp.Warnings[0].Type != "invalid_email" || resp.Warnings[0].Field != "vpn_account" {
+		t.Fatalf("expected invalid_email warning for vpn_account, got %+v", resp.Warnings)
+	}
+	if !strings.Contains(resp.Warnings[0].Message, "不能用用户名代替邮箱") {
+		t.Fatalf("expected username substitution warning message, got %q", resp.Warnings[0].Message)
+	}
+}
+
+func TestDraftPrepare_AllowsEmailForEmailSemanticAccountField(t *testing.T) {
+	store := newMemStateStore()
+	op := &stubOperator{detail: vpnServiceDetail(5)}
+	store.states[1] = &ServiceDeskState{
+		Stage:           "service_loaded",
+		LoadedServiceID: 5,
+		FieldsHash:      "vpn123",
+	}
+	ctx := context.WithValue(context.Background(), app.SessionIDKey, uint(1))
+
+	result, err := draftPrepareHandler(op, store)(ctx, 1, []byte(`{
+		"summary":"VPN 开通申请 - 线上支持用",
+		"form_data":{
+			"vpn_account":"admin@local.dev",
+			"device_usage":"线上支持用",
+			"request_kind":"线上支持用"
+		}
+	}`))
+	if err != nil {
+		t.Fatalf("prepare draft: %v", err)
+	}
+
+	var resp struct {
+		OK                   bool           `json:"ok"`
+		ReadyForConfirmation bool           `json:"ready_for_confirmation"`
+		NextRequiredTool     string         `json:"next_required_tool"`
+		FormData             map[string]any `json:"form_data"`
+	}
+	if err := json.Unmarshal(result, &resp); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if !resp.OK || !resp.ReadyForConfirmation || resp.NextRequiredTool != "itsm.draft_confirm" {
+		t.Fatalf("expected email account to be accepted, got %s", string(result))
+	}
+	if resp.FormData["vpn_account"] != "admin@local.dev" {
+		t.Fatalf("expected email account to be preserved, got %+v", resp.FormData)
 	}
 }
 
