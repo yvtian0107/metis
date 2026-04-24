@@ -152,8 +152,9 @@ func (gw *AgentGateway) Run(ctx context.Context, sessionID, userID uint) (io.Rea
 		return nil, err
 	}
 
-	// Create cancellable context
-	execCtx, cancel := context.WithCancel(ctx)
+	// Create cancellable context with a backend hard timeout. User/client
+	// cancellation still propagates through the parent context.
+	execCtx, cancel := context.WithTimeout(ctx, agentExecutionTimeout)
 	gw.mu.Lock()
 	gw.executions[sessionID] = cancel
 	gw.mu.Unlock()
@@ -221,17 +222,32 @@ func (gw *AgentGateway) Run(ctx context.Context, sessionID, userID uint) (io.Rea
 			persistPartialAssistant(0)
 			_ = gw.sessionSvc.UpdateStatus(sessionID, SessionStatusCancelled)
 		}
+		finalizeError := func() {
+			if finalized {
+				return
+			}
+			finalized = true
+			persistPartialAssistant(0)
+			_ = gw.sessionSvc.UpdateStatus(sessionID, SessionStatusError)
+		}
+		encodeExecutionStopped := func() error {
+			if ctx.Err() != nil || errors.Is(execCtx.Err(), context.Canceled) {
+				finalizeCancelled()
+				return encoder.Encode(Event{Type: EventTypeCancelled, Message: execCtx.Err().Error()})
+			}
+			finalizeError()
+			return encoder.Encode(Event{Type: EventTypeError, Message: fmt.Sprintf("agent execution timed out after %s", agentExecutionTimeout)})
+		}
 
 		for {
 			select {
 			case evt, ok := <-eventCh:
 				if !ok {
 					if execCtx.Err() != nil {
-						if err := encoder.Encode(Event{Type: EventTypeCancelled, Message: execCtx.Err().Error()}); err != nil {
+						if err := encodeExecutionStopped(); err != nil {
 							closeErr = err
 							return
 						}
-						finalizeCancelled()
 					}
 					return
 				}
@@ -305,11 +321,10 @@ func (gw *AgentGateway) Run(ctx context.Context, sessionID, userID uint) (io.Rea
 				}
 
 			case <-execCtx.Done():
-				if err := encoder.Encode(Event{Type: EventTypeCancelled, Message: execCtx.Err().Error()}); err != nil {
+				if err := encodeExecutionStopped(); err != nil {
 					closeErr = err
 					return
 				}
-				finalizeCancelled()
 				return
 
 			case <-idleTimer.C:

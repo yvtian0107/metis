@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"strings"
 	"testing"
 	"time"
 
@@ -396,6 +397,40 @@ func TestGateway_Run_CancelledSession(t *testing.T) {
 	loaded, _ := gw.sessionSvc.GetOwned(session.ID, 1)
 	if loaded.Status != SessionStatusCancelled {
 		t.Errorf("status: expected %q, got %q", SessionStatusCancelled, loaded.Status)
+	}
+}
+
+func TestGateway_Run_BackendTimeoutMarksSessionError(t *testing.T) {
+	previousAgentTimeout := agentExecutionTimeout
+	previousTurnTimeout := llmTurnTimeout
+	agentExecutionTimeout = 20 * time.Millisecond
+	llmTurnTimeout = time.Second
+	t.Cleanup(func() {
+		agentExecutionTimeout = previousAgentTimeout
+		llmTurnTimeout = previousTurnTimeout
+	})
+
+	db := setupTestDB(t)
+	mockLLM := &blockingMockLLMClient{}
+	gw := newGatewayForTest(t, db, mockLLM)
+
+	modelID := uint(1)
+	agent := &Agent{Name: "Agent", Type: AgentTypeAssistant, ModelID: &modelID, Strategy: AgentStrategyReact, CreatedBy: 1}
+	_ = gw.agentSvc.Create(agent)
+	session, _ := gw.sessionSvc.Create(agent.ID, 1)
+
+	reader, err := gw.Run(context.Background(), session.ID, 1)
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	body := drainReader(reader)
+	if !strings.Contains(body, "error") || !strings.Contains(body, "[DONE]") {
+		t.Fatalf("expected error stream to close, got %q", body)
+	}
+
+	loaded, _ := gw.sessionSvc.GetOwned(session.ID, 1)
+	if loaded.Status != SessionStatusError {
+		t.Errorf("status: expected %q, got %q", SessionStatusError, loaded.Status)
 	}
 }
 

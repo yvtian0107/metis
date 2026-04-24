@@ -41,6 +41,21 @@ func (c *controlledStreamLLMClient) Embedding(context.Context, llm.EmbeddingRequ
 	return nil, llm.ErrNotSupported
 }
 
+type blockingStreamStartLLMClient struct{}
+
+func (c *blockingStreamStartLLMClient) Chat(context.Context, llm.ChatRequest) (*llm.ChatResponse, error) {
+	return nil, llm.ErrNotSupported
+}
+
+func (c *blockingStreamStartLLMClient) ChatStream(ctx context.Context, _ llm.ChatRequest) (<-chan llm.StreamEvent, error) {
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+func (c *blockingStreamStartLLMClient) Embedding(context.Context, llm.EmbeddingRequest) (*llm.EmbeddingResponse, error) {
+	return nil, llm.ErrNotSupported
+}
+
 func collectEvents(ch <-chan Event) []Event {
 	var events []Event
 	for evt := range ch {
@@ -89,6 +104,35 @@ func TestReactExecutor_DirectContent(t *testing.T) {
 	}
 	if events[len(events)-1].Type != EventTypeDone {
 		t.Errorf("last event: expected %q, got %q", EventTypeDone, events[len(events)-1].Type)
+	}
+}
+
+func TestReactExecutor_ChatStreamStartTimeoutEmitsError(t *testing.T) {
+	previous := llmTurnTimeout
+	llmTurnTimeout = 20 * time.Millisecond
+	t.Cleanup(func() { llmTurnTimeout = previous })
+
+	exec := NewReactExecutor(&blockingStreamStartLLMClient{}, newMockToolExecutor())
+	ch, err := exec.Execute(context.Background(), ExecuteRequest{
+		Messages: []ExecuteMessage{{Role: MessageRoleUser, Content: "Hi"}},
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+
+	events := collectEvents(ch)
+	if len(events) < 2 {
+		t.Fatalf("expected start and error events, got %+v", events)
+	}
+	if events[0].Type != EventTypeLLMStart {
+		t.Fatalf("expected first event %q, got %+v", EventTypeLLMStart, events[0])
+	}
+	last := events[len(events)-1]
+	if last.Type != EventTypeError {
+		t.Fatalf("expected final event %q, got %+v", EventTypeError, last)
+	}
+	if !strings.Contains(last.Message, "timed out") {
+		t.Fatalf("expected timeout message, got %q", last.Message)
 	}
 }
 

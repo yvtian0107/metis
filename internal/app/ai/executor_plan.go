@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -54,7 +55,7 @@ func (e *PlanAndExecuteExecutor) Execute(ctx context.Context, req ExecuteRequest
 		// Phase 1: Generate plan
 		select {
 		case <-ctx.Done():
-			emit(Event{Type: EventTypeCancelled, Message: "cancelled by user"})
+			emit(stoppedEvent(ctx.Err(), "planning"))
 			return
 		default:
 		}
@@ -65,16 +66,22 @@ func (e *PlanAndExecuteExecutor) Execute(ctx context.Context, req ExecuteRequest
 			last.Content += planningPromptSuffix
 		}
 
-		planResp, err := e.llmClient.Chat(ctx, llm.ChatRequest{
+		slog.Info("plan executor: starting planning LLM call", "model", req.AgentConfig.ModelName)
+		planResp, err := chatWithTimeout(ctx, e.llmClient, llm.ChatRequest{
 			Model:       req.AgentConfig.ModelName,
 			Messages:    planMessages,
 			MaxTokens:   req.AgentConfig.MaxTokens,
 			Temperature: req.AgentConfig.Temperature,
 		})
 		if err != nil {
-			emit(Event{Type: EventTypeError, Message: fmt.Sprintf("planning failed: %v", err)})
+			if ctx.Err() != nil {
+				emit(stoppedEvent(ctx.Err(), "planning"))
+			} else {
+				emit(Event{Type: EventTypeError, Message: llmCallErrorMessage("planning", err)})
+			}
 			return
 		}
+		slog.Info("plan executor: completed planning LLM call", "model", req.AgentConfig.ModelName)
 
 		steps := parsePlanSteps(planResp.Content)
 		if len(steps) == 0 {
@@ -97,7 +104,7 @@ func (e *PlanAndExecuteExecutor) Execute(ctx context.Context, req ExecuteRequest
 		for _, step := range steps {
 			select {
 			case <-ctx.Done():
-				emit(Event{Type: EventTypeCancelled, Message: "cancelled by user"})
+				emit(stoppedEvent(ctx.Err(), "LLM stream"))
 				return
 			default:
 			}
@@ -117,7 +124,8 @@ func (e *PlanAndExecuteExecutor) Execute(ctx context.Context, req ExecuteRequest
 			var stepToolOutputs []string
 			stepCompleted := false
 			for turn := 0; turn < defaultStepTurnBudget; turn++ {
-				streamCh, err := e.llmClient.ChatStream(ctx, llm.ChatRequest{
+				slog.Info("plan executor: starting step LLM turn", "step", step.Index, "turn", turn+1, "model", req.AgentConfig.ModelName)
+				streamCh, turnCtx, turnCancel, err := openChatStreamWithTimeout(ctx, e.llmClient, llm.ChatRequest{
 					Model:       req.AgentConfig.ModelName,
 					Messages:    stepMessages,
 					Tools:       tools,
@@ -125,33 +133,69 @@ func (e *PlanAndExecuteExecutor) Execute(ctx context.Context, req ExecuteRequest
 					Temperature: req.AgentConfig.Temperature,
 				})
 				if err != nil {
-					emit(Event{Type: EventTypeError, Message: fmt.Sprintf("step %d failed: %v", step.Index, err)})
+					if ctx.Err() != nil {
+						emit(stoppedEvent(ctx.Err(), "LLM stream"))
+					} else {
+						emit(Event{Type: EventTypeError, Message: fmt.Sprintf("step %d %s", step.Index, llmCallErrorMessage("LLM stream", err))})
+					}
 					return
 				}
+				slog.Info("plan executor: LLM stream established", "step", step.Index, "turn", turn+1)
 
 				var content string
 				var toolCalls []llm.ToolCall
 
-				for evt := range streamCh {
-					switch evt.Type {
-					case "content_delta":
-						content += evt.Content
-						stepContent.WriteString(evt.Content)
-						emit(Event{Type: EventTypeContentDelta, Text: evt.Content})
-					case "tool_call":
-						if evt.ToolCall != nil {
-							toolCalls = append(toolCalls, *evt.ToolCall)
+				streamDone := false
+				for !streamDone {
+					select {
+					case evt, ok := <-streamCh:
+						if !ok {
+							if ctx.Err() != nil {
+								turnCancel()
+								emit(stoppedEvent(ctx.Err(), "LLM stream"))
+								return
+							}
+							if turnCtx.Err() != nil {
+								turnCancel()
+								emit(Event{Type: EventTypeError, Message: fmt.Sprintf("step %d %s", step.Index, llmCallErrorMessage("LLM stream", turnCtx.Err()))})
+								return
+							}
+							streamDone = true
+							break
 						}
-					case "done":
-						if evt.Usage != nil {
-							totalInput += evt.Usage.InputTokens
-							totalOutput += evt.Usage.OutputTokens
+						switch evt.Type {
+						case "content_delta":
+							content += evt.Content
+							stepContent.WriteString(evt.Content)
+							emit(Event{Type: EventTypeContentDelta, Text: evt.Content})
+						case "tool_call":
+							if evt.ToolCall != nil {
+								toolCalls = append(toolCalls, *evt.ToolCall)
+							}
+						case "done":
+							if evt.Usage != nil {
+								totalInput += evt.Usage.InputTokens
+								totalOutput += evt.Usage.OutputTokens
+							}
+						case "error":
+							turnCancel()
+							slog.Warn("plan executor: LLM stream returned error", "step", step.Index, "turn", turn+1, "error", evt.Error)
+							emit(Event{Type: EventTypeError, Message: evt.Error})
+							return
 						}
-					case "error":
-						emit(Event{Type: EventTypeError, Message: evt.Error})
+					case <-ctx.Done():
+						turnCancel()
+						emit(stoppedEvent(ctx.Err(), "LLM stream"))
+						return
+					case <-turnCtx.Done():
+						turnCancel()
+						slog.Warn("plan executor: LLM stream timed out", "step", step.Index, "turn", turn+1, "error", turnCtx.Err())
+						emit(Event{Type: EventTypeError, Message: fmt.Sprintf("step %d %s", step.Index, llmCallErrorMessage("LLM stream", turnCtx.Err()))})
 						return
 					}
 				}
+				turnCancel()
+				slog.Info("plan executor: completed step LLM turn", "step", step.Index, "turn", turn+1, "toolCalls", len(toolCalls))
 
 				if len(toolCalls) == 0 {
 					stepCompleted = true

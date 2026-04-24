@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"sync/atomic"
 	"time"
 
@@ -57,12 +58,13 @@ func (e *ReactExecutor) Execute(ctx context.Context, req ExecuteRequest) (<-chan
 		for turn := 1; turn <= maxTurns; turn++ {
 			select {
 			case <-ctx.Done():
-				emit(Event{Type: EventTypeCancelled, Message: "cancelled by user"})
+				emit(stoppedEvent(ctx.Err(), "LLM stream"))
 				return
 			default:
 			}
 
 			emit(Event{Type: EventTypeLLMStart, Turn: turn, Model: req.AgentConfig.ModelName})
+			slog.Info("react executor: starting LLM turn", "turn", turn, "maxTurns", maxTurns, "model", req.AgentConfig.ModelName)
 
 			chatReq := llm.ChatRequest{
 				Model:       req.AgentConfig.ModelName,
@@ -72,37 +74,94 @@ func (e *ReactExecutor) Execute(ctx context.Context, req ExecuteRequest) (<-chan
 				Temperature: req.AgentConfig.Temperature,
 			}
 
-			streamCh, err := e.llmClient.ChatStream(ctx, chatReq)
+			streamCh, turnCtx, turnCancel, err := openChatStreamWithTimeout(ctx, e.llmClient, chatReq)
 			if err != nil {
-				emit(Event{Type: EventTypeError, Message: fmt.Sprintf("LLM call failed: %v", err)})
+				slog.Warn("react executor: failed to open LLM stream", "turn", turn, "error", err)
+				if ctx.Err() != nil {
+					emit(stoppedEvent(ctx.Err(), "LLM stream"))
+				} else {
+					emit(Event{Type: EventTypeError, Message: llmCallErrorMessage("LLM stream", err)})
+				}
 				return
 			}
+			slog.Info("react executor: LLM stream established", "turn", turn, "model", req.AgentConfig.ModelName)
 
 			var assistantContent string
 			var toolCalls []llm.ToolCall
 			var usage llm.Usage
 
-			for evt := range streamCh {
-				switch evt.Type {
-				case "content_delta":
-					assistantContent += evt.Content
-					emit(Event{Type: EventTypeContentDelta, Text: evt.Content})
-				case "tool_call":
-					if evt.ToolCall != nil {
-						toolCalls = append(toolCalls, *evt.ToolCall)
-						emit(Event{
-							Type:       EventTypeToolCall,
-							ToolCallID: evt.ToolCall.ID,
-							ToolName:   evt.ToolCall.Name,
-							ToolArgs:   json.RawMessage(evt.ToolCall.Arguments),
-						})
+			streamDone := false
+			for !streamDone {
+				select {
+				case evt, ok := <-streamCh:
+					if !ok {
+						if ctx.Err() != nil {
+							turnCancel()
+							emit(stoppedEvent(ctx.Err(), "LLM stream"))
+							return
+						}
+						if turnCtx.Err() != nil {
+							turnCancel()
+							slog.Warn("react executor: LLM stream closed after timeout", "turn", turn, "error", turnCtx.Err())
+							emit(Event{Type: EventTypeError, Message: llmCallErrorMessage("LLM stream", turnCtx.Err())})
+							return
+						}
+						streamDone = true
+						break
 					}
-				case "done":
-					if evt.Usage != nil {
-						usage = *evt.Usage
+					switch evt.Type {
+					case "content_delta":
+						assistantContent += evt.Content
+						emit(Event{Type: EventTypeContentDelta, Text: evt.Content})
+					case "tool_call":
+						if evt.ToolCall != nil {
+							toolCalls = append(toolCalls, *evt.ToolCall)
+							emit(Event{
+								Type:       EventTypeToolCall,
+								ToolCallID: evt.ToolCall.ID,
+								ToolName:   evt.ToolCall.Name,
+								ToolArgs:   json.RawMessage(evt.ToolCall.Arguments),
+							})
+						}
+					case "done":
+						if evt.Usage != nil {
+							usage = *evt.Usage
+						}
+					case "error":
+						turnCancel()
+						slog.Warn("react executor: LLM stream returned error", "turn", turn, "error", evt.Error)
+						emit(Event{Type: EventTypeError, Message: evt.Error})
+						return
 					}
-				case "error":
-					emit(Event{Type: EventTypeError, Message: evt.Error})
+				case <-ctx.Done():
+					turnCancel()
+					emit(stoppedEvent(ctx.Err(), "LLM stream"))
+					return
+				case <-turnCtx.Done():
+					turnCancel()
+					slog.Warn("react executor: LLM stream timed out", "turn", turn, "error", turnCtx.Err())
+					emit(Event{Type: EventTypeError, Message: llmCallErrorMessage("LLM stream", turnCtx.Err())})
+					return
+				}
+			}
+			turnCancel()
+			if ctx.Err() != nil {
+				emit(stoppedEvent(ctx.Err(), "LLM stream"))
+				return
+			}
+			slog.Info("react executor: completed LLM turn", "turn", turn, "toolCalls", len(toolCalls))
+
+			select {
+			case <-ctx.Done():
+				emit(stoppedEvent(ctx.Err(), "LLM stream"))
+				return
+			default:
+			}
+			if usage == (llm.Usage{}) && len(toolCalls) == 0 && assistantContent == "" {
+				// An empty closed stream usually means the underlying provider ended
+				// because the context deadline fired before it could emit an event.
+				if ctx.Err() != nil {
+					emit(stoppedEvent(ctx.Err(), "LLM stream"))
 					return
 				}
 			}
