@@ -57,6 +57,72 @@ func TestBuildInitialSeedIncludesDecisionTrigger(t *testing.T) {
 	}
 }
 
+func TestBuildInitialSeedIncludesRejectedActivityPolicy(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	if err := db.Exec(`CREATE TABLE itsm_tickets (
+		id integer primary key,
+		code text,
+		title text,
+		description text,
+		status text,
+		source text,
+		priority_id integer
+	)`).Error; err != nil {
+		t.Fatalf("create tickets: %v", err)
+	}
+	if err := db.Exec(`CREATE TABLE itsm_priorities (id integer primary key, name text)`).Error; err != nil {
+		t.Fatalf("create priorities: %v", err)
+	}
+	if err := db.AutoMigrate(&activityModel{}); err != nil {
+		t.Fatalf("migrate activities: %v", err)
+	}
+	if err := db.Exec(`INSERT INTO itsm_priorities (id, name) VALUES (1, '普通')`).Error; err != nil {
+		t.Fatalf("insert priority: %v", err)
+	}
+	if err := db.Exec(`INSERT INTO itsm_tickets (id, code, title, description, status, source, priority_id) VALUES (42, 'TICK-42', 'VPN', '线上支持', 'in_progress', 'agent', 1)`).Error; err != nil {
+		t.Fatalf("insert ticket: %v", err)
+	}
+	completed := activityModel{
+		ID:                9,
+		TicketID:          42,
+		Name:              "网络管理员处理",
+		ActivityType:      NodeProcess,
+		Status:            ActivityCompleted,
+		TransitionOutcome: "rejected",
+		DecisionReasoning: "不符合申请要求",
+	}
+	if err := db.Create(&completed).Error; err != nil {
+		t.Fatalf("create completed activity: %v", err)
+	}
+
+	completedActivityID := uint(9)
+	engine := &SmartEngine{}
+	_, userMsg, err := engine.buildInitialSeed(db, 42, &serviceModel{
+		ID:                7,
+		Name:              "VPN 开通申请",
+		Description:       "VPN service",
+		CollaborationSpec: "处理完成后结束流程。",
+		WorkflowJSON:      vpnWorkflowContextFixture,
+	}, "direct_first", &completedActivityID, "activity_completed")
+	if err != nil {
+		t.Fatalf("build initial seed: %v", err)
+	}
+	for _, needle := range []string{
+		`"rejected_activity_policy"`,
+		`"must_explain_rejection": true`,
+		`"operator_opinion": "不符合申请要求"`,
+		`不得在没有新证据的情况下重复创建刚被驳回的同一人工处理任务`,
+		`"workflow_context"`,
+	} {
+		if !strings.Contains(userMsg, needle) {
+			t.Fatalf("expected rejected seed to contain %s, got %s", needle, userMsg)
+		}
+	}
+}
+
 type fakeDecisionDataProvider struct {
 	ticket       *DecisionTicketData
 	history      []activityModel
@@ -222,6 +288,78 @@ func TestDecisionTicketContextReturnsStableDecisionAnchors(t *testing.T) {
 	}
 }
 
+func TestDecisionTicketContextMarksRejectedActivityForRecovery(t *testing.T) {
+	now := time.Now()
+	def := toolTicketContext()
+	raw, err := def.Handler(&decisionToolContext{
+		ticketID:            42,
+		serviceID:           7,
+		workflowJSON:        vpnWorkflowContextFixture,
+		completedActivityID: uintPtrIf(9),
+		data: fakeDecisionDataProvider{
+			ticket: &DecisionTicketData{
+				Code:        "TICK-42",
+				Title:       "VPN",
+				Description: "线上支持",
+				Status:      "in_progress",
+				Source:      "agent",
+				FormData:    `{"vpn_account":"demo@qq.com","request_kind":"online_support"}`,
+			},
+			history: []activityModel{
+				{ID: 9, Name: "网络管理员处理", ActivityType: NodeProcess, Status: ActivityCompleted, NodeID: "network_process", TransitionOutcome: "rejected", DecisionReasoning: "不符合申请要求", FinishedAt: &now},
+			},
+			activityByID: map[uint]activityModel{
+				9: {ID: 9, Name: "网络管理员处理", ActivityType: NodeProcess, Status: ActivityCompleted, NodeID: "network_process", TransitionOutcome: "rejected", DecisionReasoning: "不符合申请要求", FinishedAt: &now},
+			},
+			assignments: map[uint][]ActivityAssignmentInfo{
+				9: {{ParticipantType: "position_department", PositionID: uintPtrIf(11), DepartmentID: uintPtrIf(22), AssigneeID: uintPtrIf(1), Status: "completed", FinishedAt: &now}},
+			},
+		},
+	}, nil)
+	if err != nil {
+		t.Fatalf("ticket context: %v", err)
+	}
+
+	var resp struct {
+		CompletedActivity struct {
+			Outcome                  string `json:"outcome"`
+			OperatorOpinion          string `json:"operator_opinion"`
+			Satisfied                bool   `json:"satisfied"`
+			RequiresRecoveryDecision bool   `json:"requires_recovery_decision"`
+		} `json:"completed_activity"`
+		CompletedRequirements []struct {
+			Outcome                  string `json:"outcome"`
+			OperatorOpinion          string `json:"operator_opinion"`
+			Satisfied                bool   `json:"satisfied"`
+			RequiresRecoveryDecision bool   `json:"requires_recovery_decision"`
+		} `json:"completed_requirements"`
+		WorkflowContext struct {
+			Kind        string `json:"kind"`
+			RelatedStep struct {
+				ID            string `json:"id"`
+				OutgoingEdges []struct {
+					Target string `json:"target"`
+				} `json:"outgoing_edges"`
+			} `json:"related_step"`
+			HumanSteps []struct {
+				ID string `json:"id"`
+			} `json:"human_steps"`
+		} `json:"workflow_context"`
+	}
+	if err := json.Unmarshal(raw, &resp); err != nil {
+		t.Fatalf("unmarshal context: %v", err)
+	}
+	if resp.CompletedActivity.Outcome != "rejected" || resp.CompletedActivity.OperatorOpinion != "不符合申请要求" || resp.CompletedActivity.Satisfied || !resp.CompletedActivity.RequiresRecoveryDecision {
+		t.Fatalf("expected rejected completed activity recovery facts, got %+v", resp.CompletedActivity)
+	}
+	if len(resp.CompletedRequirements) != 1 || resp.CompletedRequirements[0].Satisfied || !resp.CompletedRequirements[0].RequiresRecoveryDecision {
+		t.Fatalf("expected rejected completed requirement facts, got %+v", resp.CompletedRequirements)
+	}
+	if resp.WorkflowContext.Kind != "ai_generated_workflow_blueprint" || resp.WorkflowContext.RelatedStep.ID != "network_process" || len(resp.WorkflowContext.RelatedStep.OutgoingEdges) != 1 {
+		t.Fatalf("expected workflow context anchored to rejected activity, got %+v", resp.WorkflowContext)
+	}
+}
+
 func TestValidateDecisionPlanRejectsDuplicateCompletedHumanActivity(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
 	if err != nil {
@@ -272,8 +410,86 @@ func TestValidateDecisionPlanRejectsDuplicateCompletedHumanActivity(t *testing.T
 			Instructions:  "再次处理",
 		}},
 		Confidence: 0.95,
-	}, &serviceModel{ID: 1})
+	}, &serviceModel{ID: 1}, nil)
 	if err == nil || !strings.Contains(err.Error(), "重复创建已完成的人工活动") {
 		t.Fatalf("expected duplicate human activity validation error, got %v", err)
 	}
 }
+
+func TestValidateDecisionPlanRejectsRepeatedActivityAfterRejectedCompletion(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	if err := db.AutoMigrate(&ticketModel{}, &activityModel{}, &assignmentModel{}); err != nil {
+		t.Fatalf("migrate db: %v", err)
+	}
+	if err := db.Exec(`CREATE TABLE users (id integer primary key, is_active boolean)`).Error; err != nil {
+		t.Fatalf("create users: %v", err)
+	}
+	if err := db.Exec(`INSERT INTO users (id, is_active) VALUES (1, true)`).Error; err != nil {
+		t.Fatalf("insert user: %v", err)
+	}
+
+	ticket := ticketModel{Status: "in_progress", EngineType: "smart"}
+	if err := db.Create(&ticket).Error; err != nil {
+		t.Fatalf("create ticket: %v", err)
+	}
+	activity := activityModel{
+		TicketID:          ticket.ID,
+		Name:              "网络管理员处理",
+		ActivityType:      NodeProcess,
+		Status:            ActivityCompleted,
+		TransitionOutcome: "rejected",
+		DecisionReasoning: "不符合申请要求",
+	}
+	if err := db.Create(&activity).Error; err != nil {
+		t.Fatalf("create activity: %v", err)
+	}
+	if err := db.Create(&assignmentModel{
+		TicketID:        ticket.ID,
+		ActivityID:      activity.ID,
+		ParticipantType: "user",
+		UserID:          uintPtrIf(1),
+		AssigneeID:      uintPtrIf(1),
+		Status:          "completed",
+	}).Error; err != nil {
+		t.Fatalf("create assignment: %v", err)
+	}
+
+	eng := &SmartEngine{}
+	err = eng.validateDecisionPlan(db, ticket.ID, &DecisionPlan{
+		NextStepType:  NodeProcess,
+		ExecutionMode: "single",
+		Activities: []DecisionActivity{{
+			Type:          NodeProcess,
+			ParticipantID: uintPtrIf(1),
+			Instructions:  "处理 VPN 开通申请",
+		}},
+		Confidence: 0.95,
+	}, &serviceModel{ID: 1}, &activity.ID)
+	if err == nil || !strings.Contains(err.Error(), "刚被驳回") {
+		t.Fatalf("expected rejected duplicate validation error, got %v", err)
+	}
+
+	err = eng.validateDecisionPlan(db, ticket.ID, &DecisionPlan{
+		NextStepType:  "complete",
+		ExecutionMode: "single",
+		Confidence:    0.95,
+	}, &serviceModel{ID: 1}, &activity.ID)
+	if err != nil {
+		t.Fatalf("expected complete decision to remain allowed after rejection context, got %v", err)
+	}
+}
+
+const vpnWorkflowContextFixture = `{
+  "nodes": [
+    {"id": "start", "type": "start", "data": {"label": "开始"}},
+    {"id": "network_process", "type": "process", "data": {"label": "网络管理员处理", "participants": [{"type": "position_department", "department_code": "it", "position_code": "network_admin"}]}},
+    {"id": "end", "type": "end", "data": {"label": "结束"}}
+  ],
+  "edges": [
+    {"id": "e1", "source": "start", "target": "network_process"},
+    {"id": "e2", "source": "network_process", "target": "end", "data": {"outcome": "approved"}}
+  ]
+}`

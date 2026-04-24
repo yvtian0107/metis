@@ -23,6 +23,7 @@ type decisionToolContext struct {
 	data                DecisionDataProvider
 	ticketID            uint
 	serviceID           uint
+	workflowJSON        string
 	knowledgeSearcher   KnowledgeSearcher
 	resolver            *ParticipantResolver
 	knowledgeBaseIDs    []uint
@@ -114,13 +115,16 @@ func toolTicketContext() decisionToolDef {
 				entry := activityFactMap(&a, assignments)
 				history = append(history, entry)
 				if a.Status == ActivityCompleted && isHumanActivityType(a.ActivityType) {
+					satisfied := isPositiveActivityOutcome(a.TransitionOutcome)
 					completedRequirements = append(completedRequirements, map[string]any{
-						"type":             a.ActivityType,
-						"name":             a.Name,
-						"outcome":          a.TransitionOutcome,
-						"operator_opinion": a.DecisionReasoning,
-						"participants":     assignmentFacts(assignments),
-						"satisfied":        isPositiveActivityOutcome(a.TransitionOutcome),
+						"type":                       a.ActivityType,
+						"name":                       a.Name,
+						"node_id":                    a.NodeID,
+						"outcome":                    a.TransitionOutcome,
+						"operator_opinion":           a.DecisionReasoning,
+						"participants":               assignmentFacts(assignments),
+						"satisfied":                  satisfied,
+						"requires_recovery_decision": !satisfied,
 					})
 				}
 			}
@@ -131,7 +135,12 @@ func toolTicketContext() decisionToolDef {
 				if completed, err := ctx.data.GetActivityByID(ctx.ticketID, *ctx.completedActivityID); err == nil {
 					assignments, _ := ctx.data.GetActivityAssignments(completed.ID)
 					result["completed_activity"] = activityFactMap(completed, assignments)
+					if workflowCtx := buildWorkflowContext(ctx.workflowJSON, completed); workflowCtx != nil {
+						result["workflow_context"] = workflowCtx
+					}
 				}
+			} else if workflowCtx := buildWorkflowContext(ctx.workflowJSON, nil); workflowCtx != nil {
+				result["workflow_context"] = workflowCtx
 			}
 
 			currentActivities, _ := ctx.data.GetCurrentActivities(ctx.ticketID)
@@ -215,8 +224,19 @@ func activityFactMap(a *activityModel, assignments []ActivityAssignmentInfo) map
 		"status":  a.Status,
 		"outcome": a.TransitionOutcome,
 	}
+	if a.NodeID != "" {
+		entry["node_id"] = a.NodeID
+	}
 	if a.FinishedAt != nil {
 		entry["completed_at"] = a.FinishedAt.Format(time.RFC3339)
+	}
+	if a.Status == ActivityCompleted && isHumanActivityType(a.ActivityType) {
+		satisfied := isPositiveActivityOutcome(a.TransitionOutcome)
+		entry["satisfied"] = satisfied
+		if !satisfied {
+			entry["requires_recovery_decision"] = true
+			entry["recovery_reason"] = "人工节点已驳回；下一轮必须基于协作规范和 workflow_json 解释驳回后的恢复路径，不得无新证据重复创建同一处理任务。"
+		}
 	}
 	if a.AIReasoning != "" {
 		entry["ai_reasoning"] = a.AIReasoning

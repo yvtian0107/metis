@@ -333,7 +333,7 @@ func (e *SmartEngine) runDecisionCycle(ctx context.Context, tx *gorm.DB, ticketI
 	}
 
 	// Validate decision plan
-	if err := e.validateDecisionPlan(tx, ticketID, plan, svcInfo); err != nil {
+	if err := e.validateDecisionPlan(tx, ticketID, plan, svcInfo, completedActivityID); err != nil {
 		return e.handleDecisionFailure(tx, ticketID, fmt.Sprintf("AI 决策校验失败: %v", err))
 	}
 
@@ -734,7 +734,7 @@ func (e *SmartEngine) pendManualHandlingPlan(tx *gorm.DB, ticketID uint, plan *D
 
 // --- Validation ---
 
-func (e *SmartEngine) validateDecisionPlan(tx *gorm.DB, ticketID uint, plan *DecisionPlan, svc *serviceModel) error {
+func (e *SmartEngine) validateDecisionPlan(tx *gorm.DB, ticketID uint, plan *DecisionPlan, svc *serviceModel, completedActivityID *uint) error {
 	if plan == nil {
 		return fmt.Errorf("decision plan is nil")
 	}
@@ -793,6 +793,9 @@ func (e *SmartEngine) validateDecisionPlan(tx *gorm.DB, ticketID uint, plan *Dec
 		return fmt.Errorf("confidence %.2f 不在 [0, 1] 范围内", plan.Confidence)
 	}
 
+	if err := e.validateRejectedRecoveryDecision(tx, ticketID, completedActivityID, plan); err != nil {
+		return err
+	}
 	if err := e.validateNoDuplicateCompletedHumanActivity(tx, ticketID, plan); err != nil {
 		return err
 	}
@@ -845,6 +848,42 @@ func (e *SmartEngine) validateNoDuplicateCompletedHumanActivity(tx *gorm.DB, tic
 			}
 		}
 	}
+	return nil
+}
+
+func (e *SmartEngine) validateRejectedRecoveryDecision(tx *gorm.DB, ticketID uint, completedActivityID *uint, plan *DecisionPlan) error {
+	if completedActivityID == nil || *completedActivityID == 0 || plan == nil || plan.NextStepType == "complete" {
+		return nil
+	}
+
+	var completed activityModel
+	if err := tx.Where("ticket_id = ? AND id = ?", ticketID, *completedActivityID).First(&completed).Error; err != nil {
+		return err
+	}
+	if !isHumanActivityType(completed.ActivityType) || isPositiveActivityOutcome(completed.TransitionOutcome) {
+		return nil
+	}
+
+	assignments, err := NewDecisionDataStore(tx).GetActivityAssignments(completed.ID)
+	if err != nil {
+		return err
+	}
+	existingSignatures := participantSignaturesForAssignments(assignments)
+
+	for i, da := range plan.Activities {
+		if !isHumanActivityType(da.Type) || da.Type != completed.ActivityType {
+			continue
+		}
+		plannedSignatures := participantSignaturesForDecisionActivity(tx, da)
+		if len(plannedSignatures) == 0 || !participantSignaturesOverlap(plannedSignatures, existingSignatures) {
+			continue
+		}
+		if hasExplicitRecoveryIntent(da.Instructions) {
+			continue
+		}
+		return fmt.Errorf("activities[%d] 试图重复创建刚被驳回的人工活动：%s；请基于驳回原因和 workflow_json 选择退回、升级、结束失败或明确不同的下一步", i, completed.Name)
+	}
+
 	return nil
 }
 
@@ -965,6 +1004,22 @@ func sameActivityMeaning(existing activityModel, plannedName string, plannedInst
 
 func normalizeActivityText(value string) string {
 	return strings.ToLower(strings.TrimSpace(value))
+}
+
+func hasExplicitRecoveryIntent(instructions string) bool {
+	text := strings.ToLower(strings.TrimSpace(instructions))
+	if text == "" {
+		return false
+	}
+	for _, marker := range []string{
+		"退回", "补充", "修正", "更正", "复核", "升级", "转交", "转派", "重新分配", "其他角色", "失败", "取消",
+		"return", "revise", "revision", "rework", "review", "escalate", "handoff", "reassign", "cancel", "fail",
+	} {
+		if strings.Contains(text, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 func participantSignaturesForDecisionActivity(tx *gorm.DB, da DecisionActivity) map[string]struct{} {
@@ -1167,6 +1222,7 @@ func (e *SmartEngine) agenticDecision(ctx context.Context, tx *gorm.DB, ticketID
 		data:                NewDecisionDataStore(tx),
 		ticketID:            ticketID,
 		serviceID:           svc.ID,
+		workflowJSON:        svc.WorkflowJSON,
 		knowledgeSearcher:   e.knowledgeSearcher,
 		resolver:            e.resolver,
 		actionExecutor:      e.actionExecutor,
@@ -1277,11 +1333,30 @@ func (e *SmartEngine) buildInitialSeed(tx *gorm.DB, ticketID uint, svc *serviceM
 			"current_status":     ticket.Status,
 		},
 	}
+	if svc.WorkflowJSON != "" {
+		seed["workflow_context"] = map[string]any{
+			"kind":    "ai_generated_workflow_blueprint",
+			"summary": extractWorkflowHints(svc.WorkflowJSON),
+			"policy": []string{
+				"workflow_json 是智能服务的协作蓝图和语义约束，不是可忽略的说明文字。",
+				"activity_completed 触发时，必须解释 completed_activity 与 workflow_json 中节点、边、条件的关系。",
+				"不得在没有新证据的情况下重复创建刚被驳回的同一人工处理任务。",
+			},
+		}
+	}
 	if completedActivityID != nil && *completedActivityID > 0 {
 		data := NewDecisionDataStore(tx)
 		if completed, err := data.GetActivityByID(ticketID, *completedActivityID); err == nil {
 			assignments, _ := data.GetActivityAssignments(completed.ID)
 			seed["completed_activity"] = activityFactMap(completed, assignments)
+			if isHumanActivityType(completed.ActivityType) && !isPositiveActivityOutcome(completed.TransitionOutcome) {
+				seed["rejected_activity_policy"] = map[string]any{
+					"must_explain_rejection": true,
+					"operator_opinion":       completed.DecisionReasoning,
+					"allowed_recovery_paths": []string{"退回申请人补充", "升级/转交其他角色", "结束为失败或取消", "按协作规范继续到明确不同的下一步"},
+					"forbidden_path":         "没有新证据时重复创建与刚被驳回活动相同的处理任务",
+				}
+			}
 		}
 	}
 	seedJSON, _ := json.MarshalIndent(seed, "", "  ")
@@ -1327,7 +1402,7 @@ func buildAgenticSystemPrompt(collaborationSpec, decisionMode, workflowJSON stri
 	default: // "direct_first" or empty
 		hints := extractWorkflowHints(workflowJSON)
 		if hints != "" {
-			prompt += "## 决策策略\n\n优先参考以下工作流路径来决定下一步，无法确定时使用 AI 推理。\n\n"
+			prompt += "## 决策策略\n\n优先遵守 AI 生成 workflow_json 表达的协作路径和语义。workflow_json 是当前服务的协作蓝图，不是可忽略的参考说明；无法直接映射时，再结合协作规范和工具上下文进行 AI 推理。\n\n"
 			prompt += "## 工作流参考路径\n\n" + hints + "\n\n---\n\n"
 		} else {
 			slog.Warn("direct_first mode but no workflow hints available, degrading to ai_only")
@@ -1357,13 +1432,14 @@ const agenticToolGuidance = `## 工具使用指引
 
 1. 必须先用 decision.ticket_context 了解完整上下文，尤其是 current_activities、activity_history、action_progress、parallel_groups 和 is_terminal。
 2. 如果 is_terminal=true，直接输出 complete 或保持终态判断，不要创建新活动。
-3. 当 trigger_reason=activity_completed 时，必须先读取 completed_activity 和 completed_requirements；刚完成的人工活动如果已经满足当前服务规范，不得再次创建同一处理/表单，必须进入下一条件或 complete。
-4. 用 decision.list_actions 查看是否有可用自动化动作；协作规范要求预检、放行等同步动作时，优先 decision.execute_action，而不是输出 action 活动。
-5. 如需查阅处理规范或知识库，使用 decision.knowledge_search。知识不可用或无命中时可以降级，但要在 reasoning 说明。
-6. 需要人工处理/表单时，必须先用 decision.resolve_participant 解析参与人；count=0 时不得高置信输出该人工活动。
-7. 候选多人时，可用 decision.user_workload 选择负载较低者；SLA 风险明显时可用 decision.sla_status。
-8. 如果需要多角色并行处理，设置 execution_mode 为 "parallel"，在 activities 中列出所有并行角色。
-9. 最终输出决策 JSON（不调用任何工具）。
+3. 当 trigger_reason=activity_completed 时，必须先读取 completed_activity、completed_requirements 和 workflow_context；刚完成的人工活动如果已经满足当前服务规范，不得再次创建同一处理/表单，必须进入下一条件或 complete。
+4. 当 completed_activity.outcome=rejected 或 completed_activity.satisfied=false 时，必须先解释驳回原因以及 workflow_json 允许的恢复路径，再决定退回申请人、升级/转交、结束为失败或按规范继续；没有新证据时不得重复创建刚被驳回的同一人工处理任务。
+5. 用 decision.list_actions 查看是否有可用自动化动作；协作规范要求预检、放行等同步动作时，优先 decision.execute_action，而不是输出 action 活动。
+6. 如需查阅处理规范或知识库，使用 decision.knowledge_search。知识不可用或无命中时可以降级，但要在 reasoning 说明。
+7. 需要人工处理/表单时，必须先用 decision.resolve_participant 解析参与人；count=0 时不得高置信输出该人工活动。
+8. 候选多人时，可用 decision.user_workload 选择负载较低者；SLA 风险明显时可用 decision.sla_status。
+9. 如果需要多角色并行处理，设置 execution_mode 为 "parallel"，在 activities 中列出所有并行角色。
+10. 最终输出决策 JSON（不调用任何工具）。
 
 ### 完成判断
 
