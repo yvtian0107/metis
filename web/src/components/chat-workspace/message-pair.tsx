@@ -19,7 +19,7 @@ interface QAPairProps {
   onEditMessage?: (messageId: number, content: string) => void
   doneMetrics?: { durationMs?: number; inputTokens?: number; outputTokens?: number }
   streamingExtras?: React.ReactNode
-  renderDataPart?: (part: UIMessage["parts"][number]) => React.ReactNode
+  renderDataPart?: (part: UIMessage["parts"][number], message: UIMessage) => React.ReactNode
   suppressTextWhenDataPart?: boolean
 }
 
@@ -446,7 +446,10 @@ export function QAPair({
   )
   const renderedDataParts = renderDataPart
     ? latestDataParts
-        .map(([key, part]) => ({ key, node: renderDataPart(part) }))
+        .map(([key, part]) => {
+          const message = mainAiMessages.find((item) => item.parts?.includes(part)) ?? mainAiMessage
+          return { key, node: message ? renderDataPart(part, message) : null }
+        })
         .filter((item) => item.node != null)
     : []
 

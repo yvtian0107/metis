@@ -8,7 +8,7 @@ import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { sessionApi } from "@/lib/api"
-import { SessionSidebar } from "./components/session-sidebar"
+import { ChatHeader, SessionSidebar } from "@/components/chat-workspace"
 
 const SIDEBAR_COLLAPSED_KEY = "ai-chat-sidebar-collapsed"
 
@@ -55,16 +55,19 @@ export function Component() {
       {agentId && <SessionSidebar agentId={agentId} collapsed={sidebarCollapsed} />}
 
       <div className="flex min-w-0 flex-1 flex-col bg-background">
-        <div className="flex h-12 shrink-0 items-center justify-between border-b px-4 py-2">
-          <div className="flex min-w-0 items-center gap-2">
-            {agentId && (
+        <ChatHeader
+          identity={{
+            title: t("ai:chat.newChat"),
+            icon: <Bot className="size-4" />,
+          }}
+          leading={
+            agentId ? (
               <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={toggleSidebar}>
                 {sidebarCollapsed ? <PanelLeft className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}
               </Button>
-            )}
-            <h3 className="truncate font-medium">{t("ai:chat.newChat")}</h3>
-          </div>
-        </div>
+            ) : null
+          }
+        />
 
         <div className="flex flex-1 items-center justify-center px-4 pb-24">
           <div className="flex max-w-md flex-col items-center text-center">

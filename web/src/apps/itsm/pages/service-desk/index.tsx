@@ -8,19 +8,24 @@ import {
   AlertTriangle,
   Bot,
   CheckCircle2,
-  History,
   Loader2,
   Plus,
-  Send,
   Sparkles,
-  Square,
 } from "lucide-react"
 import { toast } from "sonner"
 
-import { QAPair } from "@/apps/ai/pages/chat/components/message-item"
-import { useAiChat } from "@/apps/ai/pages/chat/hooks/use-ai-chat"
+import {
+  ChatComposer,
+  ChatHeader,
+  ChatStatusDot,
+  ChatWorkspace,
+  groupUIMessagesIntoPairs,
+  SessionSidebar,
+  useAiChat,
+  type ChatComposerImage,
+  type ChatWorkspaceSurfaceRenderer,
+} from "@/components/chat-workspace"
 import { sessionApi, type AgentSession } from "@/lib/api"
-import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { FormRenderer, type FormSchema } from "../../components/form-engine"
 import {
@@ -38,18 +43,14 @@ const SUGGESTED_PROMPTS = [
   "帮我查一下我的工单进度",
 ]
 
-function groupUIMessagesIntoPairs(messages: UIMessage[]): Array<{ userMessage: UIMessage; aiMessages: UIMessage[] }> {
-  const pairs: Array<{ userMessage: UIMessage; aiMessages: UIMessage[] }> = []
-  for (const msg of messages) {
-    if (msg.role === "user") {
-      pairs.push({ userMessage: msg, aiMessages: [] })
-      continue
+function addImagePreviews(files: File[], onAdd: (image: ChatComposerImage) => void) {
+  for (const file of files) {
+    const reader = new FileReader()
+    reader.onload = (event) => {
+      onAdd({ file, preview: String(event.target?.result ?? "") })
     }
-    if (pairs.length > 0) {
-      pairs[pairs.length - 1].aiMessages.push(msg)
-    }
+    reader.readAsDataURL(file)
   }
-  return pairs
 }
 
 function formatSessionTime(value: string) {
@@ -58,157 +59,26 @@ function formatSessionTime(value: string) {
   return date.toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })
 }
 
-function sessionTitle(session: AgentSession) {
-  return session.title || `会话 #${session.id}`
-}
-
-function StatusDot({ className }: { className?: string }) {
-  return (
-    <span className={cn("relative flex size-2.5", className)}>
-      <span className="absolute inline-flex size-full animate-ping rounded-full bg-emerald-400 opacity-45" />
-      <span className="relative inline-flex size-2.5 rounded-full bg-emerald-500" />
-    </span>
-  )
-}
-
-function ServiceDeskSidebar({
-  sessions,
-  activeSessionId,
-  loading,
-  onSelect,
-  onNew,
-}: {
-  sessions: AgentSession[]
-  activeSessionId: number | null
-  loading: boolean
-  onSelect: (sessionId: number) => void
-  onNew: () => void
-}) {
-  return (
-    <aside className="hidden min-h-0 w-60 shrink-0 border-r border-border/70 bg-muted/12 md:flex md:flex-col">
-      <div className="flex h-14 items-center justify-between px-4">
-        <div className="flex items-center gap-2 text-sm font-medium">
-          <History className="size-4 text-muted-foreground" />
-          会话
-        </div>
-        <Button type="button" size="icon" variant="ghost" className="size-8" onClick={onNew}>
-          <Plus className="size-4" />
-        </Button>
-      </div>
-      <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
-        {loading ? (
-          <div className="flex items-center gap-2 px-3 py-3 text-xs text-muted-foreground">
-            <Loader2 className="size-3.5 animate-spin" />
-            载入会话
-          </div>
-        ) : sessions.length === 0 ? (
-          <div className="px-3 py-3 text-xs leading-5 text-muted-foreground">暂无历史会话</div>
-        ) : (
-          <div className="space-y-1">
-            {sessions.map((session) => {
-              const active = session.id === activeSessionId
-              return (
-                <button
-                  key={session.id}
-                  type="button"
-                  onClick={() => onSelect(session.id)}
-                  className={cn(
-                    "group flex w-full flex-col rounded-md border border-transparent px-3 py-2 text-left transition-colors",
-                    active ? "border-primary/18 bg-primary/8 text-foreground" : "text-muted-foreground hover:bg-muted/45 hover:text-foreground",
-                  )}
-                >
-                  <span className="line-clamp-2 text-sm leading-5">{sessionTitle(session)}</span>
-                  <span className="mt-1 text-[11px] text-muted-foreground/75">{formatSessionTime(session.updatedAt)}</span>
-                </button>
-              )
-            })}
-          </div>
-        )}
-      </div>
-    </aside>
-  )
-}
-
-function ServiceDeskComposer({
-  value,
-  disabled,
-  pending,
-  placeholder,
-  onChange,
-  onSend,
-  compact,
-}: {
-  value: string
-  disabled?: boolean
-  pending?: boolean
-  placeholder: string
-  onChange: (value: string) => void
-  onSend: () => void
-  compact?: boolean
-}) {
-  const textareaRef = useRef<HTMLTextAreaElement>(null)
-
-  useEffect(() => {
-    const textarea = textareaRef.current
-    if (!textarea) return
-    textarea.style.height = "auto"
-    const maxHeight = compact ? 160 : 200
-    textarea.style.height = `${Math.min(textarea.scrollHeight, maxHeight)}px`
-  }, [value, compact])
-
-  return (
-    <div className={cn("w-full", compact ? "max-w-3xl" : "max-w-[720px]")}>
-      <div className="rounded-2xl border bg-background shadow-lg transition-colors focus-within:border-primary/30">
-        <textarea
-          ref={textareaRef}
-          value={value}
-          onChange={(event) => onChange(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.nativeEvent.isComposing) return
-            if (event.key === "Enter" && !event.shiftKey) {
-              event.preventDefault()
-              onSend()
-            }
-          }}
-          placeholder={placeholder}
-          rows={1}
-          className={cn(
-            "w-full max-h-[200px] resize-none bg-transparent px-4 pt-3 pb-1 text-base leading-relaxed placeholder:text-muted-foreground focus:outline-none read-only:cursor-text",
-            compact ? "min-h-11" : "min-h-24",
-          )}
-          readOnly={disabled}
-        />
-        <div className="flex items-center justify-between px-3 pb-2">
-          <div />
-          <Button
-            type="button"
-            size="icon"
-            className="size-8 rounded-full"
-            onClick={onSend}
-            disabled={!value.trim() || disabled || pending}
-          >
-            {pending ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />}
-          </Button>
-        </div>
-      </div>
-    </div>
-  )
-}
-
 function WelcomeStage({
   agentName,
   value,
+  images,
   disabled,
   pending,
   onChange,
   onSend,
+  onAddImages,
+  onRemoveImage,
 }: {
   agentName: string
   value: string
+  images: ChatComposerImage[]
   disabled?: boolean
   pending?: boolean
   onChange: (value: string) => void
   onSend: () => void
+  onAddImages: (files: File[]) => void
+  onRemoveImage: (index: number) => void
 }) {
   return (
     <div className="flex min-h-0 flex-1 flex-col items-center justify-center px-5 py-8">
@@ -217,7 +87,7 @@ function WelcomeStage({
           <Bot className="size-8" />
         </div>
         <div className="mt-4 flex items-center gap-2 text-sm text-muted-foreground">
-          <StatusDot />
+          <ChatStatusDot />
           <span>{agentName}</span>
         </div>
         <h1 className="mt-3 text-3xl font-semibold tracking-normal text-foreground">IT 服务台</h1>
@@ -226,13 +96,19 @@ function WelcomeStage({
         </p>
       </div>
       <div className="mt-9 flex w-full flex-col items-center">
-        <ServiceDeskComposer
+        <ChatComposer
           value={value}
           onChange={onChange}
           onSend={onSend}
+          onPasteImages={onAddImages}
+          onPickImages={onAddImages}
+          onRemoveImage={onRemoveImage}
+          images={images}
           disabled={disabled}
           pending={pending}
+          allowImages
           placeholder="描述你的 IT 诉求..."
+          className="max-w-[720px]"
         />
         <div className="mt-4 flex max-w-3xl flex-wrap justify-center gap-2">
           {SUGGESTED_PROMPTS.map((prompt) => (
@@ -446,15 +322,19 @@ function ServiceDeskConversation({
   session,
   agentName,
   initialPrompt,
+  initialImages,
   onInitialPromptSent,
 }: {
   session: AgentSession
   agentName: string
   initialPrompt?: string
+  initialImages?: ChatComposerImage[]
   onInitialPromptSent: () => void
 }) {
+  const navigate = useNavigate()
   const queryClient = useQueryClient()
   const [input, setInput] = useState("")
+  const [pendingImages, setPendingImages] = useState<ChatComposerImage[]>([])
   const scrollRef = useRef<HTMLDivElement>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const initialPromptSentRef = useRef(false)
@@ -485,9 +365,22 @@ function ServiceDeskConversation({
   useEffect(() => {
     if (!initialPrompt || initialPromptSentRef.current || isLoading) return
     initialPromptSentRef.current = true
-    chat.sendMessage({ text: initialPrompt })
-    onInitialPromptSent()
-  }, [chat, initialPrompt, isLoading, onInitialPromptSent])
+    ;(async () => {
+      try {
+        const imageUrls: string[] = []
+        for (const image of initialImages ?? []) {
+          const res = await sessionApi.uploadMessageImage(session.id, image.file)
+          imageUrls.push(res.url)
+        }
+        chat.setPendingImageUrls(imageUrls)
+        chat.sendMessage({ text: initialPrompt })
+        onInitialPromptSent()
+      } catch (err) {
+        initialPromptSentRef.current = false
+        toast.error(err instanceof Error ? err.message : "图片上传失败")
+      }
+    })()
+  }, [chat, initialImages, initialPrompt, isLoading, onInitialPromptSent, session.id])
 
   useEffect(() => {
     const container = scrollRef.current
@@ -496,10 +389,19 @@ function ServiceDeskConversation({
   }, [chat.messages.length, isBusy])
 
   const sendMutation = useMutation({
-    mutationFn: async (text: string) => text,
+    mutationFn: async (text: string) => {
+      const imageUrls: string[] = []
+      for (const image of pendingImages) {
+        const res = await sessionApi.uploadMessageImage(session.id, image.file)
+        imageUrls.push(res.url)
+      }
+      chat.setPendingImageUrls(imageUrls)
+      return text
+    },
     onSuccess: (text) => {
       chat.sendMessage({ text })
       setInput("")
+      setPendingImages([])
     },
     onError: (err) => toast.error(err.message),
   })
@@ -515,39 +417,32 @@ function ServiceDeskConversation({
 
   const handleSend = useCallback(() => {
     const text = input.trim()
-    if (!text || isBusy || sendMutation.isPending) return
+    if ((!text && pendingImages.length === 0) || isBusy || sendMutation.isPending) return
     sendMutation.mutate(text)
-  }, [input, isBusy, sendMutation])
+  }, [input, isBusy, pendingImages.length, sendMutation])
+
+  const addPendingImages = useCallback((files: File[]) => {
+    addImagePreviews(files, (image) => setPendingImages((prev) => [...prev, image]))
+  }, [])
+
+  const removePendingImage = useCallback((index: number) => {
+    setPendingImages((prev) => prev.filter((_, i) => i !== index))
+  }, [])
 
   const showEmpty = !isLoading && qaPairs.length === 0 && !initialPrompt
 
   return (
-    <main className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background">
-        <div className="flex h-14 shrink-0 items-center justify-between border-b border-border/70 px-5">
-          <div className="flex min-w-0 items-center gap-3">
-            <div className="flex size-8 shrink-0 items-center justify-center rounded-full border border-primary/20 bg-primary/8 text-primary">
-              <Bot className="size-4" />
-            </div>
-            <div className="min-w-0">
-              <div className="flex items-center gap-2">
-                <h1 className="truncate text-sm font-semibold">IT 服务台</h1>
-                <StatusDot />
-              </div>
-              <div className="mt-0.5 truncate text-xs font-medium text-foreground/70">
-                当前智能体：{agentName} · {formatSessionTime(session.updatedAt)}
-              </div>
-            </div>
-          </div>
-          <div />
-        </div>
-
-        <div ref={scrollRef} className="relative min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
-          {isLoading ? (
-            <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-              <Loader2 className="mr-2 size-4 animate-spin" />
-              载入会话
-            </div>
-          ) : showEmpty ? (
+    <ChatWorkspace
+      identity={{
+        title: "IT 服务台",
+        subtitle: `当前智能体：${agentName} · ${formatSessionTime(session.updatedAt)}`,
+        icon: <Bot className="size-4" />,
+        switchLabel: "前往智能岗位",
+        onSwitchAgent: () => navigate("/itsm/smart-staffing"),
+      }}
+      loading={isLoading}
+      emptyState={
+        showEmpty ? (
             <div className="mx-auto flex h-full max-w-3xl flex-col justify-center px-6 py-12">
               <div className="flex size-14 items-center justify-center rounded-full border border-primary/25 bg-primary/10 text-primary">
                 <Bot className="size-7" />
@@ -557,77 +452,51 @@ function ServiceDeskConversation({
                 服务台会沿用当前会话上下文继续澄清、填槽和创建工单。
               </p>
             </div>
-          ) : (
-            <div className="mx-auto max-w-3xl px-4 pb-4">
-              {qaPairs.map((pair, index) => {
-                const isLastPair = index === qaPairs.length - 1
-                return (
-                  <QAPair
-                    key={pair.userMessage.id}
-                    userMessage={pair.userMessage}
-                    aiMessages={pair.aiMessages}
-                    agentName={agentName}
-                    isStreaming={isLastPair && isBusy}
-                    onRegenerate={isLastPair ? () => chat.regenerate() : undefined}
-                    renderDataPart={(part) => (
-                      <ServiceDeskDataPart
-                        part={part}
-                        sessionId={session.id}
-                        onSubmitted={invalidateWorkspace}
-                      />
-                    )}
-                    suppressTextWhenDataPart
-                    doneMetrics={
-                      isLastPair && chat.status === "ready"
-                        ? {
-                            inputTokens: chat.lastUsage.promptTokens,
-                            outputTokens: chat.lastUsage.completionTokens,
-                          }
-                        : undefined
-                    }
-                  />
-                )
-              })}
-              {chat.error && !isBusy && (
-                <div className="mb-6 rounded-lg border border-destructive/25 bg-destructive/5 p-3 text-sm text-destructive">
-                  {chat.error.message}
-                </div>
-              )}
-              <div ref={messagesEndRef} />
-            </div>
-          )}
-        </div>
-
-        {isBusy && (
-          <div className="flex shrink-0 justify-center pb-2">
-            <Button
-              variant="outline"
-              size="sm"
-              className="rounded-full px-4"
-              onClick={() => cancelMutation.mutate()}
-              disabled={cancelMutation.isPending}
-            >
-              {cancelMutation.isPending ? <Loader2 className="mr-1.5 size-3.5 animate-spin" /> : <Square className="mr-1.5 size-3.5" />}
-              停止
-            </Button>
-          </div>
-        )}
-
-        <div className="shrink-0 bg-background px-4 pb-3 pt-1">
-          <div className="mx-auto max-w-3xl">
-            <ServiceDeskComposer
-              value={input}
-              onChange={setInput}
-              onSend={handleSend}
-              disabled={isBusy}
-              pending={sendMutation.isPending}
-              placeholder="描述你的 IT 诉求..."
-              compact
+        ) : null
+      }
+      pairs={qaPairs}
+      agentName={agentName}
+      isBusy={isBusy}
+      status={chat.status}
+      error={chat.error}
+      session={session}
+      surfaces={[
+        {
+          surfaceType: "itsm.draft_form",
+          suppressText: true,
+          render: ({ part }) => (
+            <ServiceDeskDataPart
+              part={part}
+              sessionId={session.id}
+              onSubmitted={invalidateWorkspace}
             />
-            <p className="mt-1 text-center text-[10px] text-muted-foreground/50">Enter 发送，Shift + Enter 换行</p>
-          </div>
-        </div>
-    </main>
+          ),
+        } satisfies ChatWorkspaceSurfaceRenderer,
+      ]}
+      workspaceActions={{
+        regenerate: () => chat.regenerate(),
+        cancel: () => cancelMutation.mutate(),
+      }}
+      composer={{
+        value: input,
+        onChange: setInput,
+        onSend: handleSend,
+        onStop: () => cancelMutation.mutate(),
+        onPasteImages: addPendingImages,
+        onPickImages: addPendingImages,
+        onRemoveImage: removePendingImage,
+        images: pendingImages,
+        disabled: isBusy,
+        pending: sendMutation.isPending,
+        isBusy,
+        allowImages: true,
+        placeholder: "描述你的 IT 诉求...",
+        hint: "Enter 发送，Shift + Enter 换行",
+        compact: true,
+      }}
+      messagesEndRef={messagesEndRef}
+      scrollRef={scrollRef}
+    />
   )
 }
 
@@ -636,7 +505,8 @@ export function Component() {
   const [selectedSessionId, setSelectedSessionId] = useState<number | null>(null)
   const [createdSession, setCreatedSession] = useState<AgentSession | null>(null)
   const [landingInput, setLandingInput] = useState("")
-  const [pendingInitialPrompt, setPendingInitialPrompt] = useState<{ sessionId: number; text: string } | null>(null)
+  const [landingImages, setLandingImages] = useState<ChatComposerImage[]>([])
+  const [pendingInitialPrompt, setPendingInitialPrompt] = useState<{ sessionId: number; text: string; images: ChatComposerImage[] } | null>(null)
 
   const { data: config, isLoading: configLoading } = useQuery({
     queryKey: ["itsm-smart-staffing-config"],
@@ -658,15 +528,16 @@ export function Component() {
     : sessions.find((item) => item.id === selectedSessionId) ?? (createdSession?.id === selectedSessionId ? createdSession : null)
 
   const createSessionMutation = useMutation({
-    mutationFn: async (text: string) => {
+    mutationFn: async ({ text, images }: { text: string; images: ChatComposerImage[] }) => {
       const session = await sessionApi.create(serviceDeskAgentId)
-      return { session, text }
+      return { session, text, images }
     },
-    onSuccess: ({ session, text }) => {
+    onSuccess: ({ session, text, images }) => {
       setCreatedSession(session)
       setSelectedSessionId(session.id)
-      setPendingInitialPrompt({ sessionId: session.id, text })
+      setPendingInitialPrompt({ sessionId: session.id, text, images })
       setLandingInput("")
+      setLandingImages([])
       queryClient.invalidateQueries({ queryKey: ["ai-sessions", serviceDeskAgentId] })
     },
     onError: (err) => toast.error(err.message),
@@ -674,9 +545,17 @@ export function Component() {
 
   const handleLandingSend = useCallback(() => {
     const text = landingInput.trim()
-    if (!text || serviceDeskAgentId <= 0 || createSessionMutation.isPending) return
-    createSessionMutation.mutate(text)
-  }, [createSessionMutation, landingInput, serviceDeskAgentId])
+    if ((!text && landingImages.length === 0) || serviceDeskAgentId <= 0 || createSessionMutation.isPending) return
+    createSessionMutation.mutate({ text, images: landingImages })
+  }, [createSessionMutation, landingImages, landingInput, serviceDeskAgentId])
+
+  const addLandingImages = useCallback((files: File[]) => {
+    addImagePreviews(files, (image) => setLandingImages((prev) => [...prev, image]))
+  }, [])
+
+  const removeLandingImage = useCallback((index: number) => {
+    setLandingImages((prev) => prev.filter((_, i) => i !== index))
+  }, [])
 
   const handleSelectSession = useCallback((sessionId: number) => {
     setSelectedSessionId(sessionId)
@@ -689,6 +568,7 @@ export function Component() {
     setCreatedSession(null)
     setPendingInitialPrompt(null)
     setLandingInput("")
+    setLandingImages([])
   }, [])
 
   const clearPendingInitialPrompt = useCallback(() => {
@@ -697,14 +577,18 @@ export function Component() {
 
   return (
     <div className="grid h-full min-h-0 grid-cols-1 overflow-hidden bg-[linear-gradient(180deg,hsl(var(--background)),hsl(var(--muted)/0.18))] md:grid-cols-[240px_minmax(0,1fr)]">
-      <ServiceDeskSidebar
+      <SessionSidebar
         sessions={sessions}
-        activeSessionId={activeSession?.id ?? null}
+        currentSessionId={activeSession?.id ?? undefined}
         loading={sessionsQuery.isLoading}
+        title="服务台会话"
+        emptyText="暂无历史会话"
+        newLabel="新会话"
+        showDateGroups={false}
+        showItemActions={false}
         onSelect={handleSelectSession}
         onNew={handleNewSession}
       />
-
       {serviceDeskAgentId <= 0 || configLoading ? (
         <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
           <NotOnDutyState loading={configLoading} />
@@ -715,35 +599,33 @@ export function Component() {
           session={activeSession}
           agentName={serviceDeskAgentName}
           initialPrompt={pendingInitialPrompt?.sessionId === activeSession.id ? pendingInitialPrompt.text : undefined}
+          initialImages={pendingInitialPrompt?.sessionId === activeSession.id ? pendingInitialPrompt.images : undefined}
           onInitialPromptSent={clearPendingInitialPrompt}
         />
       ) : (
         <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-            <div className="flex h-14 shrink-0 items-center justify-between border-b border-border/70 px-5">
-              <div className="flex min-w-0 items-center gap-3">
-                <div className="flex size-8 shrink-0 items-center justify-center rounded-full border border-primary/20 bg-primary/8 text-primary">
-                  <Sparkles className="size-4" />
-                </div>
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2">
-                    <h1 className="truncate text-sm font-semibold">IT 服务台</h1>
-                    <StatusDot />
-                  </div>
-                  <div className="mt-0.5 truncate text-xs font-medium text-foreground/70">
-                    当前智能体：{serviceDeskAgentName}
-                  </div>
-                </div>
-              </div>
-              <Button type="button" size="sm" variant="outline" className="md:hidden" onClick={handleNewSession}>
+            <ChatHeader
+              identity={{
+                title: "IT 服务台",
+                subtitle: `当前智能体：${serviceDeskAgentName}`,
+                icon: <Sparkles className="size-4" />,
+                status: <ChatStatusDot />,
+              }}
+              actions={
+                <Button type="button" size="sm" variant="outline" className="md:hidden" onClick={handleNewSession}>
                 <Plus className="mr-1.5 size-3.5" />
                 新会话
-              </Button>
-            </div>
+                </Button>
+              }
+            />
             <WelcomeStage
               agentName={serviceDeskAgentName}
               value={landingInput}
+              images={landingImages}
               onChange={setLandingInput}
               onSend={handleLandingSend}
+              onAddImages={addLandingImages}
+              onRemoveImage={removeLandingImage}
               disabled={createSessionMutation.isPending}
               pending={createSessionMutation.isPending}
             />

@@ -20,6 +20,15 @@ interface SessionSidebarProps {
   agentId?: number
   currentSessionId?: number
   collapsed?: boolean
+  sessions?: AgentSession[]
+  loading?: boolean
+  title?: string
+  emptyText?: string
+  newLabel?: string
+  onNew?: () => void
+  onSelect?: (sessionId: number) => void
+  showDateGroups?: boolean
+  showItemActions?: boolean
 }
 
 type DateGroup = "today" | "yesterday" | "last7Days" | "last30Days" | "older"
@@ -102,19 +111,33 @@ function InlineRename({
   )
 }
 
-export function SessionSidebar({ agentId, currentSessionId, collapsed = false }: SessionSidebarProps) {
+export function SessionSidebar({
+  agentId,
+  currentSessionId,
+  collapsed = false,
+  sessions: controlledSessions,
+  loading,
+  title,
+  emptyText,
+  newLabel,
+  onNew,
+  onSelect,
+  showDateGroups = true,
+  showItemActions = true,
+}: SessionSidebarProps) {
   const { t } = useTranslation(["ai", "common"])
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const [renamingId, setRenamingId] = useState<number | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<AgentSession | null>(null)
 
-  const { data } = useQuery({
+  const { data, isLoading } = useQuery({
     queryKey: ["ai-sessions", agentId],
     queryFn: () => sessionApi.list({ agentId, pageSize: 50 }),
-    enabled: !!agentId,
+    enabled: !!agentId && !controlledSessions,
   })
-  const sessions = useMemo(() => data?.items ?? [], [data])
+  const sessions = useMemo(() => controlledSessions ?? data?.items ?? [], [controlledSessions, data])
+  const isSidebarLoading = loading ?? isLoading
 
   const grouped = useMemo(() => groupSessionsByDate(sessions), [sessions])
 
@@ -164,6 +187,22 @@ export function SessionSidebar({ agentId, currentSessionId, collapsed = false }:
     renameMutation.mutate({ sid, title })
   }, [renameMutation])
 
+  const handleNew = useCallback(() => {
+    if (onNew) {
+      onNew()
+      return
+    }
+    createMutation.mutate()
+  }, [createMutation, onNew])
+
+  const handleSelect = useCallback((sid: number) => {
+    if (onSelect) {
+      onSelect(sid)
+      return
+    }
+    navigate(`/ai/chat/${sid}`)
+  }, [navigate, onSelect])
+
   // Collapsed mode
   if (collapsed) {
     return (
@@ -173,8 +212,8 @@ export function SessionSidebar({ agentId, currentSessionId, collapsed = false }:
             variant="outline"
             size="icon"
             className="w-8 h-8"
-            disabled={!agentId || createMutation.isPending}
-            onClick={() => createMutation.mutate()}
+            disabled={(!agentId && !onNew) || createMutation.isPending}
+            onClick={handleNew}
           >
             <Plus className="h-4 w-4" />
           </Button>
@@ -189,7 +228,7 @@ export function SessionSidebar({ agentId, currentSessionId, collapsed = false }:
                   "w-full flex items-center justify-center h-8 rounded-md hover:bg-accent",
                   s.id === currentSessionId && "bg-accent"
                 )}
-                onClick={() => navigate(`/ai/chat/${s.id}`)}
+                onClick={() => handleSelect(s.id)}
                 title={s.title || `#${s.id}`}
               >
                 <MessageSquare className={cn(
@@ -212,18 +251,21 @@ export function SessionSidebar({ agentId, currentSessionId, collapsed = false }:
           variant="outline"
           size="sm"
           className="w-full"
-          disabled={!agentId || createMutation.isPending}
-          onClick={() => createMutation.mutate()}
+          disabled={(!agentId && !onNew) || createMutation.isPending}
+          onClick={handleNew}
         >
           <Plus className="mr-1.5 h-3.5 w-3.5" />
-          {t("ai:chat.newChat")}
+          {newLabel ?? t("ai:chat.newChat")}
         </Button>
       </div>
       <ScrollArea className="flex-1">
         <div className="p-2">
-          {sessions.length === 0 ? (
-            <p className="text-xs text-muted-foreground text-center py-4">{t("ai:chat.noSessions")}</p>
-          ) : (
+          {title && <div className="px-2.5 pb-2 pt-1 text-xs font-medium text-muted-foreground">{title}</div>}
+          {isSidebarLoading ? (
+            <p className="py-4 text-center text-xs text-muted-foreground">{t("common:loading")}</p>
+          ) : sessions.length === 0 ? (
+            <p className="text-xs text-muted-foreground text-center py-4">{emptyText ?? t("ai:chat.noSessions")}</p>
+          ) : showDateGroups ? (
             Array.from(grouped.entries()).map(([groupKey, groupSessions]) => (
               <div key={groupKey} className="mb-3">
                 <div className="px-2.5 py-1 text-[10px] font-medium text-muted-foreground/60 uppercase tracking-wider">
@@ -237,7 +279,7 @@ export function SessionSidebar({ agentId, currentSessionId, collapsed = false }:
                         "group flex items-center gap-2 rounded-md px-2.5 py-2 cursor-pointer hover:bg-accent text-sm",
                         s.id === currentSessionId && "bg-accent",
                       )}
-                      onClick={() => navigate(`/ai/chat/${s.id}`)}
+                      onClick={() => handleSelect(s.id)}
                       onDoubleClick={(e) => {
                         e.stopPropagation()
                         setRenamingId(s.id)
@@ -253,6 +295,7 @@ export function SessionSidebar({ agentId, currentSessionId, collapsed = false }:
                       ) : (
                         <span className="flex-1 truncate">{s.title || `#${s.id}`}</span>
                       )}
+                      {showItemActions && (
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
                           <button
@@ -277,11 +320,31 @@ export function SessionSidebar({ agentId, currentSessionId, collapsed = false }:
                           </DropdownMenuItem>
                         </DropdownMenuContent>
                       </DropdownMenu>
+                      )}
                     </div>
                   ))}
                 </div>
               </div>
             ))
+          ) : (
+            <div className="space-y-0.5">
+              {sessions.map((s: AgentSession) => (
+                <button
+                  key={s.id}
+                  type="button"
+                  className={cn(
+                    "group flex w-full flex-col rounded-md border border-transparent px-2.5 py-2 text-left text-sm hover:bg-accent",
+                    s.id === currentSessionId && "border-primary/18 bg-primary/8 text-foreground",
+                  )}
+                  onClick={() => handleSelect(s.id)}
+                >
+                  <span className="line-clamp-2">{s.title || `#${s.id}`}</span>
+                  <span className="mt-1 text-[11px] text-muted-foreground/75">
+                    {new Date(s.updatedAt).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}
+                  </span>
+                </button>
+              ))}
+            </div>
           )}
         </div>
       </ScrollArea>
