@@ -5,7 +5,14 @@ import { useMutation, useQuery } from "@tanstack/react-query"
 import type { UIMessage } from "ai"
 import { toast } from "sonner"
 import { sessionApi, type AgentSession, type SessionMessage } from "@/lib/api"
-import { createOptimisticUserMessage, mergePendingUserMessages, sessionMessagesToUIMessages, useAiChat, type UseAiChatOptions } from "./use-ai-chat"
+import {
+  createOptimisticUserMessage,
+  hasUnmatchedPendingUserMessages,
+  mergeTimelineMessages,
+  sessionMessagesToUIMessages,
+  useAiChat,
+  type UseAiChatOptions,
+} from "./use-ai-chat"
 import type { ChatComposerImage } from "./composer"
 
 function previewImage(file: File) {
@@ -53,17 +60,17 @@ export function useChatWorkspace({
     () => sessionMessagesToUIMessages(loadedMessages ?? []),
     [loadedMessages],
   )
-  const baseVisibleMessages = useMemo(() => {
-    if (chatBusy) return chat.messages.length > 0 ? chat.messages : serverMessages
-    return serverMessages.length >= chat.messages.length ? serverMessages : chat.messages
-  }, [chat.messages, chatBusy, serverMessages])
-  const activePendingUserMessages = useMemo(
-    () => pendingUserMessages.filter((message) => mergePendingUserMessages(baseVisibleMessages, [message]).length > baseVisibleMessages.length),
+  const baseVisibleMessages = useMemo(
+    () => mergeTimelineMessages(serverMessages, chat.messages),
+    [chat.messages, serverMessages],
+  )
+  const hasPendingUserMessage = useMemo(
+    () => hasUnmatchedPendingUserMessages(baseVisibleMessages, pendingUserMessages),
     [baseVisibleMessages, pendingUserMessages],
   )
   const visibleMessages = useMemo(
-    () => mergePendingUserMessages(baseVisibleMessages, activePendingUserMessages),
-    [activePendingUserMessages, baseVisibleMessages],
+    () => mergeTimelineMessages(serverMessages, chat.messages, pendingUserMessages),
+    [chat.messages, pendingUserMessages, serverMessages],
   )
 
   const addImages = useCallback(async (files: File[]) => {
@@ -119,7 +126,7 @@ export function useChatWorkspace({
     onError: (err) => toast.error(err.message),
   })
 
-  const isBusy = chatBusy || sendMutation.isPending || activePendingUserMessages.length > 0
+  const isBusy = chatBusy || sendMutation.isPending || hasPendingUserMessage
 
   const send = useCallback((content?: string) => {
     const text = (content ?? input).trim()

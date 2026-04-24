@@ -1,4 +1,9 @@
-export { createOptimisticUserMessage, mergePendingUserMessages, sessionMessagesToUIMessages, useAiChat } from "./use-ai-chat"
+export {
+  createOptimisticUserMessage,
+  sessionMessagesToUIMessages,
+  useAiChat,
+} from "./use-ai-chat"
+export { hasUnmatchedPendingUserMessages, mergeTimelineMessages } from "./message-merge"
 export type { UseAiChatOptions, UseAiChatReturn } from "./use-ai-chat"
 export { AIResponse, MessageTimeline } from "./message-timeline"
 export { ThinkingBlock } from "./thinking-block"

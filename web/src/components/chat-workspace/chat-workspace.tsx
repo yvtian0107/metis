@@ -41,6 +41,7 @@ export interface ChatWorkspaceProps {
   composerPlacement?: "floating" | "docked"
   emptyStateTone?: "ai" | "service-desk"
   className?: string
+  headerClassName?: string
 }
 
 const messageWidthClass = {
@@ -92,6 +93,7 @@ export function ChatWorkspace({
   composerPlacement = "docked",
   emptyStateTone = "ai",
   className,
+  headerClassName,
 }: ChatWorkspaceProps) {
   const surfaceRenderer = createSurfacePartRenderer({ renderers: surfaces, session, actions: workspaceActions })
   const showEmptyState = messages.length === 0 && !isBusy
@@ -100,7 +102,7 @@ export function ChatWorkspace({
     <div className={cn("flex h-full min-h-0 overflow-hidden", workspaceDensityClass[density], className)}>
       {sidebar}
       <main className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background/82">
-        <ChatHeader identity={identity} leading={leading} actions={actions} />
+        <ChatHeader identity={identity} leading={leading} actions={actions} className={headerClassName} />
 
         <div
           ref={scrollRef}

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useNavigate } from "react-router"
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import type { UIMessage } from "ai"
 import {
   AlertTriangle,
@@ -10,7 +10,7 @@ import {
   CheckCircle2,
   FileCheck2,
   Loader2,
-  Plus,
+  MessageSquarePlus,
   Sparkles,
 } from "lucide-react"
 import { toast } from "sonner"
@@ -21,7 +21,8 @@ import {
   ChatStatusDot,
   ChatWorkspace,
   createOptimisticUserMessage,
-  mergePendingUserMessages,
+  hasUnmatchedPendingUserMessages,
+  mergeTimelineMessages,
   sessionMessagesToUIMessages,
   SessionSidebar,
   useAiChat,
@@ -392,17 +393,17 @@ function ServiceDeskConversation({
     () => sessionMessagesToUIMessages(sessionData?.messages ?? []),
     [sessionData?.messages],
   )
-  const baseVisibleMessages = useMemo(() => {
-    if (chatBusy) return chat.messages.length > 0 ? chat.messages : serverMessages
-    return serverMessages.length >= chat.messages.length ? serverMessages : chat.messages
-  }, [chat.messages, chatBusy, serverMessages])
-  const activePendingUserMessages = useMemo(
-    () => pendingUserMessages.filter((message) => mergePendingUserMessages(baseVisibleMessages, [message]).length > baseVisibleMessages.length),
+  const baseVisibleMessages = useMemo(
+    () => mergeTimelineMessages(serverMessages, chat.messages),
+    [chat.messages, serverMessages],
+  )
+  const hasPendingUserMessage = useMemo(
+    () => hasUnmatchedPendingUserMessages(baseVisibleMessages, pendingUserMessages),
     [baseVisibleMessages, pendingUserMessages],
   )
   const visibleMessages = useMemo(
-    () => mergePendingUserMessages(baseVisibleMessages, activePendingUserMessages),
-    [activePendingUserMessages, baseVisibleMessages],
+    () => mergeTimelineMessages(serverMessages, chat.messages, pendingUserMessages),
+    [chat.messages, pendingUserMessages, serverMessages],
   )
 
   useEffect(() => {
@@ -468,7 +469,7 @@ function ServiceDeskConversation({
     onError: (err) => toast.error(err.message),
   })
 
-  const isBusy = chatBusy || sendMutation.isPending || activePendingUserMessages.length > 0
+  const isBusy = chatBusy || sendMutation.isPending || hasPendingUserMessage
 
   const handleSend = useCallback(() => {
     const text = input.trim()
@@ -498,6 +499,7 @@ function ServiceDeskConversation({
       messageWidth="standard"
       composerPlacement="docked"
       emptyStateTone="service-desk"
+      headerClassName="pl-8 pr-5"
       identity={{
         title: "IT 服务台",
         subtitle: `当前智能体：${agentName} · ${formatSessionTime(session.updatedAt)}`,
@@ -584,13 +586,26 @@ export function Component() {
   const serviceDeskAgentId = config?.posts?.intake?.agentId ?? 0
   const serviceDeskAgentName = config?.posts?.intake?.agentName || "IT 服务台"
 
-  const sessionsQuery = useQuery({
+  const sessionsQuery = useInfiniteQuery({
     queryKey: ["ai-sessions", serviceDeskAgentId],
-    queryFn: () => sessionApi.list({ agentId: serviceDeskAgentId, page: 1, pageSize: 30 }),
+    initialPageParam: 1,
+    queryFn: ({ pageParam }) => sessionApi.list({ agentId: serviceDeskAgentId, page: pageParam, pageSize: 30 }),
     enabled: serviceDeskAgentId > 0,
+    getNextPageParam: (lastPage, allPages) => {
+      const loaded = allPages.reduce((sum, page) => sum + page.items.length, 0)
+      return loaded < lastPage.total ? allPages.length + 1 : undefined
+    },
   })
 
-  const sessions = sessionsQuery.data?.items ?? []
+  const sessions = useMemo(() => {
+    const unique = new Map<number, AgentSession>()
+    for (const page of sessionsQuery.data?.pages ?? []) {
+      for (const item of page.items) {
+        unique.set(item.id, item)
+      }
+    }
+    return Array.from(unique.values())
+  }, [sessionsQuery.data?.pages])
   const activeSession = selectedSessionId == null
     ? null
     : sessions.find((item) => item.id === selectedSessionId) ?? (createdSession?.id === selectedSessionId ? createdSession : null)
@@ -606,6 +621,22 @@ export function Component() {
       setPendingInitialPrompt({ sessionId: session.id, text, images })
       setLandingInput("")
       setLandingImages([])
+      queryClient.invalidateQueries({ queryKey: ["ai-sessions", serviceDeskAgentId] })
+    },
+    onError: (err) => toast.error(err.message),
+  })
+
+  const deleteSessionMutation = useMutation({
+    mutationFn: (sid: number) => sessionApi.delete(sid),
+    onSuccess: (_, sid) => {
+      toast.success("会话已删除")
+      if (selectedSessionId === sid) {
+        setSelectedSessionId(null)
+        setPendingInitialPrompt(null)
+      }
+      if (createdSession?.id === sid) {
+        setCreatedSession(null)
+      }
       queryClient.invalidateQueries({ queryKey: ["ai-sessions", serviceDeskAgentId] })
     },
     onError: (err) => toast.error(err.message),
@@ -643,8 +674,17 @@ export function Component() {
     setPendingInitialPrompt(null)
   }, [])
 
+  const handleDeleteSession = useCallback((session: AgentSession) => {
+    deleteSessionMutation.mutate(session.id)
+  }, [deleteSessionMutation])
+
+  const handleLoadMoreSessions = useCallback(() => {
+    if (!sessionsQuery.hasNextPage || sessionsQuery.isFetchingNextPage) return
+    sessionsQuery.fetchNextPage()
+  }, [sessionsQuery])
+
   return (
-    <div className="grid h-full min-h-0 grid-cols-1 overflow-hidden bg-[linear-gradient(180deg,hsl(var(--background)),hsl(var(--muted)/0.18))] md:grid-cols-[240px_minmax(0,1fr)]">
+    <div className="grid h-full min-h-0 grid-cols-1 grid-rows-1 overflow-hidden bg-[linear-gradient(180deg,hsl(var(--background)),hsl(var(--muted)/0.18))] md:grid-cols-[240px_minmax(0,1fr)]">
       <SessionSidebar
         variant="service-desk"
         sessions={sessions}
@@ -654,26 +694,34 @@ export function Component() {
         emptyText="暂无历史会话"
         newLabel="新会话"
         showDateGroups={false}
-        showItemActions={false}
+        showItemActions
         onSelect={handleSelectSession}
         onNew={handleNewSession}
+        onDeleteSession={handleDeleteSession}
+        deletingSessionId={deleteSessionMutation.isPending ? deleteSessionMutation.variables ?? null : null}
+        hasMore={Boolean(sessionsQuery.hasNextPage)}
+        loadingMore={sessionsQuery.isFetchingNextPage}
+        onLoadMore={handleLoadMoreSessions}
       />
       {serviceDeskAgentId <= 0 || configLoading ? (
         <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
           <NotOnDutyState loading={configLoading} />
         </main>
       ) : activeSession ? (
-        <ServiceDeskConversation
-          key={activeSession.id}
-          session={activeSession}
-          agentName={serviceDeskAgentName}
-          initialPrompt={pendingInitialPrompt?.sessionId === activeSession.id ? pendingInitialPrompt.text : undefined}
-          initialImages={pendingInitialPrompt?.sessionId === activeSession.id ? pendingInitialPrompt.images : undefined}
-          onInitialPromptSent={clearPendingInitialPrompt}
-        />
+        <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+          <ServiceDeskConversation
+            key={activeSession.id}
+            session={activeSession}
+            agentName={serviceDeskAgentName}
+            initialPrompt={pendingInitialPrompt?.sessionId === activeSession.id ? pendingInitialPrompt.text : undefined}
+            initialImages={pendingInitialPrompt?.sessionId === activeSession.id ? pendingInitialPrompt.images : undefined}
+            onInitialPromptSent={clearPendingInitialPrompt}
+          />
+        </main>
       ) : (
         <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
             <ChatHeader
+              className="pl-8 pr-5"
               identity={{
                 title: "IT 服务台",
                 subtitle: `当前智能体：${serviceDeskAgentName}`,
@@ -682,7 +730,7 @@ export function Component() {
               }}
               actions={
                 <Button type="button" size="sm" variant="outline" className="md:hidden" onClick={handleNewSession}>
-                <Plus className="mr-1.5 size-3.5" />
+                <MessageSquarePlus className="mr-1.5 size-3.5" />
                 新会话
                 </Button>
               }

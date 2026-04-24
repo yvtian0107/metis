@@ -2,9 +2,11 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { Chat, useChat, type UseChatHelpers } from "@ai-sdk/react"
-import type { ChatTransport, UIMessage, UIMessageChunk } from "ai"
+import type { ChatTransport, UIMessage } from "ai"
 import { sessionApi, type SessionMessage } from "@/lib/api"
 import { TOKEN_KEY } from "@/lib/constants"
+import { hasUnmatchedPendingUserMessages, mergeTimelineMessages } from "./message-merge"
+import { createStreamFromSSE } from "./sse-stream"
 
 export function sessionMessagesToUIMessages(messages: SessionMessage[]): UIMessage[] {
   return messages.map((m) => {
@@ -52,23 +54,6 @@ export function createOptimisticUserMessage({
   }
 }
 
-function userMessageSignature(message: UIMessage) {
-  if (message.role !== "user") return ""
-  const text = message.parts
-    ?.filter((part): part is { type: "text"; text: string } => part.type === "text")
-    .map((part) => part.text)
-    .join("") || ""
-  const images = (message.metadata as { images?: string[] } | undefined)?.images ?? []
-  return `${text}::${images.length}`
-}
-
-export function mergePendingUserMessages(messages: UIMessage[], pendingMessages: UIMessage[]) {
-  if (pendingMessages.length === 0) return messages
-  const existingSignatures = new Set(messages.map(userMessageSignature).filter(Boolean))
-  const remainingPending = pendingMessages.filter((message) => !existingSignatures.has(userMessageSignature(message)))
-  return remainingPending.length > 0 ? [...messages, ...remainingPending] : messages
-}
-
 function sessionMessagesSignature(messages: SessionMessage[] | undefined) {
   if (!messages) return ""
   return messages
@@ -89,64 +74,6 @@ function uiMessagesSignature(messages: UIMessage[]) {
       return `${message.id}:${index}:${meta?.originalRole ?? message.role}:${textLength}`
     })
     .join("|")
-}
-
-function createStreamFromSSE(
-  response: Response,
-  onUsage?: (usage: { promptTokens: number; completionTokens: number }) => void,
-): ReadableStream<UIMessageChunk> {
-  const reader = response.body?.getReader()
-  if (!reader) {
-    throw new Error("No response body")
-  }
-
-  const decoder = new TextDecoder()
-  let buffer = ""
-
-  return new ReadableStream<UIMessageChunk>({
-    async pull(controller) {
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) {
-          controller.close()
-          return
-        }
-
-        buffer += decoder.decode(value, { stream: true })
-        const lines = buffer.split("\n")
-        buffer = lines.pop() || ""
-
-        for (const line of lines) {
-          const trimmed = line.trim()
-          if (!trimmed.startsWith("data: ")) continue
-          const data = trimmed.slice(6)
-          if (data === "[DONE]") continue
-
-          try {
-            const chunk = JSON.parse(data) as UIMessageChunk
-            if (
-              chunk.type === "finish" &&
-              "usage" in chunk &&
-              chunk.usage &&
-              typeof chunk.usage === "object"
-            ) {
-              const usage = chunk.usage as { promptTokens?: number; completionTokens?: number }
-              onUsage?.({
-                promptTokens: usage.promptTokens || 0,
-                completionTokens: usage.completionTokens || 0,
-              })
-            }
-            controller.enqueue(chunk)
-          } catch (e) {
-            console.error("Failed to parse SSE chunk:", data, e)
-          }
-        }
-      }
-    },
-    cancel() {
-      reader.cancel()
-    },
-  })
 }
 
 type SendMessagesOptions = Parameters<ChatTransport<UIMessage>["sendMessages"]>[0]

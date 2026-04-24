@@ -14,7 +14,15 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
 } from "@/components/ui/alert-dialog"
-import { ChatWorkspace, createOptimisticUserMessage, mergePendingUserMessages, SessionSidebar, sessionMessagesToUIMessages, useAiChat } from "@/components/chat-workspace"
+import {
+  ChatWorkspace,
+  createOptimisticUserMessage,
+  hasUnmatchedPendingUserMessages,
+  mergeTimelineMessages,
+  SessionSidebar,
+  sessionMessagesToUIMessages,
+  useAiChat,
+} from "@/components/chat-workspace"
 import { WelcomeScreen } from "./components/welcome-screen"
 import { MemoryPanel } from "./components/memory-panel"
 
@@ -69,17 +77,17 @@ export function Component() {
     () => sessionMessagesToUIMessages(sessionData?.messages ?? []),
     [sessionData?.messages],
   )
-  const baseVisibleMessages = useMemo(() => {
-    if (chatBusy) return chat.messages.length > 0 ? chat.messages : serverMessages
-    return serverMessages.length >= chat.messages.length ? serverMessages : chat.messages
-  }, [chat.messages, chatBusy, serverMessages])
-  const activePendingUserMessages = useMemo(
-    () => pendingUserMessages.filter((message) => mergePendingUserMessages(baseVisibleMessages, [message]).length > baseVisibleMessages.length),
+  const baseVisibleMessages = useMemo(
+    () => mergeTimelineMessages(serverMessages, chat.messages),
+    [chat.messages, serverMessages],
+  )
+  const hasPendingUserMessage = useMemo(
+    () => hasUnmatchedPendingUserMessages(baseVisibleMessages, pendingUserMessages),
     [baseVisibleMessages, pendingUserMessages],
   )
   const visibleMessages = useMemo(
-    () => mergePendingUserMessages(baseVisibleMessages, activePendingUserMessages),
-    [activePendingUserMessages, baseVisibleMessages],
+    () => mergeTimelineMessages(serverMessages, chat.messages, pendingUserMessages),
+    [chat.messages, pendingUserMessages, serverMessages],
   )
   const scrollToBottom = useCallback((instant?: boolean) => {
     messagesEndRef.current?.scrollIntoView({ behavior: instant ? "instant" : "smooth" })
@@ -196,7 +204,7 @@ export function Component() {
     scrollToBottom(instant)
   }, [chat.messages, chat.status, isAtBottom, scrollToBottom, visibleMessages])
 
-  const isBusy = chatBusy || sendMutation.isPending || activePendingUserMessages.length > 0
+  const isBusy = chatBusy || sendMutation.isPending || hasPendingUserMessage
 
   function handleSend(content?: string) {
     const text = (content ?? input).trim()
