@@ -109,7 +109,8 @@ form 节点必须包含 formSchema，描述该节点需要收集的字段：
   ]
 }
 
-字段 type 可选值：text, textarea, select, number, date, checkbox
+字段 type 可选值：text, textarea, select, number, date, checkbox, email, url, radio, datetime, user_picker, dept_picker, rich_text, switch, multi_select, date_range, table
+其中 user_picker、dept_picker、rich_text、table 等高级类型仅在协作规范明确需要时使用；大多数场景使用 text/textarea/select/number/date/checkbox 即可。
 根据协作规范中描述的业务场景，推断合理的表单字段。排他网关 condition 中引用的 form.xxx 字段必须在上游 form 节点的 formSchema.fields 中有对应 key。
 
 ## 排他网关（exclusive）条件格式

@@ -66,7 +66,36 @@ func buildWorkflowContext(workflowJSON string, completed *activityModel) map[str
 
 	if completed.NodeID != "" {
 		if node, ok := nodeMap[completed.NodeID]; ok {
-			ctx["related_step"] = workflowNodeFact(node, nodeMap, outEdges[node.ID])
+			relatedStep := workflowNodeFact(node, nodeMap, outEdges[node.ID])
+			// Attach outcome-specific edge target for precise path guidance
+			if isPositiveActivityOutcome(completed.TransitionOutcome) {
+				for _, edge := range outEdges[node.ID] {
+					if edge.Data.Outcome == "approved" {
+						if target, ok := nodeMap[edge.Target]; ok {
+							relatedStep["approved_edge_target"] = map[string]any{
+								"node_id": target.ID,
+								"label":   workflowNodeLabel(target),
+								"type":    target.Type,
+							}
+						}
+						break
+					}
+				}
+			} else if isHumanActivityType(completed.ActivityType) {
+				for _, edge := range outEdges[node.ID] {
+					if edge.Data.Outcome == "rejected" {
+						if target, ok := nodeMap[edge.Target]; ok {
+							relatedStep["rejected_edge_target"] = map[string]any{
+								"node_id": target.ID,
+								"label":   workflowNodeLabel(target),
+								"type":    target.Type,
+							}
+						}
+						break
+					}
+				}
+			}
+			ctx["related_step"] = relatedStep
 		}
 	} else {
 		ctx["related_step_note"] = "completed_activity 缺少 node_id；请结合 source_decision、activity_history 和 human_steps 判断它对应的 workflow_json 节点。"

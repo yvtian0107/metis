@@ -152,3 +152,88 @@ func TestValidateWorkflowRejectsNonRunnableClassicNodeConfig(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateFormSchemaReferences(t *testing.T) {
+	// Workflow: start -> form (request_kind, urgency) -> exclusive gateway -> two branches
+	makeWorkflow := func(condField string) json.RawMessage {
+		return json.RawMessage(`{
+			"nodes": [
+				{"id":"start","type":"start","data":{"label":"开始"}},
+				{"id":"form1","type":"form","data":{"label":"申请表","participants":[{"type":"requester"}],"formSchema":{"fields":[{"key":"request_kind","type":"select","label":"类型"},{"key":"urgency","type":"select","label":"紧急程度"}]}}},
+				{"id":"gw","type":"exclusive","data":{"label":"分支"}},
+				{"id":"p1","type":"process","data":{"label":"处理A","participants":[{"type":"requester"}]}},
+				{"id":"p2","type":"process","data":{"label":"处理B","participants":[{"type":"requester"}]}},
+				{"id":"end","type":"end","data":{"label":"结束"}}
+			],
+			"edges": [
+				{"id":"e1","source":"start","target":"form1","data":{}},
+				{"id":"e2","source":"form1","target":"gw","data":{"outcome":"submitted"}},
+				{"id":"e3","source":"gw","target":"p1","data":{"condition":{"field":"` + condField + `","operator":"equals","value":"high"}}},
+				{"id":"e4","source":"gw","target":"p2","data":{"default":true}},
+				{"id":"e5","source":"p1","target":"end","data":{"outcome":"approved"}},
+				{"id":"e5r","source":"p1","target":"end","data":{"outcome":"rejected"}},
+				{"id":"e6","source":"p2","target":"end","data":{"outcome":"approved"}},
+				{"id":"e6r","source":"p2","target":"end","data":{"outcome":"rejected"}}
+			]
+		}`)
+	}
+
+	t.Run("field exists in formSchema", func(t *testing.T) {
+		errs := ValidateWorkflow(makeWorkflow("form.urgency"))
+		for _, e := range errs {
+			if e.IsWarning() && strings.Contains(e.Message, "formSchema") {
+				t.Fatalf("unexpected formSchema warning: %s", e.Message)
+			}
+		}
+	})
+
+	t.Run("field missing from formSchema", func(t *testing.T) {
+		errs := ValidateWorkflow(makeWorkflow("form.nonexistent"))
+		var found bool
+		for _, e := range errs {
+			if e.IsWarning() && strings.Contains(e.Message, "nonexistent") {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatal("expected warning about missing formSchema field")
+		}
+	})
+
+	t.Run("non-form field skipped", func(t *testing.T) {
+		errs := ValidateWorkflow(makeWorkflow("ticket.status"))
+		for _, e := range errs {
+			if e.IsWarning() && strings.Contains(e.Message, "formSchema") {
+				t.Fatalf("unexpected formSchema warning for non-form field: %s", e.Message)
+			}
+		}
+	})
+
+	t.Run("no upstream form node skipped", func(t *testing.T) {
+		wf := json.RawMessage(`{
+			"nodes": [
+				{"id":"start","type":"start","data":{"label":"开始"}},
+				{"id":"gw","type":"exclusive","data":{"label":"分支"}},
+				{"id":"p1","type":"process","data":{"label":"A","participants":[{"type":"requester"}]}},
+				{"id":"p2","type":"process","data":{"label":"B","participants":[{"type":"requester"}]}},
+				{"id":"end","type":"end","data":{"label":"结束"}}
+			],
+			"edges": [
+				{"id":"e1","source":"start","target":"gw","data":{}},
+				{"id":"e2","source":"gw","target":"p1","data":{"condition":{"field":"form.request_kind","operator":"equals","value":"vpn"}}},
+				{"id":"e3","source":"gw","target":"p2","data":{"default":true}},
+				{"id":"e4","source":"p1","target":"end","data":{"outcome":"approved"}},
+				{"id":"e4r","source":"p1","target":"end","data":{"outcome":"rejected"}},
+				{"id":"e5","source":"p2","target":"end","data":{"outcome":"approved"}},
+				{"id":"e5r","source":"p2","target":"end","data":{"outcome":"rejected"}}
+			]
+		}`)
+		errs := ValidateWorkflow(wf)
+		for _, e := range errs {
+			if e.IsWarning() && strings.Contains(e.Message, "formSchema") {
+				t.Fatalf("unexpected formSchema warning when no upstream form: %s", e.Message)
+			}
+		}
+	})
+}

@@ -3,6 +3,7 @@ package engine
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 )
 
 // ValidationError represents a single validation issue.
@@ -599,6 +600,124 @@ func ValidateWorkflow(workflowJSON json.RawMessage) []ValidationError {
 		}
 	}
 
+	// 10b. Validate formSchema references in exclusive gateway conditions
+	errs = append(errs, validateFormSchemaReferences(def, nodeMap, inEdges)...)
+
+	return errs
+}
+
+// validateFormSchemaReferences checks that form.xxx fields referenced in exclusive gateway
+// conditions actually exist in upstream form nodes' formSchema.
+func validateFormSchemaReferences(def *WorkflowDef, nodeMap map[string]*WFNode, inEdges map[string][]*WFEdge) []ValidationError {
+	var errs []ValidationError
+
+	// Collect formSchema keys from all form nodes: nodeID -> set of field keys
+	formFieldsByNode := make(map[string]map[string]bool)
+	for i := range def.Nodes {
+		n := &def.Nodes[i]
+		if n.Type != NodeForm {
+			continue
+		}
+		nd, err := ParseNodeData(n.Data)
+		if err != nil || len(nd.FormSchema) == 0 {
+			continue
+		}
+		var schema struct {
+			Fields []struct {
+				Key string `json:"key"`
+			} `json:"fields"`
+		}
+		if err := json.Unmarshal(nd.FormSchema, &schema); err != nil {
+			continue
+		}
+		keys := make(map[string]bool, len(schema.Fields))
+		for _, f := range schema.Fields {
+			if f.Key != "" {
+				keys[f.Key] = true
+			}
+		}
+		if len(keys) > 0 {
+			formFieldsByNode[n.ID] = keys
+		}
+	}
+
+	if len(formFieldsByNode) == 0 {
+		return nil // no form nodes with formSchema, nothing to check
+	}
+
+	// For each exclusive gateway, check condition field references
+	for i := range def.Nodes {
+		n := &def.Nodes[i]
+		if n.Type != NodeExclusive {
+			continue
+		}
+
+		// BFS backwards to find upstream form nodes reachable from this gateway
+		upstreamKeys := collectUpstreamFormKeys(n.ID, nodeMap, inEdges, formFieldsByNode)
+		if len(upstreamKeys) == 0 {
+			continue // no upstream form nodes — can't validate
+		}
+
+		// Check each outgoing edge's condition
+		for _, e := range def.Edges {
+			if e.Source != n.ID || e.Data.Condition == nil {
+				continue
+			}
+			errs = append(errs, checkConditionFormRefs(*e.Data.Condition, n.ID, e.ID, upstreamKeys)...)
+		}
+	}
+
+	return errs
+}
+
+// collectUpstreamFormKeys does a BFS backwards from gatewayID and returns the union of
+// formSchema field keys from all reachable form nodes.
+func collectUpstreamFormKeys(gatewayID string, nodeMap map[string]*WFNode, inEdges map[string][]*WFEdge, formFieldsByNode map[string]map[string]bool) map[string]bool {
+	visited := map[string]bool{gatewayID: true}
+	queue := []string{gatewayID}
+	result := make(map[string]bool)
+
+	for len(queue) > 0 {
+		current := queue[0]
+		queue = queue[1:]
+		for _, edge := range inEdges[current] {
+			src := edge.Source
+			if visited[src] {
+				continue
+			}
+			visited[src] = true
+			if keys, ok := formFieldsByNode[src]; ok {
+				for k := range keys {
+					result[k] = true
+				}
+			}
+			queue = append(queue, src)
+		}
+	}
+	return result
+}
+
+// checkConditionFormRefs recursively checks if form.xxx references in a condition
+// exist in the provided upstream keys set.
+func checkConditionFormRefs(cond GatewayCondition, nodeID, edgeID string, upstreamKeys map[string]bool) []ValidationError {
+	var errs []ValidationError
+	if cond.Logic != "" {
+		for _, sub := range cond.Conditions {
+			errs = append(errs, checkConditionFormRefs(sub, nodeID, edgeID, upstreamKeys)...)
+		}
+		return errs
+	}
+	if strings.HasPrefix(cond.Field, "form.") {
+		key := strings.TrimPrefix(cond.Field, "form.")
+		if !upstreamKeys[key] {
+			errs = append(errs, ValidationError{
+				NodeID:  nodeID,
+				EdgeID:  edgeID,
+				Level:   "warning",
+				Message: fmt.Sprintf("排他网关 %s 的条件引用了 %s，但上游 form 节点的 formSchema 中未找到字段 %s", nodeID, cond.Field, key),
+			})
+		}
+	}
 	return errs
 }
 

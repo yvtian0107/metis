@@ -238,6 +238,7 @@ func (o *Operator) WithdrawTicket(userID uint, ticketCode string, reason string)
 }
 
 // ValidateParticipants checks if workflow participants can be resolved.
+// Uses engine.ParticipantResolver for consistent validation with the runtime engine.
 func (o *Operator) ValidateParticipants(serviceID uint, formData map[string]any) (*ParticipantValidation, error) {
 	// Load workflow JSON.
 	var svc struct {
@@ -250,104 +251,64 @@ func (o *Operator) ValidateParticipants(serviceID uint, formData map[string]any)
 	}
 
 	if svc.WorkflowJSON == "" {
-		// No workflow defined — skip validation.
 		return &ParticipantValidation{OK: true}, nil
 	}
 
-	// Parse workflow nodes.
-	type workflowParticipant struct {
-		Type           string `json:"type"`
-		Value          string `json:"value"`
-		PositionCode   string `json:"position_code"`
-		DepartmentCode string `json:"department_code"`
-	}
-	var workflow struct {
-		Nodes []struct {
-			ID    string `json:"id"`
-			Type  string `json:"type"`
-			Label string `json:"label"`
-			Data  struct {
-				ParticipantType string                `json:"participantType"`
-				PositionCode    string                `json:"positionCode"`
-				DepartmentCode  string                `json:"departmentCode"`
-				UserID          *uint                 `json:"userId"`
-				Label           string                `json:"label"`
-				Participants    []workflowParticipant `json:"participants"`
-			} `json:"data"`
-		} `json:"nodes"`
-	}
-	if err := json.Unmarshal([]byte(svc.WorkflowJSON), &workflow); err != nil {
+	def, err := engine.ParseWorkflowDef(json.RawMessage(svc.WorkflowJSON))
+	if err != nil {
 		return &ParticipantValidation{OK: true}, nil // Can't parse, skip.
 	}
 
-	// Check each process node.
-	for _, node := range workflow.Nodes {
-		if node.Type != "process" {
+	for _, node := range def.Nodes {
+		if node.Type != "process" && node.Type != "form" {
 			continue
 		}
-		nodeLabel := node.Data.Label
+		nd, err := engine.ParseNodeData(node.Data)
+		if err != nil || len(nd.Participants) == 0 {
+			continue
+		}
+		nodeLabel := nd.Label
 		if nodeLabel == "" {
-			nodeLabel = node.Label
+			nodeLabel = node.ID
 		}
-		participants := node.Data.Participants
-		if len(participants) == 0 && node.Data.ParticipantType != "" {
-			legacy := workflowParticipant{
-				Type:           node.Data.ParticipantType,
-				PositionCode:   node.Data.PositionCode,
-				DepartmentCode: node.Data.DepartmentCode,
+
+		for _, p := range nd.Participants {
+			// Skip requester/requester_manager — can't validate before ticket exists
+			if p.Type == "requester" || p.Type == "requester_manager" {
+				continue
 			}
-			if node.Data.UserID != nil {
-				legacy.Value = fmt.Sprintf("%d", *node.Data.UserID)
+
+			if o.resolver == nil {
+				continue
 			}
-			participants = append(participants, legacy)
-		}
-		for _, participant := range participants {
-			if participant.Type == "user" && participant.Value != "" {
-				// Direct user assignment — check user exists and is active.
-				var userID uint
-				if _, err := fmt.Sscanf(participant.Value, "%d", &userID); err != nil {
+			userIDs, err := o.resolver.Resolve(o.db, 0, p)
+			if err != nil {
+				// orgResolver nil errors mean the org module isn't installed — skip
+				if strings.Contains(err.Error(), "安装组织架构模块") {
 					continue
 				}
-				var count int64
-				o.db.Table("users").Where("id = ? AND is_active = ?", userID, true).Count(&count)
-				if count == 0 {
-					return &ParticipantValidation{
-						OK:            false,
-						FailureReason: fmt.Sprintf("指定用户(ID=%d)不存在或已停用", userID),
-						NodeLabel:     nodeLabel,
-						Guidance:      "请联系管理员检查用户状态",
-					}, nil
-				}
+				return &ParticipantValidation{
+					OK:            false,
+					FailureReason: err.Error(),
+					NodeLabel:     nodeLabel,
+					Guidance:      "请联系管理员检查参与人配置",
+				}, nil
 			}
-			if (participant.Type == "position" || participant.Type == "position_department") && participant.PositionCode != "" {
-				if o.orgResolver == nil {
-					// Org App not installed — skip position validation.
-					continue
-				}
-				// Position-based — check if any active user holds the position.
-				var userIDs []uint
-				var err error
-				if participant.DepartmentCode != "" {
-					userIDs, err = o.orgResolver.FindUsersByPositionAndDepartment(participant.PositionCode, participant.DepartmentCode)
-				} else {
-					userIDs, err = o.orgResolver.FindUsersByPositionCode(participant.PositionCode)
-				}
-				if err != nil {
-					return nil, fmt.Errorf("validate participants: %w", err)
-				}
-				if len(userIDs) == 0 {
-					reason := fmt.Sprintf("岗位[%s]", participant.PositionCode)
-					if participant.DepartmentCode != "" {
-						reason += fmt.Sprintf("+部门[%s]", participant.DepartmentCode)
+			if len(userIDs) == 0 {
+				reason := fmt.Sprintf("节点[%s]的参与人（%s）无可用人员", nodeLabel, p.Type)
+				if p.PositionCode != "" {
+					reason = fmt.Sprintf("岗位[%s]", p.PositionCode)
+					if p.DepartmentCode != "" {
+						reason += fmt.Sprintf("+部门[%s]", p.DepartmentCode)
 					}
 					reason += " 下无可用人员"
-					return &ParticipantValidation{
-						OK:            false,
-						FailureReason: reason,
-						NodeLabel:     nodeLabel,
-						Guidance:      "请联系 IT 管理员补充人员配置后再提单",
-					}, nil
 				}
+				return &ParticipantValidation{
+					OK:            false,
+					FailureReason: reason,
+					NodeLabel:     nodeLabel,
+					Guidance:      "请联系 IT 管理员补充人员配置后再提单",
+				}, nil
 			}
 		}
 	}

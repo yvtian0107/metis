@@ -493,3 +493,229 @@ const vpnWorkflowContextFixture = `{
     {"id": "e2", "source": "network_process", "target": "end", "data": {"outcome": "approved"}}
   ]
 }`
+
+const nodeIDValidationWorkflowFixture = `{
+  "nodes": [
+    {"id": "start", "type": "start", "data": {"label": "开始"}},
+    {"id": "node_form", "type": "form", "data": {"label": "申请表单", "participants": [{"type": "requester"}]}},
+    {"id": "node_process", "type": "process", "data": {"label": "IT审批", "participants": [{"type": "position", "value": "it_mgr"}]}},
+    {"id": "end_ok", "type": "end", "data": {"label": "结束"}},
+    {"id": "end_reject", "type": "end", "data": {"label": "驳回结束"}}
+  ],
+  "edges": [
+    {"id": "e1", "source": "start", "target": "node_form"},
+    {"id": "e2", "source": "node_form", "target": "node_process", "data": {"outcome": "submitted"}},
+    {"id": "e3", "source": "node_process", "target": "end_ok", "data": {"outcome": "approved"}},
+    {"id": "e4", "source": "node_process", "target": "end_reject", "data": {"outcome": "rejected"}}
+  ]
+}`
+
+func TestValidateDecisionPlanNodeID(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	if err := db.AutoMigrate(&ticketModel{}, &activityModel{}, &assignmentModel{}); err != nil {
+		t.Fatalf("migrate db: %v", err)
+	}
+	if err := db.Exec(`CREATE TABLE users (id integer primary key, is_active boolean)`).Error; err != nil {
+		t.Fatalf("create users: %v", err)
+	}
+	if err := db.Exec(`INSERT INTO users (id, is_active) VALUES (1, true)`).Error; err != nil {
+		t.Fatalf("insert user: %v", err)
+	}
+
+	ticket := ticketModel{Status: "in_progress", EngineType: "smart"}
+	db.Create(&ticket)
+
+	eng := &SmartEngine{}
+
+	t.Run("valid node_id preserved", func(t *testing.T) {
+		plan := &DecisionPlan{
+			NextStepType: NodeProcess,
+			Activities: []DecisionActivity{{
+				Type:          NodeProcess,
+				NodeID:        "node_process",
+				ParticipantID: uintPtrIf(1),
+			}},
+			Confidence: 0.9,
+		}
+		err := eng.validateDecisionPlan(db, ticket.ID, plan, &serviceModel{ID: 1, WorkflowJSON: nodeIDValidationWorkflowFixture}, nil)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if plan.Activities[0].NodeID != "node_process" {
+			t.Fatalf("expected node_id to be preserved, got %q", plan.Activities[0].NodeID)
+		}
+	})
+
+	t.Run("nonexistent node_id cleared", func(t *testing.T) {
+		plan := &DecisionPlan{
+			NextStepType: NodeProcess,
+			Activities: []DecisionActivity{{
+				Type:          NodeProcess,
+				NodeID:        "node_nonexistent",
+				ParticipantID: uintPtrIf(1),
+			}},
+			Confidence: 0.9,
+		}
+		err := eng.validateDecisionPlan(db, ticket.ID, plan, &serviceModel{ID: 1, WorkflowJSON: nodeIDValidationWorkflowFixture}, nil)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if plan.Activities[0].NodeID != "" {
+			t.Fatalf("expected node_id to be cleared, got %q", plan.Activities[0].NodeID)
+		}
+	})
+
+	t.Run("type mismatch node_id cleared", func(t *testing.T) {
+		plan := &DecisionPlan{
+			NextStepType: NodeProcess,
+			Activities: []DecisionActivity{{
+				Type:          NodeProcess,
+				NodeID:        "node_form", // form node, not process
+				ParticipantID: uintPtrIf(1),
+			}},
+			Confidence: 0.9,
+		}
+		err := eng.validateDecisionPlan(db, ticket.ID, plan, &serviceModel{ID: 1, WorkflowJSON: nodeIDValidationWorkflowFixture}, nil)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if plan.Activities[0].NodeID != "" {
+			t.Fatalf("expected node_id to be cleared for type mismatch, got %q", plan.Activities[0].NodeID)
+		}
+	})
+
+	t.Run("no workflow_json skips check", func(t *testing.T) {
+		plan := &DecisionPlan{
+			NextStepType: NodeProcess,
+			Activities: []DecisionActivity{{
+				Type:          NodeProcess,
+				NodeID:        "anything",
+				ParticipantID: uintPtrIf(1),
+			}},
+			Confidence: 0.9,
+		}
+		err := eng.validateDecisionPlan(db, ticket.ID, plan, &serviceModel{ID: 1}, nil)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if plan.Activities[0].NodeID != "anything" {
+			t.Fatalf("expected node_id to be preserved when no workflow_json, got %q", plan.Activities[0].NodeID)
+		}
+	})
+}
+
+func TestBuildWorkflowContextApprovedEdgeTarget(t *testing.T) {
+	ctx := buildWorkflowContext(nodeIDValidationWorkflowFixture, &activityModel{
+		ID:                1,
+		ActivityType:      NodeProcess,
+		Name:              "IT审批",
+		NodeID:            "node_process",
+		TransitionOutcome: "approved",
+		Status:            ActivityCompleted,
+	})
+	if ctx == nil {
+		t.Fatal("expected non-nil workflow context")
+	}
+	relatedStep, ok := ctx["related_step"].(map[string]any)
+	if !ok {
+		t.Fatal("expected related_step in workflow context")
+	}
+	approvedTarget, ok := relatedStep["approved_edge_target"].(map[string]any)
+	if !ok {
+		t.Fatal("expected approved_edge_target in related_step")
+	}
+	if approvedTarget["node_id"] != "end_ok" {
+		t.Fatalf("expected approved target node_id=end_ok, got %v", approvedTarget["node_id"])
+	}
+	if _, exists := relatedStep["rejected_edge_target"]; exists {
+		t.Fatal("approved path should not have rejected_edge_target")
+	}
+}
+
+func TestBuildWorkflowContextRejectedEdgeTarget(t *testing.T) {
+	ctx := buildWorkflowContext(nodeIDValidationWorkflowFixture, &activityModel{
+		ID:                2,
+		ActivityType:      NodeProcess,
+		Name:              "IT审批",
+		NodeID:            "node_process",
+		TransitionOutcome: "rejected",
+		Status:            ActivityCompleted,
+	})
+	if ctx == nil {
+		t.Fatal("expected non-nil workflow context")
+	}
+	relatedStep, ok := ctx["related_step"].(map[string]any)
+	if !ok {
+		t.Fatal("expected related_step in workflow context")
+	}
+	rejectedTarget, ok := relatedStep["rejected_edge_target"].(map[string]any)
+	if !ok {
+		t.Fatal("expected rejected_edge_target in related_step")
+	}
+	if rejectedTarget["node_id"] != "end_reject" {
+		t.Fatalf("expected rejected target node_id=end_reject, got %v", rejectedTarget["node_id"])
+	}
+	if _, exists := relatedStep["approved_edge_target"]; exists {
+		t.Fatal("rejected path should not have approved_edge_target")
+	}
+}
+
+func TestBuildWorkflowContextEmptyNodeIDFallback(t *testing.T) {
+	ctx := buildWorkflowContext(nodeIDValidationWorkflowFixture, &activityModel{
+		ID:                3,
+		ActivityType:      NodeProcess,
+		Name:              "IT审批",
+		NodeID:            "", // empty — should trigger fallback note
+		TransitionOutcome: "approved",
+		Status:            ActivityCompleted,
+	})
+	if ctx == nil {
+		t.Fatal("expected non-nil workflow context")
+	}
+	if _, ok := ctx["related_step"]; ok {
+		t.Fatal("expected no related_step when NodeID is empty")
+	}
+	if _, ok := ctx["related_step_note"]; !ok {
+		t.Fatal("expected related_step_note when NodeID is empty")
+	}
+}
+
+func TestActivityFactMapFormData(t *testing.T) {
+	t.Run("with form_data", func(t *testing.T) {
+		a := &activityModel{
+			ID:           1,
+			ActivityType: "form",
+			Name:         "申请表单",
+			Status:       ActivityCompleted,
+			FormData:     `{"name":"张三","reason":"VPN申请"}`,
+		}
+		result := activityFactMap(a, nil)
+		fd, ok := result["form_data"]
+		if !ok {
+			t.Fatal("expected form_data in activityFactMap result")
+		}
+		raw, ok := fd.(json.RawMessage)
+		if !ok {
+			t.Fatalf("expected json.RawMessage, got %T", fd)
+		}
+		if string(raw) != `{"name":"张三","reason":"VPN申请"}` {
+			t.Fatalf("unexpected form_data: %s", raw)
+		}
+	})
+
+	t.Run("without form_data", func(t *testing.T) {
+		a := &activityModel{
+			ID:           2,
+			ActivityType: "process",
+			Name:         "处理",
+			Status:       ActivityCompleted,
+		}
+		result := activityFactMap(a, nil)
+		if _, ok := result["form_data"]; ok {
+			t.Fatal("expected no form_data when FormData is empty")
+		}
+	})
+}

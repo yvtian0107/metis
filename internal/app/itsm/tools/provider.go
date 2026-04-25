@@ -401,6 +401,7 @@ const decisionAgentSystemPrompt = `你是流程决策智能体，负责为智能
 ## 输出约束
 
 - 最终只输出 JSON DecisionPlan，不输出解释性正文。
+- activities 中每个活动可包含 node_id 字段（对应 workflow_json 中的节点 ID，可选）；有 workflow_json 时建议填写，帮助引擎精确定位当前步骤在流程图中的位置。
 - participant_type=requester 表示当前工单申请人，无需 participant_id；participant_type=user 时必须填 participant_id；participant_type=position_department 时必须填 position_code 和 department_code。
 - 不允许把姓名当 username，不允许把岗位名称当 position_code，不允许把部门名称当 department_code。
 - confidence 必须反映证据强度：未解析到参与者、知识冲突、动作失败或上下文不足时降低置信度。`

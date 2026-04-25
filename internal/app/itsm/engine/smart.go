@@ -98,6 +98,7 @@ type DecisionPlan struct {
 // DecisionActivity is a single activity within a decision plan.
 type DecisionActivity struct {
 	Type            string `json:"type"`
+	NodeID          string `json:"node_id,omitempty"`
 	ParticipantType string `json:"participant_type,omitempty"`
 	ParticipantID   *uint  `json:"participant_id,omitempty"`
 	PositionCode    string `json:"position_code,omitempty"`
@@ -426,6 +427,7 @@ func (e *SmartEngine) executeParallelPlan(tx *gorm.DB, ticketID uint, plan *Deci
 			Name:            decisionActivityName(da),
 			ActivityType:    da.Type,
 			Status:          status,
+			NodeID:          da.NodeID,
 			ExecutionMode:   "parallel",
 			ActivityGroupID: groupID,
 			AIDecision:      planJSON,
@@ -502,6 +504,7 @@ func (e *SmartEngine) executeSinglePlan(tx *gorm.DB, ticketID uint, plan *Decisi
 		Name:         decisionActivityName(da),
 		ActivityType: da.Type,
 		Status:       status,
+		NodeID:       da.NodeID,
 		AIDecision:   planJSON,
 		AIReasoning:  plan.Reasoning,
 		AIConfidence: plan.Confidence,
@@ -682,14 +685,17 @@ func (e *SmartEngine) pendManualHandlingPlan(tx *gorm.DB, ticketID uint, plan *D
 	planJSON := mustJSON(plan)
 
 	name := "AI 低置信待处置"
+	var nodeID string
 	if len(plan.Activities) > 0 {
 		name = fmt.Sprintf("AI 低置信待处置：%s", decisionActivityName(plan.Activities[0]))
+		nodeID = plan.Activities[0].NodeID
 	}
 
 	act := &activityModel{
 		TicketID:     ticketID,
 		Name:         name,
 		ActivityType: NodeProcess,
+		NodeID:       nodeID,
 		Status:       ActivityPending,
 		AIDecision:   planJSON,
 		AIReasoning:  plan.Reasoning,
@@ -794,6 +800,26 @@ func (e *SmartEngine) validateDecisionPlan(tx *gorm.DB, ticketID uint, plan *Dec
 				Count(&count)
 			if count == 0 {
 				return fmt.Errorf("activities[%d].action_id %d 不在服务可用动作列表中", i, *a.ActionID)
+			}
+		}
+
+		// Validate node_id against workflow_json if provided
+		if a.NodeID != "" && svc.WorkflowJSON != "" {
+			def, parseErr := ParseWorkflowDef(json.RawMessage(svc.WorkflowJSON))
+			if parseErr == nil {
+				nodeMap, _ := def.BuildMaps()
+				if node, ok := nodeMap[a.NodeID]; ok {
+					if node.Type != a.Type && !(a.Type == "approve" && node.Type == "process") {
+						slog.Warn("decision plan node_id type mismatch, clearing",
+							"activity_index", i, "node_id", a.NodeID,
+							"node_type", node.Type, "activity_type", a.Type)
+						plan.Activities[i].NodeID = ""
+					}
+				} else {
+					slog.Warn("decision plan node_id not found in workflow_json, clearing",
+						"activity_index", i, "node_id", a.NodeID)
+					plan.Activities[i].NodeID = ""
+				}
 			}
 		}
 	}
@@ -1357,8 +1383,12 @@ func (e *SmartEngine) buildInitialSeed(tx *gorm.DB, ticketID uint, svc *serviceM
 	if completedActivityID != nil && *completedActivityID > 0 {
 		data := NewDecisionDataStore(tx)
 		if completed, err := data.GetActivityByID(ticketID, *completedActivityID); err == nil {
-			assignments, _ := data.GetActivityAssignments(completed.ID)
-			seed["completed_activity"] = activityFactMap(completed, assignments)
+			// Lightweight anchor — full facts available via ticket_context tool
+			seed["completed_activity"] = map[string]any{
+				"id":               completed.ID,
+				"outcome":          completed.TransitionOutcome,
+				"operator_opinion": completed.DecisionReasoning,
+			}
 			if isHumanActivityType(completed.ActivityType) && !isPositiveActivityOutcome(completed.TransitionOutcome) {
 				policy := map[string]any{
 					"must_explain_rejection": true,
@@ -1376,6 +1406,20 @@ func (e *SmartEngine) buildInitialSeed(tx *gorm.DB, ticketID uint, svc *serviceM
 					policy["allowed_recovery_paths"] = []string{"退回申请人补充", "升级/转交其他角色", "结束为失败或取消", "按协作规范继续到明确不同的下一步"}
 				}
 				seed["rejected_activity_policy"] = policy
+			} else if isPositiveActivityOutcome(completed.TransitionOutcome) && completed.NodeID != "" {
+				// Symmetric approved path injection
+				if targetID, targetLabel, targetType := findOutcomeEdgeTargetInfo(svc.WorkflowJSON, completed.NodeID, "approved"); targetID != "" {
+					instruction := fmt.Sprintf("workflow_json 的 approved 出边指向 %s，应遵循此路径继续", targetLabel)
+					if targetType == "end" {
+						instruction += "。目标是 end 节点，流程可能即将结束"
+					}
+					seed["approved_next_step"] = map[string]any{
+						"target_node_id":    targetID,
+						"target_node_label": targetLabel,
+						"target_node_type":  targetType,
+						"instruction":       instruction,
+					}
+				}
 			}
 		}
 	}
@@ -1509,31 +1553,51 @@ const agenticOutputFormat = "## 输出要求\n\n" +
 // findRejectedEdgeTarget looks up the rejected edge's target for a given workflow node.
 // Returns a description like "end（结束）" or "node_3（填写补充信息）", or "" if not found.
 func findRejectedEdgeTarget(workflowJSON string, nodeID string) string {
+	return findOutcomeEdgeTarget(workflowJSON, nodeID, "rejected")
+}
+
+func findApprovedEdgeTarget(workflowJSON string, nodeID string) string {
+	return findOutcomeEdgeTarget(workflowJSON, nodeID, "approved")
+}
+
+// findOutcomeEdgeTargetInfo returns (nodeID, label, nodeType) for the target of an outcome edge.
+func findOutcomeEdgeTargetInfo(workflowJSON string, nodeID string, outcome string) (string, string, string) {
 	if workflowJSON == "" || nodeID == "" {
-		return ""
+		return "", "", ""
 	}
 	def, err := ParseWorkflowDef(json.RawMessage(workflowJSON))
 	if err != nil {
-		return ""
+		return "", "", ""
 	}
 	nodeMap := make(map[string]*WFNode, len(def.Nodes))
 	for i := range def.Nodes {
 		nodeMap[def.Nodes[i].ID] = &def.Nodes[i]
 	}
 	for _, e := range def.Edges {
-		if e.Source == nodeID && e.Data.Outcome == "rejected" {
+		if e.Source == nodeID && e.Data.Outcome == outcome {
 			if target, ok := nodeMap[e.Target]; ok {
 				nd, _ := ParseNodeData(target.Data)
 				label := nd.Label
 				if label == "" {
 					label = target.Type
 				}
-				return fmt.Sprintf("%s（%s，类型: %s）", target.ID, label, target.Type)
+				return target.ID, label, target.Type
 			}
-			return e.Target
+			return e.Target, "", ""
 		}
 	}
-	return ""
+	return "", "", ""
+}
+
+func findOutcomeEdgeTarget(workflowJSON string, nodeID string, outcome string) string {
+	targetID, label, nodeType := findOutcomeEdgeTargetInfo(workflowJSON, nodeID, outcome)
+	if targetID == "" {
+		return ""
+	}
+	if label != "" {
+		return fmt.Sprintf("%s（%s，类型: %s）", targetID, label, nodeType)
+	}
+	return targetID
 }
 
 func extractWorkflowHints(workflowJSON string) string {

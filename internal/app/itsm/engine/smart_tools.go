@@ -251,6 +251,9 @@ func activityFactMap(a *activityModel, assignments []ActivityAssignmentInfo) map
 			entry["source_decision"] = decision
 		}
 	}
+	if a.FormData != "" {
+		entry["form_data"] = json.RawMessage(a.FormData)
+	}
 	facts := assignmentFacts(assignments)
 	if len(facts) > 0 {
 		entry["participants"] = facts

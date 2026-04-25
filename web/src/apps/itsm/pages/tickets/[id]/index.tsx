@@ -583,6 +583,18 @@ export function Component() {
     return () => window.clearInterval(interval)
   }, [queryClient, ticket?.engineType, ticket?.smartState, ticketId])
 
+  // When timeline reports a terminal event but ticket status hasn't caught up yet,
+  // force an immediate refetch of the ticket query to close the sync gap.
+  useEffect(() => {
+    if (!ticket || TERMINAL_STATUSES.has(ticket.status)) return
+    const hasTerminalEvent = timeline.some(
+      (e) => e.eventType === "workflow_completed" || e.eventType === "ticket_cancelled",
+    )
+    if (hasTerminalEvent) {
+      queryClient.invalidateQueries({ queryKey: ["itsm-ticket", ticketId] })
+    }
+  }, [queryClient, ticket, ticketId, timeline])
+
   const currentActivity = ticket ? activities.find((a) => a.id === ticket.currentActivityId) : undefined
   const activeHumanActivity = activities.find(
     (a) => ["pending", "in_progress"].includes(a.status) && HUMAN_ACTIVITY_TYPES.has(a.activityType),
