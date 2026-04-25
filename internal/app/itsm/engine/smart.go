@@ -713,6 +713,7 @@ func (e *SmartEngine) createRequesterAssignment(tx *gorm.DB, ticketID, activityI
 
 // pendManualHandlingPlan creates a manual process activity for low-confidence decisions.
 func (e *SmartEngine) pendManualHandlingPlan(tx *gorm.DB, ticketID uint, plan *DecisionPlan) error {
+	slog.Info("decision-cycle: low-confidence", "ticketID", ticketID, "confidence", plan.Confidence)
 	now := time.Now()
 	planJSON := mustJSON(plan)
 

@@ -185,6 +185,10 @@ func (e *ClassicEngine) Progress(ctx context.Context, tx *gorm.DB, params Progre
 		source := fmt.Sprintf("form:%d", params.ActivityID)
 		if err := writeFormBindings(tx, params.TicketID, token.ScopeID, activity.FormSchema, string(params.Result), source, activity.NodeID); err != nil {
 			slog.Warn("failed to write form bindings on progress", "ticketID", params.TicketID, "activityID", params.ActivityID, "error", err)
+			if fve, ok := err.(*FormValidationError); ok {
+				e.recordTimeline(tx, params.TicketID, &params.ActivityID, params.OperatorID, "form_validation_failed",
+					fmt.Sprintf("表单验证失败: %s", fve.Error()))
+			}
 		}
 	}
 

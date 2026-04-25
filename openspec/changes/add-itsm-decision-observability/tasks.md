@@ -22,13 +22,13 @@
 
 ## 5. Plan 执行结果日志
 
-- [ ] 5.1 在 `smart.go:executeSinglePlan()` 创建 activity 和 assignment 后增加 Info 日志 "decision-cycle: executed"，包含 ticketID、activityType、activityID、assigneeID、executionMode="single"
-- [ ] 5.2 在 `smart.go:executeParallelPlan()` 完成循环后增加 Info 日志 "decision-cycle: executed"，包含 ticketID、activityCount、executionMode="parallel"、groupID
-- [ ] 5.3 在 `smart.go:handleComplete()` 增加 Info 日志 "decision-cycle: completed"，包含 ticketID
-- [ ] 5.4 在 `smart.go:pendManualHandlingPlan()` 增加 Info 日志 "decision-cycle: low-confidence"，包含 ticketID、confidence
+- [x] 5.1 在 `smart.go:executeSinglePlan()` 创建 activity 和 assignment 后增加 Info 日志 "decision-cycle: executed"，包含 ticketID、activityType、activityID、assigneeID、executionMode="single"
+- [x] 5.2 在 `smart.go:executeParallelPlan()` 完成循环后增加 Info 日志 "decision-cycle: executed"，包含 ticketID、activityCount、executionMode="parallel"、groupID
+- [x] 5.3 在 `smart.go:handleComplete()` 增加 Info 日志 "decision-cycle: completed"，包含 ticketID
+- [x] 5.4 在 `smart.go:pendManualHandlingPlan()` 增加 Info 日志 "decision-cycle: low-confidence"，包含 ticketID、confidence
 
 ## 6. 验证
 
-- [ ] 6.1 运行 `go build -tags dev ./cmd/server` 确认编译通过
-- [ ] 6.2 运行 `go test ./internal/app/itsm/engine/...` 确认现有测试通过
-- [ ] 6.3 运行 `go test ./internal/app/ai/runtime/...` 确认现有测试通过
+- [x] 6.1 运行 `go build -tags dev ./cmd/server` 确认编译通过
+- [x] 6.2 运行 `go test ./internal/app/itsm/engine/...` 确认现有测试通过
+- [x] 6.3 运行 `go test ./internal/app/ai/runtime/...` 确认现有测试通过
