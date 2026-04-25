@@ -29,6 +29,12 @@ const useStrictModeSafeInit = () => {
   return ready;
 };
 
+function setRiveInputValue(input: { value: boolean | number } | null, value: boolean) {
+  if (input) {
+    input.value = value;
+  }
+}
+
 export type PersonaState =
   | "idle"
   | "listening"
@@ -279,18 +285,10 @@ export const Persona: FC<PersonaProps> = memo(
     // Rive state machine inputs are mutable objects that must be set via direct
     // property assignment — this is the intended Rive API, not a React anti-pattern.
     useEffect(() => {
-      if (listeningInput) {
-        listeningInput.value = state === "listening";
-      }
-      if (thinkingInput) {
-        thinkingInput.value = state === "thinking";
-      }
-      if (speakingInput) {
-        speakingInput.value = state === "speaking";
-      }
-      if (asleepInput) {
-        asleepInput.value = state === "asleep";
-      }
+      setRiveInputValue(listeningInput, state === "listening");
+      setRiveInputValue(thinkingInput, state === "thinking");
+      setRiveInputValue(speakingInput, state === "speaking");
+      setRiveInputValue(asleepInput, state === "asleep");
     }, [state, listeningInput, thinkingInput, speakingInput, asleepInput]);
 
     const Component = source.hasModel ? PersonaWithModel : PersonaWithoutModel;

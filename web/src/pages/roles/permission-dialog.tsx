@@ -265,18 +265,24 @@ export function PermissionDialog({ open, onOpenChange, role }: PermissionDialogP
   // Expand all directories on open
   useEffect(() => {
     if (sections.length > 0) {
-      setExpandedDirs(new Set(sections.map((s) => s.directory?.id).filter(Boolean) as number[]))
+      const id = window.setTimeout(() => {
+        setExpandedDirs(new Set(sections.map((s) => s.directory?.id).filter(Boolean) as number[]))
+      }, 0)
+      return () => window.clearTimeout(id)
     }
   }, [sections])
 
   useEffect(() => {
     if (!currentPerms || !menuTree) return
-    const ids = new Set<number>()
-    for (const perm of currentPerms.menuPermissions || []) {
-      const id = permMap.get(perm)
-      if (id !== undefined) ids.add(id)
-    }
-    setCheckedIds(ids)
+    const timer = window.setTimeout(() => {
+      const ids = new Set<number>()
+      for (const perm of currentPerms.menuPermissions || []) {
+        const id = permMap.get(perm)
+        if (id !== undefined) ids.add(id)
+      }
+      setCheckedIds(ids)
+    }, 0)
+    return () => window.clearTimeout(timer)
   }, [currentPerms, menuTree, permMap])
 
   function toggleDir(id: number) {

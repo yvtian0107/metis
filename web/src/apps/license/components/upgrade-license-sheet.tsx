@@ -56,25 +56,25 @@ interface ProductOption {
   plans: PlanOption[] | null
 }
 
-interface LicenseItem {
+export interface UpgradeLicenseItem {
   id: number
   productId: number | null
   licenseeId: number | null
-  planId: number | null
+  planId?: number | null
   planName: string
   licenseeName?: string
   registrationCode: string
-  constraintValues: Record<string, Record<string, unknown>>
+  constraintValues?: Record<string, Record<string, unknown>>
   validFrom: string
   validUntil: string | null
-  notes: string
+  notes?: string
 }
 
 type ModuleValues = { enabled: boolean; [featureKey: string]: unknown }
 type PlanValues = Record<string, ModuleValues>
 
 interface UpgradeLicenseSheetProps {
-  license: LicenseItem | null
+  license: UpgradeLicenseItem | null
   open: boolean
   onOpenChange: (open: boolean) => void
 }

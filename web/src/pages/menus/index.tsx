@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from "react"
+import { createElement, useState, useEffect, useMemo, useCallback } from "react"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
@@ -157,6 +157,7 @@ function SortableMenuRow({
   }
 
   const Icon = getIcon(menu.icon, menu.type)
+  const iconClassName = `h-4 w-4 ${typeIconClass[menu.type] ?? "text-muted-foreground"}`
 
   return (
     <TableRow ref={setNodeRef} style={style} {...attributes}>
@@ -186,7 +187,7 @@ function SortableMenuRow({
           ) : (
             <span className="w-5" />
           )}
-          <Icon className={`h-4 w-4 ${typeIconClass[menu.type] ?? "text-muted-foreground"}`} />
+          {createElement(Icon, { className: iconClassName })}
           <span className="font-medium">{menu.name}</span>
         </div>
       </TableCell>
@@ -247,10 +248,11 @@ function SortableMenuRow({
 /** Lightweight overlay shown while dragging */
 function DragPreview({ menu }: { menu: MenuItem }) {
   const Icon = getIcon(menu.icon, menu.type)
+  const iconClassName = `h-4 w-4 ${typeIconClass[menu.type] ?? "text-muted-foreground"}`
   return (
     <div className="flex items-center gap-2 rounded-md border bg-background px-3 py-2 shadow-md text-sm">
       <GripVertical className="h-3.5 w-3.5 text-muted-foreground/40" />
-      <Icon className={`h-4 w-4 ${typeIconClass[menu.type] ?? "text-muted-foreground"}`} />
+      {createElement(Icon, { className: iconClassName })}
       <span className="font-medium">{menu.name}</span>
     </div>
   )
@@ -291,7 +293,8 @@ export function Component() {
   // Default expand all on first load
   useEffect(() => {
     if (menuTree && expanded.size === 0) {
-      setExpanded(new Set(collectAllIds(menuTree)))
+      const id = window.setTimeout(() => setExpanded(new Set(collectAllIds(menuTree))), 0)
+      return () => window.clearTimeout(id)
     }
   }, [menuTree]) // eslint-disable-line react-hooks/exhaustive-deps
 
