@@ -87,16 +87,12 @@ func TestAgentDraftSubmission_IdempotentConfirmedDraftStartsSmartProgressTask(t 
 		t.Fatalf("load draft_submitted timeline: %v", err)
 	}
 
-	var task model.TaskExecution
-	if err := db.Where("task_name = ?", "itsm-smart-progress").First(&task).Error; err != nil {
-		t.Fatalf("load smart progress task: %v", err)
+	var created Ticket
+	if err := db.First(&created, first.TicketID).Error; err != nil {
+		t.Fatalf("load created ticket: %v", err)
 	}
-	var payload engine.SmartProgressPayload
-	if err := json.Unmarshal([]byte(task.Payload), &payload); err != nil {
-		t.Fatalf("decode task payload: %v", err)
-	}
-	if payload.TicketID != first.TicketID || payload.TriggerReason != "activity_completed" || payload.CompletedActivityID != nil {
-		t.Fatalf("unexpected smart progress payload: %+v", payload)
+	if created.Status != TicketStatusDecisioning {
+		t.Fatalf("expected created smart ticket status %q, got %q", TicketStatusDecisioning, created.Status)
 	}
 }
 
@@ -162,16 +158,12 @@ func TestAgentDraftSubmission_SingleSQLiteConnectionDoesNotBlock(t *testing.T) {
 		t.Fatalf("unexpected submission: %+v", submission)
 	}
 
-	var task model.TaskExecution
-	if err := db.Where("task_name = ?", "itsm-smart-progress").First(&task).Error; err != nil {
-		t.Fatalf("load smart progress task: %v", err)
+	var created Ticket
+	if err := db.First(&created, result.ticket.TicketID).Error; err != nil {
+		t.Fatalf("load created ticket: %v", err)
 	}
-	var payload engine.SmartProgressPayload
-	if err := json.Unmarshal([]byte(task.Payload), &payload); err != nil {
-		t.Fatalf("decode task payload: %v", err)
-	}
-	if payload.TicketID != result.ticket.TicketID {
-		t.Fatalf("expected task for ticket %d, got %+v", result.ticket.TicketID, payload)
+	if created.Status != TicketStatusDecisioning {
+		t.Fatalf("expected created smart ticket status %q, got %q", TicketStatusDecisioning, created.Status)
 	}
 }
 
@@ -209,7 +201,7 @@ func TestTicketProgress_SingleSQLiteConnectionWithOrgScopeDoesNotBlock(t *testin
 				Title:       "VPN 开通申请",
 				ServiceID:   service.ID,
 				EngineType:  "smart",
-				Status:      TicketStatusInProgress,
+				Status:      TicketStatusWaitingHuman,
 				PriorityID:  1,
 				RequesterID: 1,
 			}
@@ -266,15 +258,15 @@ func TestTicketProgress_SingleSQLiteConnectionWithOrgScopeDoesNotBlock(t *testin
 			if err := db.First(&updatedAssignment, assignment.ID).Error; err != nil {
 				t.Fatalf("load assignment: %v", err)
 			}
-			if updatedAssignment.Status != "completed" || updatedAssignment.AssigneeID == nil || *updatedAssignment.AssigneeID != 7 {
-				t.Fatalf("expected position assignment completed by operator, got %+v", updatedAssignment)
+			if updatedAssignment.Status != tc.outcome || updatedAssignment.AssigneeID == nil || *updatedAssignment.AssigneeID != 7 {
+				t.Fatalf("expected position assignment %s by operator, got %+v", tc.outcome, updatedAssignment)
 			}
 
 			var updatedActivity TicketActivity
 			if err := db.First(&updatedActivity, activity.ID).Error; err != nil {
 				t.Fatalf("load activity: %v", err)
 			}
-			if updatedActivity.Status != engine.ActivityCompleted || updatedActivity.TransitionOutcome != tc.outcome {
+			if updatedActivity.Status != tc.outcome || updatedActivity.TransitionOutcome != tc.outcome {
 				t.Fatalf("unexpected activity state: %+v", updatedActivity)
 			}
 		})
@@ -297,7 +289,7 @@ func TestRetryAI_SingleSQLiteConnectionSubmitsSmartProgressInTransaction(t *test
 		Title:          "智能审批重试",
 		ServiceID:      service.ID,
 		EngineType:     "smart",
-		Status:         TicketStatusInProgress,
+		Status:         TicketStatusWaitingHuman,
 		PriorityID:     1,
 		RequesterID:    1,
 		AIFailureCount: 3,
@@ -342,16 +334,8 @@ func TestRetryAI_SingleSQLiteConnectionSubmitsSmartProgressInTransaction(t *test
 		t.Fatalf("load retry timeline: %v", err)
 	}
 
-	var task model.TaskExecution
-	if err := db.Where("task_name = ?", "itsm-smart-progress").First(&task).Error; err != nil {
-		t.Fatalf("load smart progress task: %v", err)
-	}
-	var payload engine.SmartProgressPayload
-	if err := json.Unmarshal([]byte(task.Payload), &payload); err != nil {
-		t.Fatalf("decode task payload: %v", err)
-	}
-	if payload.TicketID != ticket.ID || payload.TriggerReason != "manual_retry" || payload.CompletedActivityID != nil {
-		t.Fatalf("unexpected smart progress payload: %+v", payload)
+	if reloaded.Status != TicketStatusDecisioning {
+		t.Fatalf("expected retry to put ticket into %q, got %q", TicketStatusDecisioning, reloaded.Status)
 	}
 }
 

@@ -47,7 +47,7 @@ func createMonitorTicket(t *testing.T, db *gorm.DB, service ServiceDefinition, p
 		Title:       "监控工单",
 		ServiceID:   service.ID,
 		EngineType:  service.EngineType,
-		Status:      TicketStatusInProgress,
+		Status:      TicketStatusWaitingHuman,
 		PriorityID:  priority.ID,
 		RequesterID: requester.ID,
 		Source:      TicketSourceAgent,

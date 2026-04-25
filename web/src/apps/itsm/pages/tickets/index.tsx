@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useNavigate } from "react-router"
 import { useTranslation } from "react-i18next"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
@@ -78,7 +78,7 @@ import { TICKET_STATUS_OPTIONS } from "../../components/ticket-status"
 import { TICKET_MENU_PERMISSION } from "./navigation"
 
 const PAGE_SIZE = 20
-const ACTIVE_STATUSES = new Set(["pending", "in_progress", "waiting_action"])
+const ACTIVE_STATUSES = new Set(["submitted", "waiting_human", "approved_decisioning", "rejected_decisioning", "decisioning", "executing_action"])
 const HUMAN_ACTIVITY_TYPES = new Set(["approve", "form", "process"])
 
 const RISK_OPTIONS = [
@@ -169,10 +169,17 @@ export function Component() {
     pageSize: PAGE_SIZE,
   }), [engineFilter, page, priorityFilter, riskFilter, serviceFilter, statusFilter, submittedKeyword])
 
-  const { data, isLoading, isFetching } = useQuery({
+  const { data, isLoading, isFetching, refetch } = useQuery({
     queryKey: ["itsm-ticket-monitor", monitorParams],
     queryFn: () => fetchTicketMonitor(monitorParams),
   })
+
+  useEffect(() => {
+    const interval = window.setInterval(() => {
+      void refetch()
+    }, 60000)
+    return () => window.clearInterval(interval)
+  }, [refetch])
 
   const { data: priorities = [] } = useQuery({
     queryKey: ["itsm-priorities"],
@@ -202,7 +209,10 @@ export function Component() {
           <h2 className="workspace-page-title">{t("tickets.title")}</h2>
           <p className="workspace-page-description">{t("tickets.monitorDesc")}</p>
         </div>
-        <Button variant="outline" size="sm" onClick={() => resetPageAnd(() => setSubmittedKeyword(keyword))} disabled={isFetching}>
+        <Button variant="outline" size="sm" onClick={() => {
+          resetPageAnd(() => setSubmittedKeyword(keyword))
+          void refetch()
+        }} disabled={isFetching}>
           {isFetching ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCcw className="h-4 w-4" />}
           {t("monitor.refresh")}
         </Button>

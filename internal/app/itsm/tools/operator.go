@@ -165,7 +165,7 @@ func (o *Operator) ListMyTickets(userID uint, status string) ([]TicketSummary, e
 
 	query := o.db.Table("itsm_tickets").
 		Where("requester_id = ? AND deleted_at IS NULL", userID).
-		Where("status NOT IN ?", []string{"completed", "cancelled", "failed"})
+		Where("status NOT IN ?", []string{"completed", "rejected", "withdrawn", "cancelled", "failed"})
 	if status != "" {
 		query = query.Where("status = ?", status)
 	}
@@ -199,7 +199,7 @@ func (o *Operator) ListMyTickets(userID uint, status string) ([]TicketSummary, e
 	for _, r := range rows {
 		// can_withdraw: non-terminal + no claimed assignments
 		canWithdraw := false
-		if r.Status != "completed" && r.Status != "cancelled" && r.Status != "failed" {
+		if r.Status != "completed" && r.Status != "rejected" && r.Status != "withdrawn" && r.Status != "cancelled" && r.Status != "failed" {
 			var claimedCount int64
 			o.db.Table("itsm_ticket_assignments").
 				Where("ticket_id = ? AND claimed_at IS NOT NULL", r.ID).

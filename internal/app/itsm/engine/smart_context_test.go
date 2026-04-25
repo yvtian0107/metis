@@ -21,6 +21,7 @@ func TestBuildInitialSeedIncludesDecisionTrigger(t *testing.T) {
 		title text,
 		description text,
 		status text,
+		outcome text,
 		source text,
 		priority_id integer
 	)`).Error; err != nil {
@@ -32,7 +33,7 @@ func TestBuildInitialSeedIncludesDecisionTrigger(t *testing.T) {
 	if err := db.Exec(`INSERT INTO itsm_priorities (id, name) VALUES (1, '紧急')`).Error; err != nil {
 		t.Fatalf("insert priority: %v", err)
 	}
-	if err := db.Exec(`INSERT INTO itsm_tickets (id, code, title, description, status, source, priority_id) VALUES (42, 'TICK-42', 'VPN', '线上支持', 'in_progress', 'agent', 1)`).Error; err != nil {
+	if err := db.Exec(`INSERT INTO itsm_tickets (id, code, title, description, status, outcome, source, priority_id) VALUES (42, 'TICK-42', 'VPN', '线上支持', 'decisioning', '', 'agent', 1)`).Error; err != nil {
 		t.Fatalf("insert ticket: %v", err)
 	}
 
@@ -68,6 +69,7 @@ func TestBuildInitialSeedIncludesRejectedActivityPolicy(t *testing.T) {
 		title text,
 		description text,
 		status text,
+		outcome text,
 		source text,
 		priority_id integer
 	)`).Error; err != nil {
@@ -82,7 +84,7 @@ func TestBuildInitialSeedIncludesRejectedActivityPolicy(t *testing.T) {
 	if err := db.Exec(`INSERT INTO itsm_priorities (id, name) VALUES (1, '普通')`).Error; err != nil {
 		t.Fatalf("insert priority: %v", err)
 	}
-	if err := db.Exec(`INSERT INTO itsm_tickets (id, code, title, description, status, source, priority_id) VALUES (42, 'TICK-42', 'VPN', '线上支持', 'in_progress', 'agent', 1)`).Error; err != nil {
+	if err := db.Exec(`INSERT INTO itsm_tickets (id, code, title, description, status, outcome, source, priority_id) VALUES (42, 'TICK-42', 'VPN', '线上支持', 'rejected_decisioning', '', 'agent', 1)`).Error; err != nil {
 		t.Fatalf("insert ticket: %v", err)
 	}
 	completed := activityModel{

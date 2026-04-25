@@ -377,8 +377,8 @@ func TestClassicMatrixParallelAndInclusiveJoinWaitForAllBranches(t *testing.T) {
 			if err := f.progress(t, ticket.ID, activities[0], "completed", nil); err != nil {
 				t.Fatalf("progress first branch: %v", err)
 			}
-			if got := f.ticketStatus(t, ticket.ID); got != "in_progress" {
-				t.Fatalf("ticket status after first branch = %q, want in_progress", got)
+			if got := f.ticketStatus(t, ticket.ID); got != TicketStatusWaitingHuman {
+				t.Fatalf("ticket status after first branch = %q, want %s", got, TicketStatusWaitingHuman)
 			}
 
 			if err := f.progress(t, ticket.ID, activities[1], "completed", nil); err != nil {

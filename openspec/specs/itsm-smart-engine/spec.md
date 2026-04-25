@@ -31,7 +31,7 @@ The SmartEngine SHALL delegate its agentic decision logic to the injected `Decis
 - **THEN** `IsAvailable()` SHALL return false
 
 ### Requirement: DecisionPlan 并签字段
-DecisionPlan 结构 SHALL 新增 `ExecutionMode string` 字段（JSON key: `execution_mode`）。合法值为 `""` / `"single"` / `"parallel"`。空值或 `"single"` 表示串行（现有行为），`"parallel"` 表示并签。
+DecisionPlan SHALL include an ExecutionMode field parsed from the AI response's execution_mode. Valid values are: empty string (default single mode), `"single"`, or `"parallel"`. Invalid values SHALL be defaulted to empty string with a warning logged. When ExecutionMode is `"parallel"`, all activities in the plan are created simultaneously and run concurrently. The cosign gate SHALL check that ALL parallel activities are completed before triggering ensureContinuation.
 
 DecisionActivity 结构体 SHALL 同时包含 `NodeID string` 字段（JSON key: `node_id`，omitempty），由 Agent 声明该活动对应的 workflow_json 节点 ID。
 
@@ -39,9 +39,19 @@ DecisionActivity 结构体 SHALL 同时包含 `NodeID string` 字段（JSON key:
 - **WHEN** Agent 输出的 JSON 包含 `"execution_mode": "parallel"`
 - **THEN** `parseDecisionPlan()` SHALL 正确解析该字段到 `DecisionPlan.ExecutionMode`
 
+#### Scenario: 有效 ExecutionMode 被接受
+- **WHEN** `parseDecisionPlan()` 解析到 `execution_mode="parallel"`
+- **THEN** `DecisionPlan.ExecutionMode` SHALL 被设为 `"parallel"`
+
 #### Scenario: execution_mode 缺失向后兼容
 - **WHEN** Agent 输出的 JSON 不包含 `execution_mode` 字段
 - **THEN** `parseDecisionPlan()` SHALL 将 `ExecutionMode` 默认为空字符串，等同 `"single"`
+
+#### Scenario: 无效 ExecutionMode 回退为单活动模式
+- **WHEN** `parseDecisionPlan()` 解析到 `execution_mode="batch"`
+- **THEN** `ExecutionMode` 被设为 `""`
+- **AND** 系统记录 warning 日志
+- **AND** 按单活动模式执行
 
 #### Scenario: 解析含 node_id 的 DecisionActivity
 - **WHEN** Agent 输出的 JSON 中 activities 条目包含 `"node_id": "node_4"`
@@ -50,6 +60,14 @@ DecisionActivity 结构体 SHALL 同时包含 `NodeID string` 字段（JSON key:
 #### Scenario: node_id 缺失向后兼容
 - **WHEN** Agent 输出的 JSON 中 activities 条目不包含 `node_id` 字段
 - **THEN** `DecisionActivity.NodeID` SHALL 默认为空字符串
+
+#### Scenario: 并签活动全部完成后续跑
+- **WHEN** `DecisionPlan.ExecutionMode == "parallel"` 且所有活动均已完成
+- **THEN** ensureContinuation 检测到全部完成，提交下一轮 `itsm-smart-progress`
+
+#### Scenario: 并签活动部分完成不续跑
+- **WHEN** `DecisionPlan.ExecutionMode == "parallel"` 且仅部分活动完成
+- **THEN** ensureContinuation 检测到尚有未完成活动，不提交新任务
 
 ### Requirement: executeDecisionPlan 并签分支
 `executeDecisionPlan()` SHALL 在 `ExecutionMode == "parallel"` 时创建并签活动组，而非逐个覆盖 `current_activity_id`。并行计划中的 action 类型活动 SHALL 被正确调度执行。所有活动创建站点 SHALL 将 `DecisionActivity.NodeID` 写入 `activityModel.NodeID`。
@@ -89,8 +107,56 @@ DecisionActivity 结构体 SHALL 同时包含 `NodeID string` 字段（JSON key:
 - **WHEN** `buildInitialSeed` 构建 seed 且有 completedActivityID
 - **THEN** `seed["completed_activity"]` SHALL 仅包含 `id`、`outcome`、`operator_opinion`
 
+### Requirement: ensureContinuation called from Start
+SmartEngine.Start() SHALL call ensureContinuation(tx, ticket, 0) after setting ticket status to `"in_progress"` and recording the timeline event. The completedActivityID=0 indicates this is the initial decision trigger. ensureContinuation's existing gate logic (terminal check, circuit breaker) SHALL apply.
+
+#### Scenario: Start triggers initial decision cycle
+- **WHEN** SmartEngine.Start() is called for a new ticket
+- **THEN** after setting status to in_progress, ensureContinuation is called with completedActivityID=0, which submits an `itsm-smart-progress` async task
+
+#### Scenario: Start with AI disabled does not trigger decision
+- **WHEN** SmartEngine.Start() is called for a ticket where `ai_failure_count >= MaxAIFailureCount`
+- **THEN** ensureContinuation's circuit breaker gate prevents task submission
+
+### Requirement: ensureContinuation called from Cancel
+SmartEngine.Cancel() SHALL call ensureContinuation(tx, ticket, 0) after setting ticket status to `"cancelled"`. This allows the decision cycle to perform cleanup if needed. If the ticket is already terminal, ensureContinuation's terminal gate SHALL prevent further processing.
+
+#### Scenario: Cancel triggers cleanup decision
+- **WHEN** SmartEngine.Cancel() is called on an in_progress ticket
+- **THEN** after setting status to cancelled, ensureContinuation is called
+
+#### Scenario: Cancel on terminal ticket is a no-op
+- **WHEN** SmartEngine.Cancel() is called on an already cancelled ticket
+- **THEN** ensureContinuation's terminal state gate returns immediately without submitting a task
+
+### Requirement: handleComplete writes NodeID
+SmartEngine.handleComplete() SHALL set the terminal activity's NodeID to the end node's ID from workflow_json. If workflow_json is unavailable or no end node is found, NodeID SHALL default to empty string.
+
+#### Scenario: Complete activity gets end node ID
+- **WHEN** handleComplete creates a `"流程完结"` activity and workflow_json has an end node with id `"end_1"`
+- **THEN** the activity's NodeID is set to `"end_1"`
+
+#### Scenario: Complete without workflow_json
+- **WHEN** handleComplete creates a terminal activity and workflow_json is not available
+- **THEN** the activity's NodeID is set to empty string
+
+### Requirement: ExecutionMode validation on parse
+parseDecisionPlan() SHALL validate that execution_mode is one of: empty string, `"single"`, or `"parallel"`. If any other value is present, it SHALL log a warning and default to empty string (single mode behavior).
+
+#### Scenario: Valid execution_mode accepted
+- **WHEN** parseDecisionPlan parses a plan with `execution_mode="parallel"`
+- **THEN** `DecisionPlan.ExecutionMode` is set to `"parallel"`
+
+#### Scenario: Invalid execution_mode defaults to empty
+- **WHEN** parseDecisionPlan parses a plan with `execution_mode="batch"`
+- **THEN** `DecisionPlan.ExecutionMode` is set to `""` and a warning is logged
+
+#### Scenario: Missing execution_mode backward compatible
+- **WHEN** parseDecisionPlan parses a plan without `execution_mode` field
+- **THEN** `DecisionPlan.ExecutionMode` is set to `""` (existing behavior preserved)
+
 ### Requirement: SmartEngine continuation trigger points
-SmartEngine SHALL 在真正完成一个 smart 活动边界时近实时提交 `itsm-smart-progress` 续跑任务，而不是依赖轮询式推进。触发点至少包括：人工审批/处理完成、action 活动完成、AI `pending_approval` 决策被确认、AI `pending_approval` 决策被拒绝。
+SmartEngine SHALL trigger near-real-time continuation at all state change boundaries. Trigger points: (1) Manual activity completion -> submit `itsm-smart-progress` immediately. (2) Action completion -> submit `itsm-smart-progress` immediately. (3) AI decision approval -> apply decision + submit `itsm-smart-progress`. (4) AI decision rejection -> record reason + submit `itsm-smart-progress`. (5) Start() -> call ensureContinuation for initial decision cycle. (6) Cancel() -> call ensureContinuation for cleanup. Before progressing, re-check current state to prevent duplicate submissions.
 
 #### Scenario: 人工审批完成后近实时续跑
 - **WHEN** smart 工单的当前人工活动完成并提交结果
@@ -110,6 +176,14 @@ SmartEngine SHALL 在真正完成一个 smart 活动边界时近实时提交 `it
 - **WHEN** status=`pending_approval` 的 AI 活动被授权用户拒绝
 - **THEN** 系统 SHALL 记录拒绝结果与理由并提交 `itsm-smart-progress` 任务
 - **AND** 下一轮决策 SHALL 在包含拒绝上下文的前提下重新运行
+
+#### Scenario: Start 触发首次决策循环
+- **WHEN** SmartEngine.Start() 设置工单状态为 in_progress
+- **THEN** 系统通过 ensureContinuation 提交首次 `itsm-smart-progress` 异步任务
+
+#### Scenario: Cancel 触发清理决策
+- **WHEN** SmartEngine.Cancel() 设置工单状态为 cancelled
+- **THEN** 系统通过 ensureContinuation 触发清理流程
 
 #### Scenario: 并发触发续跑不重复推进状态
 - **WHEN** 同一 smart 工单因接近同时的完成事件多次提交 `itsm-smart-progress`

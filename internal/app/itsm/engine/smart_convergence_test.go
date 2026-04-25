@@ -13,14 +13,14 @@ type mockConfigProvider struct {
 	convergenceTimeout time.Duration
 }
 
-func (m *mockConfigProvider) FallbackAssigneeID() uint                    { return 0 }
-func (m *mockConfigProvider) DecisionMode() string                        { return "ai_only" }
-func (m *mockConfigProvider) DecisionAgentID() uint                       { return 0 }
-func (m *mockConfigProvider) AuditLevel() string                          { return "full" }
-func (m *mockConfigProvider) SLACriticalThresholdSeconds() int            { return 1800 }
-func (m *mockConfigProvider) SLAWarningThresholdSeconds() int             { return 3600 }
-func (m *mockConfigProvider) SimilarHistoryLimit() int                    { return 5 }
-func (m *mockConfigProvider) ParallelConvergenceTimeout() time.Duration   { return m.convergenceTimeout }
+func (m *mockConfigProvider) FallbackAssigneeID() uint                  { return 0 }
+func (m *mockConfigProvider) DecisionMode() string                      { return "ai_only" }
+func (m *mockConfigProvider) DecisionAgentID() uint                     { return 0 }
+func (m *mockConfigProvider) AuditLevel() string                        { return "full" }
+func (m *mockConfigProvider) SLACriticalThresholdSeconds() int          { return 1800 }
+func (m *mockConfigProvider) SLAWarningThresholdSeconds() int           { return 3600 }
+func (m *mockConfigProvider) SimilarHistoryLimit() int                  { return 5 }
+func (m *mockConfigProvider) ParallelConvergenceTimeout() time.Duration { return m.convergenceTimeout }
 
 func TestConvergenceTimeoutCancelsPendingActivities(t *testing.T) {
 	db := newSmartContinuationDB(t)
@@ -85,9 +85,8 @@ func TestConvergenceTimeoutCancelsPendingActivities(t *testing.T) {
 		t.Fatalf("expected 1 parallel_convergence_timeout timeline event, got %d", timelineCount)
 	}
 
-	// Assert: the smart-progress task was submitted (continuation queued).
-	if submitter.txCalls != 1 {
-		t.Fatalf("expected 1 tx submit call after convergence timeout, got %d", submitter.txCalls)
+	if submitter.txCalls != 0 {
+		t.Fatalf("expected no scheduler submit call after convergence timeout, got %d", submitter.txCalls)
 	}
 }
 
@@ -181,8 +180,8 @@ func TestConvergenceTimeoutPreservesCompletedResults(t *testing.T) {
 	if err := db.First(&reloadedSecond, second.ID).Error; err != nil {
 		t.Fatalf("reload second activity: %v", err)
 	}
-	if reloadedSecond.Status != ActivityCompleted {
-		t.Fatalf("expected second activity status %q, got %q", ActivityCompleted, reloadedSecond.Status)
+	if reloadedSecond.Status != ActivityApproved {
+		t.Fatalf("expected second activity status %q, got %q", ActivityApproved, reloadedSecond.Status)
 	}
 }
 

@@ -84,6 +84,7 @@ func toolTicketContext() decisionToolDef {
 				"title":       ticket.Title,
 				"description": ticket.Description,
 				"status":      ticket.Status,
+				"outcome":     ticket.Outcome,
 				"source":      ticket.Source,
 				"is_terminal": isTerminalTicketStatus(ticket.Status),
 			}
@@ -308,12 +309,7 @@ func isPositiveActivityOutcome(outcome string) bool {
 }
 
 func isTerminalTicketStatus(status string) bool {
-	switch status {
-	case "completed", "cancelled", "failed":
-		return true
-	default:
-		return false
-	}
+	return IsTerminalTicketStatus(status)
 }
 
 // --- Tool: decision.knowledge_search ---

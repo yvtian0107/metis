@@ -84,8 +84,8 @@ import { SmartFlowVisualization } from "../../../components/smart-flow-visualiza
 import { VariablesPanel } from "../../../components/variables-panel"
 import { WorkflowViewer } from "../../../components/workflow"
 
-const ACTIVE_STATUSES = new Set(["pending", "in_progress", "waiting_action"])
-const TERMINAL_STATUSES = new Set(["completed", "cancelled", "failed"])
+const ACTIVE_STATUSES = new Set(["submitted", "waiting_human", "approved_decisioning", "rejected_decisioning", "decisioning", "executing_action"])
+const TERMINAL_STATUSES = new Set(["completed", "rejected", "withdrawn", "cancelled", "failed"])
 const HUMAN_ACTIVITY_TYPES = new Set(["approve", "form", "process"])
 const DEFAULT_DECISIONING_MESSAGE = "流程决策岗正在生成下一步，页面会自动刷新。"
 type ApprovalOutcome = "approved" | "rejected"
@@ -503,6 +503,7 @@ export function Component() {
     setDecisioningMessage(message)
     queryClient.setQueryData<TicketItem>(["itsm-ticket", ticketId], (current) => {
       if (!current || current.engineType !== "smart") return current
+      const rejected = message.includes("驳回")
       return {
         ...current,
         assigneeId: null,
@@ -513,6 +514,9 @@ export function Component() {
         currentOwnerType: "ai",
         nextStepSummary: "后台决策中",
         smartState: "ai_reasoning",
+        status: rejected ? "rejected_decisioning" : "approved_decisioning",
+        statusLabel: rejected ? "驳回后决策中" : "通过后决策中",
+        statusTone: "progress",
       }
     })
   }
@@ -579,7 +583,7 @@ export function Component() {
       queryClient.invalidateQueries({ queryKey: ["itsm-ticket", ticketId] })
       queryClient.invalidateQueries({ queryKey: ["itsm-ticket-timeline", ticketId] })
       queryClient.invalidateQueries({ queryKey: ["itsm-ticket-activities", ticketId] })
-    }, 3000)
+    }, 60000)
     return () => window.clearInterval(interval)
   }, [queryClient, ticket?.engineType, ticket?.smartState, ticketId])
 
@@ -606,7 +610,7 @@ export function Component() {
   const isActive = ticket ? ACTIVE_STATUSES.has(ticket.status) : false
   const isTerminal = ticket ? TERMINAL_STATUSES.has(ticket.status) : false
   const isDecisioning = ticket?.engineType === "smart" && ticket.smartState === "ai_reasoning"
-  const canWithdraw = Boolean(ticket && isActive && !isDecisioning && ticket.status === "pending" && ticket.requesterId === currentUserId)
+  const canWithdraw = Boolean(ticket && isActive && !isDecisioning && ticket.status === "submitted" && ticket.requesterId === currentUserId)
   const actionableActivity = activeHumanActivity
   const isCurrentUserResponsible = Boolean(
     ticket?.canAct || actionableActivity?.canAct || (ticket?.assigneeId && ticket.assigneeId === currentUserId),

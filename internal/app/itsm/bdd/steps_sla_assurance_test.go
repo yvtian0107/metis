@@ -147,7 +147,7 @@ func (bc *bddContext) givenResponseSLABreachedTicketWithRule(actionType string) 
 		Description:           "SLA 保障岗 BDD 风险工单",
 		ServiceID:             bc.service.ID,
 		EngineType:            "smart",
-		Status:                TicketStatusInProgress,
+		Status:                TicketStatusWaitingHuman,
 		PriorityID:            bc.priority.ID,
 		RequesterID:           requester.ID,
 		AssigneeID:            &current.ID,

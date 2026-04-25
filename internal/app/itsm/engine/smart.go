@@ -132,6 +132,7 @@ type SmartEngine struct {
 	scheduler         TaskSubmitter
 	configProvider    EngineConfigProvider
 	actionExecutor    *ActionExecutor
+	db                *gorm.DB
 }
 
 // NewSmartEngine creates a SmartEngine with optional AI dependencies.
@@ -163,6 +164,51 @@ func (e *SmartEngine) SetActionExecutor(executor *ActionExecutor) {
 	e.actionExecutor = executor
 }
 
+func (e *SmartEngine) SetDB(db *gorm.DB) {
+	e.db = db
+}
+
+func (e *SmartEngine) DispatchDecisionAsync(ticketID uint, completedActivityID *uint, triggerReason string) {
+	if e == nil || e.db == nil {
+		return
+	}
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				slog.Error("direct decision dispatch panic", "ticketID", ticketID, "panic", r)
+				_ = e.db.Session(&gorm.Session{NewDB: true}).Create(&timelineModel{
+					TicketID:   ticketID,
+					OperatorID: 0,
+					EventType:  "ai_decision_failed",
+					Message:    fmt.Sprintf("AI 决策异常: %v", r),
+				}).Error
+			}
+		}()
+
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		defer cancel()
+
+		db := e.db.Session(&gorm.Session{NewDB: true}).WithContext(ctx)
+		slog.Info("direct decision dispatch: starting", "ticketID", ticketID, "completedActivityID", completedActivityID, "triggerReason", triggerReason)
+		err := e.RunDecisionCycleForTicket(ctx, db, ticketID, completedActivityID, triggerReason)
+		if err != nil {
+			if err == ErrAIDecisionFailed || err == ErrAIDisabled {
+				slog.Warn("direct decision dispatch: handled decision error", "ticketID", ticketID, "error", err)
+				return
+			}
+			slog.Error("direct decision dispatch: failed", "ticketID", ticketID, "error", err)
+			_ = db.Create(&timelineModel{
+				TicketID:   ticketID,
+				OperatorID: 0,
+				EventType:  "ai_decision_failed",
+				Message:    fmt.Sprintf("AI 决策调度失败: %v", err),
+			}).Error
+			return
+		}
+		slog.Info("direct decision dispatch: completed", "ticketID", ticketID, "completedActivityID", completedActivityID)
+	}()
+}
+
 // Start initialises the workflow for a smart-engine ticket.
 func (e *SmartEngine) Start(ctx context.Context, tx *gorm.DB, params StartParams) error {
 	if !e.IsAvailable() {
@@ -179,23 +225,14 @@ func (e *SmartEngine) Start(ctx context.Context, tx *gorm.DB, params StartParams
 		return fmt.Errorf("智能服务未绑定 Agent")
 	}
 
-	// Update ticket status to in_progress
+	// Update ticket status to decisioning; the first decision cycle is dispatched after commit.
 	if err := tx.Model(&ticketModel{}).Where("id = ?", params.TicketID).
-		Update("status", "in_progress").Error; err != nil {
+		Update("status", TicketStatusDecisioning).Error; err != nil {
 		return err
 	}
 
 	// Record timeline: workflow started
 	e.recordTimeline(tx, params.TicketID, nil, params.RequesterID, "workflow_started", "智能流程已启动", "")
-
-	// Trigger initial decision cycle
-	var ticket ticketModel
-	if err := tx.First(&ticket, params.TicketID).Error; err != nil {
-		return fmt.Errorf("load ticket for continuation: %w", err)
-	}
-	if _, err := e.ensureContinuation(tx, &ticket, 0); err != nil {
-		slog.Warn("failed to trigger initial decision cycle", "ticketID", params.TicketID, "error", err)
-	}
 
 	return nil
 }
@@ -216,12 +253,12 @@ func (e *SmartEngine) Progress(ctx context.Context, tx *gorm.DB, params Progress
 	}
 
 	now := time.Now()
-	if _, _, err := completePendingAssignment(tx, e.resolver, activity.ID, params.OperatorID, now, params.OperatorPositionIDs, params.OperatorDepartmentIDs, params.OperatorOrgScopeReady); err != nil {
+	if _, _, err := completePendingAssignment(tx, e.resolver, activity.ID, params.OperatorID, params.Outcome, now, params.OperatorPositionIDs, params.OperatorDepartmentIDs, params.OperatorOrgScopeReady); err != nil {
 		return err
 	}
 
 	updates := map[string]any{
-		"status":             ActivityCompleted,
+		"status":             humanOrCompletedActivityStatus(activity.ActivityType, params.Outcome),
 		"transition_outcome": params.Outcome,
 		"finished_at":        now,
 	}
@@ -273,14 +310,15 @@ func (e *SmartEngine) Cancel(ctx context.Context, tx *gorm.DB, params CancelPara
 	// Cancel all pending assignments
 	if err := tx.Model(&assignmentModel{}).
 		Where("ticket_id = ? AND status = ?", params.TicketID, "pending").
-		Update("status", "cancelled").Error; err != nil {
+		Update("status", ActivityCancelled).Error; err != nil {
 		return err
 	}
 
 	// Update ticket
 	now := time.Now()
 	if err := tx.Model(&ticketModel{}).Where("id = ?", params.TicketID).Updates(map[string]any{
-		"status":      "cancelled",
+		"status":      ticketCancelStatus(params.EventType),
+		"outcome":     ticketCancelOutcome(params.EventType),
 		"finished_at": now,
 	}).Error; err != nil {
 		return err
@@ -342,8 +380,7 @@ func (e *SmartEngine) runDecisionCycle(ctx context.Context, tx *gorm.DB, ticketI
 	cfg := ParseSmartServiceConfig(svcInfo.AgentConfig)
 
 	// Check terminal state
-	switch ticket.Status {
-	case "completed", "cancelled", "failed":
+	if IsTerminalTicketStatus(ticket.Status) {
 		slog.Info("decision-cycle: skipped", "ticketID", ticketID, "reason", "terminal_state", "status", ticket.Status)
 		return nil
 	}
@@ -455,8 +492,10 @@ func (e *SmartEngine) handleComplete(tx *gorm.DB, ticketID uint, plan *DecisionP
 		return err
 	}
 
+	status, outcome := e.resolveCompletionStatus(tx, ticketID)
 	if err := tx.Model(&ticketModel{}).Where("id = ?", ticketID).Updates(map[string]any{
-		"status":              "completed",
+		"status":              status,
+		"outcome":             outcome,
 		"finished_at":         now,
 		"current_activity_id": act.ID,
 	}).Error; err != nil {
@@ -466,6 +505,21 @@ func (e *SmartEngine) handleComplete(tx *gorm.DB, ticketID uint, plan *DecisionP
 	slog.Info("decision-cycle: completed", "ticketID", ticketID)
 	return e.recordTimeline(tx, ticketID, &act.ID, 0, "workflow_completed",
 		"智能流程已完结", plan.Reasoning)
+}
+
+func (e *SmartEngine) resolveCompletionStatus(tx *gorm.DB, ticketID uint) (string, string) {
+	var activity activityModel
+	err := tx.Where("ticket_id = ? AND activity_type IN ? AND transition_outcome IN ?", ticketID,
+		[]string{NodeApprove, NodeForm, NodeProcess}, []string{ActivityApproved, ActivityRejected}).
+		Order("finished_at DESC, id DESC").
+		First(&activity).Error
+	if err == nil && activity.TransitionOutcome == ActivityRejected {
+		return TicketStatusRejected, TicketOutcomeRejected
+	}
+	if err == nil && activity.TransitionOutcome == ActivityApproved {
+		return TicketStatusCompleted, TicketOutcomeApproved
+	}
+	return TicketStatusCompleted, TicketOutcomeFulfilled
 }
 
 // executeDecisionPlan creates activities for a high-confidence decision.
@@ -527,6 +581,10 @@ func (e *SmartEngine) executeParallelPlan(tx *gorm.DB, ticketID uint, plan *Deci
 			e.tryFallbackAssignment(tx, ticketID, act.ID)
 		}
 
+		if i == 0 {
+			tx.Model(&ticketModel{}).Where("id = ?", ticketID).Update("status", ticketStatusForDecisionActivity(da.Type))
+		}
+
 		// Submit action task if applicable
 		if da.Type == "action" && da.ActionID != nil && e.scheduler != nil {
 			payload, _ := json.Marshal(map[string]any{
@@ -579,7 +637,11 @@ func (e *SmartEngine) executeSinglePlan(tx *gorm.DB, ticketID uint, plan *Decisi
 	if err := tx.Create(act).Error; err != nil {
 		return err
 	}
-	if err := tx.Model(&ticketModel{}).Where("id = ?", ticketID).Update("current_activity_id", act.ID).Error; err != nil {
+	if err := tx.Model(&ticketModel{}).Where("id = ?", ticketID).Updates(map[string]any{
+		"current_activity_id": act.ID,
+		"status":              ticketStatusForDecisionActivity(da.Type),
+		"outcome":             "",
+	}).Error; err != nil {
 		return err
 	}
 
@@ -1262,7 +1324,7 @@ func (serviceModel) TableName() string { return "itsm_service_definitions" }
 func (e *SmartEngine) ensureContinuation(tx *gorm.DB, ticket *ticketModel, completedActivityID uint) (bool, error) {
 	// 1. Terminal state → nothing to do
 	switch ticket.Status {
-	case "completed", "cancelled", "failed":
+	case TicketStatusCompleted, TicketStatusRejected, TicketStatusWithdrawn, TicketStatusCancelled, TicketStatusFailed:
 		return false, nil
 	}
 
@@ -1284,7 +1346,7 @@ func (e *SmartEngine) ensureContinuation(tx *gorm.DB, ticket *ticketModel, compl
 			var ids []uint
 			if err := tx.Model(&activityModel{}).
 				Clauses(clause.Locking{Strength: "UPDATE"}).
-				Where("activity_group_id = ? AND status NOT IN (?, ?)", groupID, ActivityCompleted, ActivityCancelled).
+				Where("activity_group_id = ? AND status NOT IN ?", groupID, CompletedActivityStatuses()).
 				Pluck("id", &ids).Error; err != nil {
 				return false, err
 			}
@@ -1311,7 +1373,7 @@ func (e *SmartEngine) ensureContinuation(tx *gorm.DB, ticket *ticketModel, compl
 						"ticketID", ticket.ID, "groupID", groupID,
 						"remaining", len(ids), "timeout", timeout)
 					if err := tx.Model(&activityModel{}).
-						Where("id IN ? AND status NOT IN (?, ?)", ids, ActivityCompleted, ActivityCancelled).
+						Where("id IN ? AND status NOT IN ?", ids, CompletedActivityStatuses()).
 						Updates(map[string]any{
 							"status":      ActivityCancelled,
 							"finished_at": time.Now(),
@@ -1332,20 +1394,22 @@ func (e *SmartEngine) ensureContinuation(tx *gorm.DB, ticket *ticketModel, compl
 		}
 	}
 
-	// 4. Submit async task for next decision cycle
-	if e.scheduler != nil {
-		payload, _ := json.Marshal(SmartProgressPayload{
-			TicketID:            ticket.ID,
-			CompletedActivityID: uintPtrIf(completedActivityID),
-			TriggerReason:       "activity_completed",
-		})
-		if err := submitTaskInTx(e.scheduler, tx, "itsm-smart-progress", payload); err != nil {
-			slog.Error("ensureContinuation: failed to submit smart-progress task", "error", err, "ticketID", ticket.ID)
+	decisioningStatus := TicketStatusDecisioning
+	if completedActivityID > 0 {
+		var outcome string
+		if err := tx.Model(&activityModel{}).Where("id = ?", completedActivityID).Select("transition_outcome").Scan(&outcome).Error; err != nil {
 			return false, err
 		}
-		return true, nil
+		decisioningStatus = TicketDecisioningStatusForOutcome(outcome)
 	}
-	return false, nil
+	if err := tx.Model(&ticketModel{}).Where("id = ?", ticket.ID).Updates(map[string]any{
+		"status":              decisioningStatus,
+		"outcome":             "",
+		"current_activity_id": nil,
+	}).Error; err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // uintPtrIf returns a *uint if v > 0, else nil.
@@ -1532,8 +1596,7 @@ func (e *SmartEngine) buildInitialSeed(tx *gorm.DB, ticketID uint, svc *serviceM
 	}
 
 	allowedSteps := []string{"process", "action", "notify", "form", "complete", "escalate"}
-	switch ticket.Status {
-	case "completed", "cancelled", "failed":
+	if IsTerminalTicketStatus(ticket.Status) {
 		allowedSteps = []string{}
 	}
 

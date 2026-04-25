@@ -5,6 +5,7 @@ import (
 	. "metis/internal/app/itsm/config"
 	. "metis/internal/app/itsm/domain"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/casbin/casbin/v2"
@@ -16,6 +17,9 @@ import (
 
 func SeedITSM(db *gorm.DB, enforcer *casbin.Enforcer) error {
 	migratePriorityCommitmentColumns(db)
+	if err := MigrateTicketStatusModel(db); err != nil {
+		return err
+	}
 
 	if err := seedMenus(db); err != nil {
 		return err
@@ -47,6 +51,168 @@ func SeedITSM(db *gorm.DB, enforcer *casbin.Enforcer) error {
 	return RepairCompletedHumanAssignments(db)
 }
 
+func MigrateTicketStatusModel(db *gorm.DB) error {
+	if !db.Migrator().HasTable(&Ticket{}) {
+		return nil
+	}
+	if !db.Migrator().HasColumn(&Ticket{}, "outcome") {
+		return nil
+	}
+	if db.Migrator().HasTable(&TicketActivity{}) {
+		if err := migrateHumanActivityStatuses(db); err != nil {
+			return err
+		}
+	}
+	if db.Migrator().HasTable(&TicketAssignment{}) {
+		if err := migrateAssignmentStatuses(db); err != nil {
+			return err
+		}
+	}
+	return migrateTicketStatuses(db)
+}
+
+func migrateHumanActivityStatuses(db *gorm.DB) error {
+	return db.Model(&TicketActivity{}).
+		Where("activity_type IN ?", []string{"approve", "form", "process"}).
+		Where("status = ?", "completed").
+		Where("transition_outcome IN ?", []string{"approved", "rejected"}).
+		Update("status", gorm.Expr("transition_outcome")).Error
+}
+
+func migrateAssignmentStatuses(db *gorm.DB) error {
+	type row struct {
+		AssignmentID uint
+		Outcome      string
+	}
+	var rows []row
+	if err := db.Table("itsm_ticket_assignments AS assign").
+		Select("assign.id AS assignment_id, act.transition_outcome AS outcome").
+		Joins("JOIN itsm_ticket_activities AS act ON act.id = assign.activity_id").
+		Where("assign.status = ?", "completed").
+		Where("act.transition_outcome IN ?", []string{TicketOutcomeApproved, TicketOutcomeRejected}).
+		Scan(&rows).Error; err != nil {
+		return err
+	}
+	for _, row := range rows {
+		status := AssignmentApproved
+		if row.Outcome == TicketOutcomeRejected {
+			status = AssignmentRejected
+		}
+		if err := db.Model(&TicketAssignment{}).Where("id = ?", row.AssignmentID).Update("status", status).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func migrateTicketStatuses(db *gorm.DB) error {
+	var tickets []Ticket
+	if err := db.Find(&tickets).Error; err != nil {
+		return err
+	}
+	for _, ticket := range tickets {
+		status, outcome := deriveTicketStatusOutcome(db, ticket)
+		if status == ticket.Status && outcome == ticket.Outcome {
+			continue
+		}
+		updates := map[string]any{
+			"status":  status,
+			"outcome": outcome,
+		}
+		if IsTerminalTicketStatus(status) && ticket.FinishedAt == nil {
+			now := time.Now()
+			updates["finished_at"] = now
+		}
+		if err := db.Model(&Ticket{}).Where("id = ?", ticket.ID).Updates(updates).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func deriveTicketStatusOutcome(db *gorm.DB, ticket Ticket) (string, string) {
+	status := ticket.Status
+	outcome := ticket.Outcome
+	if status == "" {
+		status = TicketStatusSubmitted
+	}
+	if isNewTicketStatus(status) {
+		return status, outcome
+	}
+
+	switch status {
+	case "pending":
+		return TicketStatusSubmitted, ""
+	case "in_progress", "waiting_action":
+		return deriveActiveTicketStatus(db, ticket.ID), ""
+	case "failed":
+		return TicketStatusFailed, TicketOutcomeFailed
+	case "cancelled":
+		if hasTimelineEvent(db, ticket.ID, "withdrawn") {
+			return TicketStatusWithdrawn, TicketOutcomeWithdrawn
+		}
+		return TicketStatusCancelled, TicketOutcomeCancelled
+	case "completed":
+		lastOutcome := lastHumanOutcome(db, ticket.ID)
+		if lastOutcome == TicketOutcomeRejected {
+			return TicketStatusRejected, TicketOutcomeRejected
+		}
+		if lastOutcome == TicketOutcomeApproved {
+			return TicketStatusCompleted, TicketOutcomeApproved
+		}
+		return TicketStatusCompleted, TicketOutcomeFulfilled
+	default:
+		return TicketStatusSubmitted, ""
+	}
+}
+
+func isNewTicketStatus(status string) bool {
+	switch status {
+	case TicketStatusSubmitted, TicketStatusWaitingHuman, TicketStatusApprovedDecisioning, TicketStatusRejectedDecisioning,
+		TicketStatusDecisioning, TicketStatusExecutingAction, TicketStatusCompleted, TicketStatusRejected,
+		TicketStatusWithdrawn, TicketStatusCancelled, TicketStatusFailed:
+		return true
+	default:
+		return false
+	}
+}
+
+func deriveActiveTicketStatus(db *gorm.DB, ticketID uint) string {
+	var activity TicketActivity
+	err := db.Where("ticket_id = ? AND status IN ?", ticketID, []string{"pending", "in_progress"}).
+		Order("id DESC").
+		First(&activity).Error
+	if err != nil {
+		return TicketStatusDecisioning
+	}
+	switch strings.TrimSpace(activity.ActivityType) {
+	case "action", "notify":
+		return TicketStatusExecutingAction
+	case "approve", "form", "process", "wait":
+		return TicketStatusWaitingHuman
+	default:
+		return TicketStatusDecisioning
+	}
+}
+
+func lastHumanOutcome(db *gorm.DB, ticketID uint) string {
+	var activity TicketActivity
+	err := db.Where("ticket_id = ? AND activity_type IN ? AND transition_outcome IN ?", ticketID,
+		[]string{"approve", "form", "process"}, []string{TicketOutcomeApproved, TicketOutcomeRejected}).
+		Order("finished_at DESC, id DESC").
+		First(&activity).Error
+	if err != nil {
+		return ""
+	}
+	return activity.TransitionOutcome
+}
+
+func hasTimelineEvent(db *gorm.DB, ticketID uint, eventType string) bool {
+	var count int64
+	db.Model(&TicketTimeline{}).Where("ticket_id = ? AND event_type = ?", ticketID, eventType).Count(&count)
+	return count > 0
+}
+
 func migratePriorityCommitmentColumns(db *gorm.DB) {
 	if !db.Migrator().HasTable(&Priority{}) {
 		return
@@ -74,6 +240,7 @@ func RepairCompletedHumanAssignments(db *gorm.DB) error {
 	type repairRow struct {
 		AssignmentID       uint
 		OperatorID         uint
+		Outcome            string
 		ActivityFinishedAt *time.Time
 		TimelineCreatedAt  *time.Time
 	}
@@ -83,13 +250,14 @@ func RepairCompletedHumanAssignments(db *gorm.DB) error {
 		Select(`
 			assign.id AS assignment_id,
 			tl.operator_id AS operator_id,
+			act.transition_outcome AS outcome,
 			act.finished_at AS activity_finished_at,
 			tl.created_at AS timeline_created_at
 		`).
 		Joins("JOIN itsm_ticket_activities AS act ON act.id = assign.activity_id").
 		Joins("JOIN itsm_ticket_timelines AS tl ON tl.ticket_id = act.ticket_id AND tl.activity_id = act.id").
 		Where("act.activity_type IN ?", []string{"approve", "form", "process"}).
-		Where("act.status = ?", "completed").
+		Where("act.status IN ?", []string{"completed", TicketOutcomeApproved, TicketOutcomeRejected}).
 		Where("assign.status = ?", "pending").
 		Where("tl.event_type = ? AND tl.operator_id > 0", "activity_completed").
 		Where("assign.user_id = tl.operator_id OR assign.assignee_id = tl.operator_id").
@@ -110,9 +278,13 @@ func RepairCompletedHumanAssignments(db *gorm.DB) error {
 		if finishedAt == nil {
 			finishedAt = row.TimelineCreatedAt
 		}
+		status := AssignmentApproved
+		if row.Outcome == TicketOutcomeRejected {
+			status = AssignmentRejected
+		}
 		updates := map[string]any{
 			"assignee_id": row.OperatorID,
-			"status":      "completed",
+			"status":      status,
 			"is_current":  false,
 		}
 		if finishedAt != nil {

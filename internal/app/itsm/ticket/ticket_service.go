@@ -90,6 +90,9 @@ func (s *TicketService) Create(input CreateTicketInput, requesterID uint) (*Tick
 	}); err != nil {
 		return nil, err
 	}
+	if ticket.EngineType == "smart" {
+		s.smartEngine.DispatchDecisionAsync(ticket.ID, nil, "ticket_created")
+	}
 
 	return s.ticketRepo.FindByID(ticket.ID)
 }
@@ -141,7 +144,7 @@ func (s *TicketService) prepareTicket(input CreateTicketInput, requesterID uint)
 		Description:    input.Description,
 		ServiceID:      input.ServiceID,
 		EngineType:     svc.EngineType,
-		Status:         TicketStatusPending,
+		Status:         TicketStatusSubmitted,
 		PriorityID:     input.PriorityID,
 		RequesterID:    requesterID,
 		Source:         source,
@@ -251,6 +254,9 @@ func (s *TicketService) createAgentTicket(ctx context.Context, input CreateTicke
 		}); err != nil {
 			return nil, err
 		}
+		if ticket.EngineType == "smart" {
+			s.smartEngine.DispatchDecisionAsync(ticket.ID, nil, "ticket_created")
+		}
 		return s.ticketRepo.FindByID(ticket.ID)
 	}
 
@@ -333,6 +339,9 @@ func (s *TicketService) createAgentTicket(ctx context.Context, input CreateTicke
 	if err != nil {
 		return nil, err
 	}
+	if created.EngineType == "smart" {
+		s.smartEngine.DispatchDecisionAsync(created.ID, nil, "ticket_created")
+	}
 	return s.ticketRepo.FindByID(created.ID)
 }
 
@@ -361,6 +370,15 @@ func (s *TicketService) findSubmittedDraftTicket(sessionID uint, draftVersion in
 func isUniqueConstraintError(err error) bool {
 	msg := strings.ToLower(err.Error())
 	return strings.Contains(msg, "unique") || strings.Contains(msg, "duplicate")
+}
+
+func isDecisioningStatus(status string) bool {
+	switch status {
+	case TicketStatusApprovedDecisioning, TicketStatusRejectedDecisioning, TicketStatusDecisioning:
+		return true
+	default:
+		return false
+	}
 }
 
 // Progress advances a workflow ticket. The operator must be the assignee or have admin privileges.
@@ -396,6 +414,18 @@ func (s *TicketService) Progress(ticketID uint, activityID uint, outcome string,
 		})
 	}); err != nil {
 		return nil, err
+	}
+
+	if t.EngineType == "smart" {
+		updated, findErr := s.ticketRepo.FindByID(ticketID)
+		if findErr == nil && isDecisioningStatus(updated.Status) {
+			triggerReason := "activity_approved"
+			if outcome == "rejected" {
+				triggerReason = "activity_rejected"
+			}
+			s.smartEngine.DispatchDecisionAsync(ticketID, &activityID, triggerReason)
+			return updated, nil
+		}
 	}
 
 	return s.ticketRepo.FindByID(ticketID)
@@ -505,9 +535,11 @@ func (s *TicketService) BuildResponses(items []Ticket, operatorID uint) ([]Ticke
 	priorityIDs := make(map[uint]struct{})
 	userIDs := make(map[uint]struct{})
 	activityIDs := make(map[uint]struct{})
+	ticketIDs := make(map[uint]struct{})
 	for i := range items {
 		t := &items[i]
 		responses[i] = t.ToResponse()
+		ticketIDs[t.ID] = struct{}{}
 		serviceIDs[t.ServiceID] = struct{}{}
 		priorityIDs[t.PriorityID] = struct{}{}
 		userIDs[t.RequesterID] = struct{}{}
@@ -582,9 +614,17 @@ func (s *TicketService) BuildResponses(items []Ticket, operatorID uint) ([]Ticke
 	if err != nil {
 		return responses, err
 	}
+	lastHumanOutcomes, err := s.loadLastHumanOutcomes(ticketIDs)
+	if err != nil {
+		return responses, err
+	}
 
 	for i := range responses {
 		resp := &responses[i]
+		resp.StatusLabel = TicketStatusLabel(resp.Status, resp.Outcome)
+		resp.StatusTone = TicketStatusTone(resp.Status, resp.Outcome)
+		resp.LastHumanOutcome = lastHumanOutcomes[resp.ID]
+		resp.DecisioningReason = decisioningReason(resp.Status)
 		resp.ServiceName = serviceNames[resp.ServiceID]
 		if p, ok := priorities[resp.PriorityID]; ok {
 			resp.PriorityName = p.Name
@@ -595,12 +635,52 @@ func (s *TicketService) BuildResponses(items []Ticket, operatorID uint) ([]Ticke
 			resp.AssigneeName = userNames[*resp.AssigneeID]
 		}
 		if resp.EngineType == "smart" {
-			resp.CanOverride = operatorID > 0 && resp.Status != TicketStatusCompleted && resp.Status != TicketStatusCancelled && resp.Status != TicketStatusFailed
+			resp.CanOverride = operatorID > 0 && !IsTerminalTicketStatus(resp.Status)
 			s.populateSmartSummary(resp, activities, assignments)
 		}
 	}
 
 	return responses, nil
+}
+
+func decisioningReason(status string) string {
+	switch status {
+	case TicketStatusApprovedDecisioning:
+		return "activity_approved"
+	case TicketStatusRejectedDecisioning:
+		return "activity_rejected"
+	case TicketStatusDecisioning:
+		return "ai_decision"
+	default:
+		return ""
+	}
+}
+
+func (s *TicketService) loadLastHumanOutcomes(ticketIDs map[uint]struct{}) (map[uint]string, error) {
+	result := map[uint]string{}
+	ids := keysOf(ticketIDs)
+	if len(ids) == 0 {
+		return result, nil
+	}
+	var rows []struct {
+		TicketID uint
+		Outcome  string
+	}
+	if err := s.ticketRepo.DB().Table("itsm_ticket_activities").
+		Where("ticket_id IN ? AND activity_type IN ? AND transition_outcome IN ?", ids,
+			[]string{engine.NodeApprove, engine.NodeForm, engine.NodeProcess},
+			[]string{TicketOutcomeApproved, TicketOutcomeRejected}).
+		Order("finished_at DESC, id DESC").
+		Select("ticket_id, transition_outcome AS outcome").
+		Scan(&rows).Error; err != nil {
+		return result, err
+	}
+	for _, row := range rows {
+		if _, exists := result[row.TicketID]; !exists {
+			result[row.TicketID] = row.Outcome
+		}
+	}
+	return result, nil
 }
 
 type ticketAssignmentDisplay struct {
@@ -687,7 +767,7 @@ func assignmentOwnerFallback(a ticketAssignmentDisplay) string {
 }
 
 func (s *TicketService) populateSmartSummary(resp *TicketResponse, activities map[uint]TicketActivity, assignments map[uint]ticketAssignmentDisplay) {
-	if resp.Status == TicketStatusCompleted || resp.Status == TicketStatusCancelled || resp.Status == TicketStatusFailed {
+	if IsTerminalTicketStatus(resp.Status) {
 		resp.SmartState = "terminal"
 		resp.NextStepSummary = "流程已结束"
 		return
@@ -701,7 +781,7 @@ func (s *TicketService) populateSmartSummary(resp *TicketResponse, activities ma
 		resp.SmartState = "ai_reasoning"
 		resp.CurrentOwnerType = "ai"
 		resp.CurrentOwnerName = "AI 智能引擎"
-		resp.NextStepSummary = "决策中"
+		resp.NextStepSummary = TicketStatusLabel(resp.Status, resp.Outcome)
 		return
 	}
 	activity, ok := activities[*resp.CurrentActivityID]
@@ -709,7 +789,7 @@ func (s *TicketService) populateSmartSummary(resp *TicketResponse, activities ma
 		resp.SmartState = "ai_reasoning"
 		resp.CurrentOwnerType = "ai"
 		resp.CurrentOwnerName = "AI 智能引擎"
-		resp.NextStepSummary = "决策中"
+		resp.NextStepSummary = TicketStatusLabel(resp.Status, resp.Outcome)
 		return
 	}
 	resp.NextStepSummary = activity.Name
@@ -892,7 +972,7 @@ func (s *TicketService) Assign(id uint, assigneeID uint, operatorID uint) (*Tick
 	if err := s.ticketRepo.DB().Transaction(func(tx *gorm.DB) error {
 		updates := map[string]any{
 			"assignee_id": assigneeID,
-			"status":      TicketStatusInProgress,
+			"status":      TicketStatusWaitingHuman,
 		}
 		if err := s.ticketRepo.UpdateInTx(tx, id, updates); err != nil {
 			return err
@@ -964,6 +1044,7 @@ func (s *TicketService) Cancel(id uint, reason string, operatorID uint) (*Ticket
 	if err := s.ticketRepo.DB().Transaction(func(tx *gorm.DB) error {
 		updates := map[string]any{
 			"status":      TicketStatusCancelled,
+			"outcome":     TicketOutcomeCancelled,
 			"finished_at": now,
 		}
 		if err := s.ticketRepo.UpdateInTx(tx, id, updates); err != nil {
@@ -1076,7 +1157,11 @@ func (s *TicketService) OverrideJump(ticketID uint, activityType string, assigne
 			return err
 		}
 
-		updates := map[string]any{"current_activity_id": act.ID}
+		updates := map[string]any{
+			"current_activity_id": act.ID,
+			"status":              ticketStatusForManualActivity(activityType),
+			"outcome":             "",
+		}
 		if assigneeID != nil && *assigneeID > 0 {
 			updates["assignee_id"] = *assigneeID
 			// Create assignment
@@ -1134,8 +1219,11 @@ func (s *TicketService) OverrideReassign(ticketID uint, activityID uint, newAssi
 			})
 
 		// Update ticket assignee
-		if err := tx.Model(&Ticket{}).Where("id = ?", ticketID).
-			Update("assignee_id", newAssigneeID).Error; err != nil {
+		if err := tx.Model(&Ticket{}).Where("id = ?", ticketID).Updates(map[string]any{
+			"assignee_id": newAssigneeID,
+			"status":      TicketStatusWaitingHuman,
+			"outcome":     "",
+		}).Error; err != nil {
 			return err
 		}
 
@@ -1172,8 +1260,12 @@ func (s *TicketService) RetryAI(ticketID uint, reason string, operatorID uint) (
 
 	if err := s.ticketRepo.DB().Transaction(func(tx *gorm.DB) error {
 		// Reset failure count
-		if err := tx.Model(&Ticket{}).Where("id = ?", ticketID).
-			Update("ai_failure_count", 0).Error; err != nil {
+		if err := tx.Model(&Ticket{}).Where("id = ?", ticketID).Updates(map[string]any{
+			"ai_failure_count":    0,
+			"status":              TicketStatusDecisioning,
+			"outcome":             "",
+			"current_activity_id": nil,
+		}).Error; err != nil {
 			return err
 		}
 
@@ -1192,15 +1284,23 @@ func (s *TicketService) RetryAI(ticketID uint, reason string, operatorID uint) (
 			return err
 		}
 
-		payload, _ := json.Marshal(engine.SmartProgressPayload{
-			TicketID:      ticketID,
-			TriggerReason: "manual_retry",
-		})
-		return s.smartEngine.SubmitProgressTaskTx(tx, payload)
+		return nil
 	}); err != nil {
 		return nil, err
 	}
+	s.smartEngine.DispatchDecisionAsync(ticketID, nil, "manual_retry")
 	return s.ticketRepo.FindByID(ticketID)
+}
+
+func ticketStatusForManualActivity(activityType string) string {
+	switch activityType {
+	case engine.NodeAction:
+		return TicketStatusExecutingAction
+	case engine.NodeApprove, engine.NodeForm, engine.NodeProcess:
+		return TicketStatusWaitingHuman
+	default:
+		return TicketStatusDecisioning
+	}
 }
 
 // resolveUserOrg returns the user's position and department IDs if Org App is available.
@@ -1430,6 +1530,7 @@ func (s *TicketService) Claim(ticketID, activityID, operatorID uint) (*Ticket, e
 	// Mark the claimer's assignment as claimed
 	db.Model(&assignment).Updates(map[string]any{
 		"assignee_id": operatorID,
+		"status":      AssignmentInProgress,
 		"claimed_at":  now,
 	})
 
@@ -1439,7 +1540,10 @@ func (s *TicketService) Claim(ticketID, activityID, operatorID uint) (*Ticket, e
 		Update("status", AssignmentClaimedByOther)
 
 	// Update ticket assignee
-	db.Model(&Ticket{}).Where("id = ?", ticketID).Update("assignee_id", operatorID)
+	db.Model(&Ticket{}).Where("id = ?", ticketID).Updates(map[string]any{
+		"assignee_id": operatorID,
+		"status":      TicketStatusWaitingHuman,
+	})
 
 	s.timelineRepo.Create(&TicketTimeline{
 		TicketID:   ticketID,

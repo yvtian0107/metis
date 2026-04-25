@@ -199,7 +199,7 @@ func monitorHasSLARisk(ticket *Ticket, now time.Time) bool {
 }
 
 func isActiveTicket(status string) bool {
-	return status == TicketStatusPending || status == TicketStatusInProgress || status == TicketStatusWaitingAction
+	return IsActiveTicketStatus(status)
 }
 
 func isActiveActivity(status string) bool {

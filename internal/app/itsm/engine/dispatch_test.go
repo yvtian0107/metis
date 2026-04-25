@@ -297,13 +297,13 @@ func TestDispatch(t *testing.T) {
 			t.Fatalf("engine.Progress failed: %v", err)
 		}
 
-		// Assert: user 200's assignment is "completed"
+		// Assert: user 200's assignment records the approved outcome directly.
 		var reloadedDelegated assignmentModel
 		if err := db.First(&reloadedDelegated, delegated.ID).Error; err != nil {
 			t.Fatalf("failed to reload delegated assignment: %v", err)
 		}
-		if reloadedDelegated.Status != "completed" {
-			t.Errorf("delegated assignment status: got %q, want %q", reloadedDelegated.Status, "completed")
+		if reloadedDelegated.Status != ActivityApproved {
+			t.Errorf("delegated assignment status: got %q, want %q", reloadedDelegated.Status, ActivityApproved)
 		}
 
 		// Assert: original assignment (user 100) is restored to "pending" with is_current=true

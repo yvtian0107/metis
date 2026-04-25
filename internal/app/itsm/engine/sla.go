@@ -58,7 +58,14 @@ func HandleSLACheck(db *gorm.DB, configProvider SLAAssuranceConfigProvider, exec
 		var tickets []ticketModel
 		err := db.Where("status IN ? AND sla_paused_at IS NULL AND "+
 			"(sla_response_deadline IS NOT NULL OR sla_resolution_deadline IS NOT NULL)",
-			[]string{"pending", "in_progress", "waiting_action"},
+			[]string{
+				TicketStatusSubmitted,
+				TicketStatusWaitingHuman,
+				TicketStatusApprovedDecisioning,
+				TicketStatusRejectedDecisioning,
+				TicketStatusDecisioning,
+				TicketStatusExecutingAction,
+			},
 		).Find(&tickets).Error
 		if err != nil {
 			slog.Error("sla-check: failed to query tickets", "error", err)

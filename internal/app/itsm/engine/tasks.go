@@ -73,16 +73,8 @@ func HandleActionExecute(db *gorm.DB, classicEngine *ClassicEngine, smartEngine 
 				return err
 			}
 
-			// Trigger next decision cycle
-			payload, _ := json.Marshal(SmartProgressPayload{
-				TicketID:            p.TicketID,
-				CompletedActivityID: &p.ActivityID,
-				TriggerReason:       "action_completed",
-			})
 			if smartEngine != nil {
-				if err := smartEngine.SubmitProgressTask(payload); err != nil {
-					slog.Error("failed to submit smart-progress after action", "error", err, "ticketID", p.TicketID)
-				}
+				smartEngine.DispatchDecisionAsync(p.TicketID, &p.ActivityID, "action_completed")
 			}
 			return nil
 		}
@@ -335,7 +327,7 @@ func HandleSmartRecovery(db *gorm.DB, smartEngine *SmartEngine) func(ctx context
 		}
 		recoverySubmissionsMu.Unlock()
 
-		// Find all in_progress smart tickets
+		// Find all orphaned decisioning smart tickets
 		type ticketRow struct {
 			ID             uint
 			Code           string
@@ -343,14 +335,18 @@ func HandleSmartRecovery(db *gorm.DB, smartEngine *SmartEngine) func(ctx context
 		}
 		var tickets []ticketRow
 		if err := db.Table("itsm_tickets").
-			Where("engine_type = ? AND status = ? AND deleted_at IS NULL", "smart", "in_progress").
+			Where("engine_type = ? AND status IN ? AND deleted_at IS NULL", "smart", []string{
+				TicketStatusApprovedDecisioning,
+				TicketStatusRejectedDecisioning,
+				TicketStatusDecisioning,
+			}).
 			Select("id, code, ai_failure_count").
 			Find(&tickets).Error; err != nil {
 			return fmt.Errorf("smart recovery: query tickets: %w", err)
 		}
 
 		if len(tickets) == 0 {
-			slog.Info("smart recovery: no in_progress smart tickets found")
+			slog.Info("smart recovery: no orphaned decisioning smart tickets found")
 			return nil
 		}
 
@@ -382,12 +378,7 @@ func HandleSmartRecovery(db *gorm.DB, smartEngine *SmartEngine) func(ctx context
 			}
 			recoverySubmissionsMu.Unlock()
 
-			// Submit recovery task
-			payload, _ := json.Marshal(SmartProgressPayload{TicketID: t.ID, TriggerReason: "recovery"})
-			if err := smartEngine.SubmitProgressTask(payload); err != nil {
-				slog.Error("smart recovery: failed to submit progress task", "ticketID", t.ID, "error", err)
-				continue
-			}
+			smartEngine.DispatchDecisionAsync(t.ID, nil, "recovery")
 
 			// Record submission time
 			recoverySubmissionsMu.Lock()

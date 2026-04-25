@@ -1,9 +1,9 @@
 "use client"
 
-import { useState, useMemo } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { useNavigate } from "react-router"
-import { Ticket, Search, Bot } from "lucide-react"
+import { Bot, RefreshCw, Search, Ticket } from "lucide-react"
 import { useListPage } from "@/hooks/use-list-page"
 import { withActiveMenuPermission } from "@/lib/navigation-state"
 import { Badge } from "@/components/ui/badge"
@@ -39,12 +39,19 @@ export function Component() {
 
   const {
     keyword, setKeyword, handleSearch,
-    page, setPage, items, total, totalPages, isLoading,
+    page, setPage, items, total, totalPages, isLoading, isFetching, refetch,
   } = useListPage<TicketItem>({
     queryKey: "itsm-tickets-mine",
     endpoint: "/api/v1/itsm/tickets/mine",
     extraParams,
   })
+
+  useEffect(() => {
+    const interval = window.setInterval(() => {
+      void refetch()
+    }, 60000)
+    return () => window.clearInterval(interval)
+  }, [refetch])
 
   return (
     <div className="workspace-page">
@@ -90,6 +97,9 @@ export function Component() {
               aria-label={t("itsm:tickets.endDate")}
             />
             <Button type="submit" variant="outline" size="sm">{t("common:search")}</Button>
+            <Button type="button" variant="outline" size="icon" aria-label={t("common:refresh")} onClick={() => void refetch()} disabled={isFetching}>
+              <RefreshCw className={`h-4 w-4 ${isFetching ? "animate-spin" : ""}`} />
+            </Button>
           </form>
         </DataTableToolbarGroup>
       </DataTableToolbar>
@@ -97,9 +107,11 @@ export function Component() {
       <Tabs value={statusTab || "all"} onValueChange={(v) => { setStatusTab(v === "all" ? "" : v); setPage(1) }}>
         <TabsList className="h-auto flex-wrap justify-start">
           <TabsTrigger value="all">{t("itsm:tickets.allStatuses")}</TabsTrigger>
-          <TabsTrigger value="pending">{t("itsm:tickets.statusPending")}</TabsTrigger>
-          <TabsTrigger value="in_progress">{t("itsm:tickets.statusInProgress")}</TabsTrigger>
+          <TabsTrigger value="submitted">{t("itsm:tickets.statusSubmitted")}</TabsTrigger>
+          <TabsTrigger value="waiting_human">{t("itsm:tickets.statusWaitingHuman")}</TabsTrigger>
+          <TabsTrigger value="decisioning">{t("itsm:tickets.statusDecisioning")}</TabsTrigger>
           <TabsTrigger value="completed">{t("itsm:tickets.statusCompleted")}</TabsTrigger>
+          <TabsTrigger value="rejected">{t("itsm:tickets.statusRejected")}</TabsTrigger>
           <TabsTrigger value="failed">{t("itsm:tickets.statusFailed")}</TabsTrigger>
           <TabsTrigger value="cancelled">{t("itsm:tickets.statusCancelled")}</TabsTrigger>
         </TabsList>

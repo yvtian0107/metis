@@ -136,7 +136,7 @@ func TestListApprovalHistoryDeduplicatesMultipleCompletedActivities(t *testing.T
 			ParticipantType: "user",
 			UserID:          &operatorID,
 			AssigneeID:      &operatorID,
-			Status:          AssignmentCompleted,
+			Status:          AssignmentApproved,
 			FinishedAt:      &finishedAt,
 		}).Error; err != nil {
 			t.Fatalf("create assignment %d: %v", i, err)

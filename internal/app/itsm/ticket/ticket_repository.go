@@ -149,7 +149,7 @@ func (r *TicketRepo) List(params TicketListParams) ([]Ticket, int64, error) {
 		query = query.Where("code LIKE ? OR title LIKE ? OR description LIKE ?", like, like, like)
 	}
 	if params.Status != "" {
-		query = query.Where("status = ?", params.Status)
+		query = applyTicketStatusFilter(query, params.Status)
 	}
 	if params.EngineType != "" {
 		query = query.Where("engine_type = ?", params.EngineType)
@@ -201,7 +201,7 @@ func (r *TicketRepo) ListMonitorBase(params TicketMonitorParams) ([]Ticket, erro
 		query = query.Where("code LIKE ? OR title LIKE ? OR description LIKE ?", like, like, like)
 	}
 	if params.Status != "" {
-		query = query.Where("status = ?", params.Status)
+		query = applyTicketStatusFilter(query, params.Status)
 	}
 	if params.EngineType != "" {
 		query = query.Where("engine_type = ?", params.EngineType)
@@ -220,11 +220,24 @@ func (r *TicketRepo) ListMonitorBase(params TicketMonitorParams) ([]Ticket, erro
 	return items, nil
 }
 
+func applyTicketStatusFilter(query *gorm.DB, status string) *gorm.DB {
+	switch status {
+	case TicketStatusDecisioning:
+		return query.Where("status IN ?", []string{
+			TicketStatusDecisioning,
+			TicketStatusApprovedDecisioning,
+			TicketStatusRejectedDecisioning,
+		})
+	default:
+		return query.Where("status = ?", status)
+	}
+}
+
 func (r *TicketRepo) ListPendingApprovals(params TicketApprovalListParams, operatorID uint, positionIDs []uint, departmentIDs []uint) ([]Ticket, int64, error) {
 	query := r.db.Model(&Ticket{}).
 		Joins("JOIN itsm_ticket_activities AS act ON act.ticket_id = itsm_tickets.id").
 		Joins("JOIN itsm_ticket_assignments AS assign ON assign.ticket_id = itsm_tickets.id AND assign.activity_id = act.id").
-		Where("itsm_tickets.status NOT IN ?", []string{TicketStatusCompleted, TicketStatusFailed, TicketStatusCancelled}).
+		Where("itsm_tickets.status NOT IN ?", TerminalTicketStatuses()).
 		Where("act.activity_type IN ? AND act.status IN ?", []string{"approve", "form", "process"}, []string{"pending", "in_progress"}).
 		Where("assign.status = ?", AssignmentPending).
 		Where(r.assignmentOperatorCondition("assign", operatorID, positionIDs, departmentIDs))
@@ -237,7 +250,7 @@ func (r *TicketRepo) ListApprovalHistory(params TicketApprovalListParams, operat
 		Joins("JOIN itsm_ticket_activities AS act ON act.ticket_id = itsm_tickets.id").
 		Joins("JOIN itsm_ticket_assignments AS assign ON assign.ticket_id = itsm_tickets.id AND assign.activity_id = act.id").
 		Where("act.activity_type IN ?", []string{"approve", "form", "process"}).
-		Where("assign.status = ? AND assign.assignee_id = ?", AssignmentCompleted, operatorID)
+		Where("assign.status IN ? AND assign.assignee_id = ?", []string{AssignmentApproved, AssignmentRejected}, operatorID)
 
 	return r.listApprovalQuery(query, params, "assign.finished_at DESC, itsm_tickets.id DESC")
 }

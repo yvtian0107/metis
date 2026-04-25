@@ -312,6 +312,11 @@ export interface TicketItem {
   serviceName: string
   engineType: string
   status: string
+  outcome: string
+  statusLabel: string
+  statusTone: "success" | "destructive" | "secondary" | "progress" | "warning" | string
+  lastHumanOutcome: string
+  decisioningReason: string
   priorityId: number
   priorityName: string
   priorityColor: string

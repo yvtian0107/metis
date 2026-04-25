@@ -204,7 +204,7 @@ func (e *ClassicEngine) handleExclusive(
 
 	// Load latest completed activity's form data for condition evaluation
 	var latestActivity activityModel
-	tx.Where("ticket_id = ? AND status = ? AND form_data IS NOT NULL AND form_data != ''", token.TicketID, ActivityCompleted).
+	tx.Where("ticket_id = ? AND status IN ? AND form_data IS NOT NULL AND form_data != ''", token.TicketID, CompletedActivityStatuses()).
 		Order("id DESC").First(&latestActivity)
 
 	evalCtx := buildEvalContext(tx, &ticket, &latestActivity)
@@ -375,7 +375,7 @@ func (e *ClassicEngine) handleInclusiveFork(
 		return err
 	}
 	var latestActivity activityModel
-	tx.Where("ticket_id = ? AND status = ? AND form_data IS NOT NULL AND form_data != ''", token.TicketID, ActivityCompleted).
+	tx.Where("ticket_id = ? AND status IN ? AND form_data IS NOT NULL AND form_data != ''", token.TicketID, CompletedActivityStatuses()).
 		Order("id DESC").First(&latestActivity)
 	evalCtx := buildEvalContext(tx, &ticket, &latestActivity)
 

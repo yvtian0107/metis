@@ -167,11 +167,11 @@ func TestProgress_SequentialCallsSameActivity(t *testing.T) {
 		t.Fatalf("first Progress call should succeed, got: %v", err)
 	}
 
-	// Verify the activity is now completed
+	// Verify the human activity records the submitted outcome directly.
 	var act activityModel
 	db.First(&act, activityID)
-	if act.Status != ActivityCompleted {
-		t.Errorf("activity status after first Progress: got %q, want %q", act.Status, ActivityCompleted)
+	if act.Status != ActivityApproved {
+		t.Errorf("activity status after first Progress: got %q, want %q", act.Status, ActivityApproved)
 	}
 
 	// Second call on the same activity should fail

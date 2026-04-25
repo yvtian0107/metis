@@ -8,12 +8,27 @@ import (
 
 // Ticket status constants
 const (
-	TicketStatusPending       = "pending"
-	TicketStatusInProgress    = "in_progress"
-	TicketStatusWaitingAction = "waiting_action"
-	TicketStatusCompleted     = "completed"
-	TicketStatusFailed        = "failed"
-	TicketStatusCancelled     = "cancelled"
+	TicketStatusSubmitted           = "submitted"
+	TicketStatusWaitingHuman        = "waiting_human"
+	TicketStatusApprovedDecisioning = "approved_decisioning"
+	TicketStatusRejectedDecisioning = "rejected_decisioning"
+	TicketStatusDecisioning         = "decisioning"
+	TicketStatusExecutingAction     = "executing_action"
+	TicketStatusCompleted           = "completed"
+	TicketStatusRejected            = "rejected"
+	TicketStatusWithdrawn           = "withdrawn"
+	TicketStatusCancelled           = "cancelled"
+	TicketStatusFailed              = "failed"
+)
+
+// Ticket outcome constants
+const (
+	TicketOutcomeApproved  = "approved"
+	TicketOutcomeRejected  = "rejected"
+	TicketOutcomeFulfilled = "fulfilled"
+	TicketOutcomeWithdrawn = "withdrawn"
+	TicketOutcomeCancelled = "cancelled"
+	TicketOutcomeFailed    = "failed"
 )
 
 // Ticket source constants
@@ -32,10 +47,14 @@ const (
 // Assignment status constants
 const (
 	AssignmentPending        = "pending"
-	AssignmentCompleted      = "completed"
+	AssignmentInProgress     = "in_progress"
+	AssignmentApproved       = "approved"
+	AssignmentRejected       = "rejected"
 	AssignmentTransferred    = "transferred"
 	AssignmentDelegated      = "delegated"
 	AssignmentClaimedByOther = "claimed_by_other"
+	AssignmentCancelled      = "cancelled"
+	AssignmentFailed         = "failed"
 )
 
 // Ticket 工单
@@ -46,7 +65,8 @@ type Ticket struct {
 	Description           string     `json:"description" gorm:"type:text"`
 	ServiceID             uint       `json:"serviceId" gorm:"not null;index"`
 	EngineType            string     `json:"engineType" gorm:"size:16;not null"`
-	Status                string     `json:"status" gorm:"size:32;not null;default:pending;index"`
+	Status                string     `json:"status" gorm:"size:32;not null;default:submitted;index"`
+	Outcome               string     `json:"outcome" gorm:"size:32;index"`
 	PriorityID            uint       `json:"priorityId" gorm:"not null;index"`
 	RequesterID           uint       `json:"requesterId" gorm:"not null;index"`
 	AssigneeID            *uint      `json:"assigneeId" gorm:"index"`
@@ -74,6 +94,11 @@ type TicketResponse struct {
 	ServiceName           string     `json:"serviceName"`
 	EngineType            string     `json:"engineType"`
 	Status                string     `json:"status"`
+	Outcome               string     `json:"outcome"`
+	StatusLabel           string     `json:"statusLabel"`
+	StatusTone            string     `json:"statusTone"`
+	LastHumanOutcome      string     `json:"lastHumanOutcome"`
+	DecisioningReason     string     `json:"decisioningReason"`
 	PriorityID            uint       `json:"priorityId"`
 	PriorityName          string     `json:"priorityName"`
 	PriorityColor         string     `json:"priorityColor"`
@@ -138,6 +163,9 @@ func (t *Ticket) ToResponse() TicketResponse {
 		ServiceID:             t.ServiceID,
 		EngineType:            t.EngineType,
 		Status:                t.Status,
+		Outcome:               t.Outcome,
+		StatusLabel:           TicketStatusLabel(t.Status, t.Outcome),
+		StatusTone:            TicketStatusTone(t.Status, t.Outcome),
 		PriorityID:            t.PriorityID,
 		RequesterID:           t.RequesterID,
 		AssigneeID:            t.AssigneeID,
@@ -159,9 +187,79 @@ func (t *Ticket) ToResponse() TicketResponse {
 
 // IsTerminal returns true if the ticket is in a terminal state.
 func (t *Ticket) IsTerminal() bool {
-	return t.Status == TicketStatusCompleted ||
-		t.Status == TicketStatusFailed ||
-		t.Status == TicketStatusCancelled
+	return IsTerminalTicketStatus(t.Status)
+}
+
+func IsTerminalTicketStatus(status string) bool {
+	switch status {
+	case TicketStatusCompleted, TicketStatusRejected, TicketStatusWithdrawn, TicketStatusCancelled, TicketStatusFailed:
+		return true
+	default:
+		return false
+	}
+}
+
+func TerminalTicketStatuses() []string {
+	return []string{
+		TicketStatusCompleted,
+		TicketStatusRejected,
+		TicketStatusWithdrawn,
+		TicketStatusCancelled,
+		TicketStatusFailed,
+	}
+}
+
+func IsActiveTicketStatus(status string) bool {
+	return !IsTerminalTicketStatus(status)
+}
+
+func TicketStatusLabel(status string, outcome string) string {
+	switch status {
+	case TicketStatusSubmitted:
+		return "已提交"
+	case TicketStatusWaitingHuman:
+		return "待人工处理"
+	case TicketStatusApprovedDecisioning:
+		return "已同意，决策中"
+	case TicketStatusRejectedDecisioning:
+		return "已驳回，决策中"
+	case TicketStatusDecisioning:
+		return "AI 决策中"
+	case TicketStatusExecutingAction:
+		return "自动执行中"
+	case TicketStatusCompleted:
+		if outcome == TicketOutcomeFulfilled {
+			return "已履约"
+		}
+		return "已通过"
+	case TicketStatusRejected:
+		return "已驳回"
+	case TicketStatusWithdrawn:
+		return "已撤回"
+	case TicketStatusCancelled:
+		return "已取消"
+	case TicketStatusFailed:
+		return "失败"
+	default:
+		return status
+	}
+}
+
+func TicketStatusTone(status string, outcome string) string {
+	switch status {
+	case TicketStatusCompleted:
+		return "success"
+	case TicketStatusRejected, TicketStatusCancelled, TicketStatusFailed:
+		return "destructive"
+	case TicketStatusWithdrawn:
+		return "secondary"
+	case TicketStatusApprovedDecisioning, TicketStatusRejectedDecisioning, TicketStatusDecisioning, TicketStatusExecutingAction:
+		return "progress"
+	case TicketStatusWaitingHuman:
+		return "warning"
+	default:
+		return "secondary"
+	}
 }
 
 // TicketActivity 工单活动（工作流步骤）

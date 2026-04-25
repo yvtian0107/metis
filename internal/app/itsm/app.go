@@ -197,6 +197,7 @@ func (a *ITSMApp) Providers(i do.Injector) {
 		configProvider := do.MustInvoke[*config.EngineConfigService](i)
 
 		se := engine.NewSmartEngine(decisionExecutor, knowledgeSearcher, userProvider, resolver, submitter, configProvider)
+		se.SetDB(db.DB)
 		se.SetActionExecutor(engine.NewActionExecutor(db.DB))
 		return se, nil
 	})

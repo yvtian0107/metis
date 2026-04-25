@@ -294,9 +294,14 @@ func TestServiceDeskSubmitDraftReturnsBeforeSubmittedSurfacePersistence(t *testi
 		t.Fatal("expected submitted surface persistence to run in background")
 	}
 
-	var task model.TaskExecution
-	if err := db.Where("task_name = ?", "itsm-smart-progress").First(&task).Error; err != nil {
-		t.Fatalf("expected smart progress task to be queued without blocking submit response: %v", err)
+	var created struct {
+		Status string
+	}
+	if err := db.Table("itsm_tickets").Where("code = ?", resp.Data.TicketCode).Select("status").First(&created).Error; err != nil {
+		t.Fatalf("load created ticket: %v", err)
+	}
+	if created.Status != engine.TicketStatusDecisioning {
+		t.Fatalf("expected smart ticket to enter decisioning without scheduler task, got %q", created.Status)
 	}
 }
 
