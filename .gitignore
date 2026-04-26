@@ -43,3 +43,7 @@ sidecar
 !cmd/server
 !cmd/sidecar
 !internal/sidecar
+!internal/**
+*.db
+*.db-shm
+*.db-wal
