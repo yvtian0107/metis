@@ -152,4 +152,6 @@ condition 字段说明：
 2. 每条从 start 到 end 的路径必须连通，不能有孤立节点
 3. 开始节点有且仅有一条出边，无入边
 4. 结束节点无出边
-5. 仅输出 JSON，不要包含任何解释文字或 markdown 标记`
+5. edge.data.outcome、edge.data.condition.field、edge.data.condition.value 必须使用稳定机器值（snake_case / 英文枚举），不要输出面向展示层的自然语言
+6. 节点 data.label 可以使用自然语言，但边的展示文案由前端基于结构值本地化生成，不要在边上发明额外自由文本字段
+7. 仅输出 JSON，不要包含任何解释文字或 markdown 标记`

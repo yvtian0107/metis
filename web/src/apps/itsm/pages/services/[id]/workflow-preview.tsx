@@ -4,22 +4,25 @@ import { useState, useMemo, useCallback, useEffect } from "react"
 import { useTranslation } from "react-i18next"
 import {
   ReactFlow, Background, Controls, MiniMap,
-  type Node, MarkerType, type ReactFlowInstance,
+  type Node, type Edge, MarkerType, type ReactFlowInstance, useNodesState, useEdgesState,
 } from "@xyflow/react"
 import "@xyflow/react/dist/style.css"
 import { X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
+import { FormRenderer, type FormSchema, type FormField, type FieldOption } from "../../../components/form-engine"
 import { nodeTypes } from "../../../components/workflow/nodes"
 import { edgeTypes } from "../../../components/workflow/custom-edges"
 import { applyDagreLayout } from "../../../components/workflow/auto-layout"
 import { getNodeAccent } from "../../../components/workflow/visual-data"
 import { WorkflowNodeIconGlyph } from "../../../components/workflow/visual"
-import { type WFNodeData, type NodeType, type Participant, type WFEdgeData } from "../../../components/workflow/types"
+import { type WFNodeData, type NodeType, type Participant } from "../../../components/workflow/types"
 import "../../../components/workflow/style.css"
 
 interface WorkflowPreviewProps {
   workflowJson: unknown
+  onWorkflowLayoutChange?: (workflowJson: unknown) => void
+  embedded?: boolean
   focusTarget?: {
     kind: "workflow_node" | "workflow_edge"
     refId: string
@@ -51,26 +54,91 @@ function participantTypeLabel(type: string, t: (k: string) => string): string {
   return map[type] ?? type
 }
 
-/** Parse formSchema fields for display */
-function parsePreviewFields(schema: unknown): Array<{ key: string; type: string; label: string; options?: string[] }> {
-  if (!schema || typeof schema !== "object") return []
-  const s = schema as { fields?: Array<{ key: string; type: string; label: string; options?: string[] }> }
-  return Array.isArray(s.fields) ? s.fields : []
+/** Parse and normalize form schema for readonly preview */
+function parsePreviewSchema(schema: unknown): FormSchema | null {
+  if (!schema || typeof schema !== "object") return null
+  const rawSchema = schema as { version?: number; fields?: unknown[] }
+  if (!Array.isArray(rawSchema.fields) || rawSchema.fields.length === 0) return null
+
+  const fields: FormField[] = rawSchema.fields.flatMap((rawField) => {
+    if (!rawField || typeof rawField !== "object") return []
+    const fieldObj = rawField as {
+      key?: unknown
+      type?: unknown
+      label?: unknown
+      placeholder?: unknown
+      description?: unknown
+      required?: unknown
+      options?: unknown
+    }
+    const key = typeof fieldObj.key === "string" ? fieldObj.key : ""
+    if (key === "") return []
+
+    const type = typeof fieldObj.type === "string" ? fieldObj.type : "text"
+    const label = typeof fieldObj.label === "string" && fieldObj.label.trim().length > 0 ? fieldObj.label : key
+    const placeholder = typeof fieldObj.placeholder === "string" ? fieldObj.placeholder : undefined
+    const description = typeof fieldObj.description === "string" ? fieldObj.description : undefined
+    const required = typeof fieldObj.required === "boolean" ? fieldObj.required : false
+
+    const options: FieldOption[] | undefined = Array.isArray(fieldObj.options)
+      ? fieldObj.options.flatMap((opt) => {
+        if (typeof opt === "string" || typeof opt === "number" || typeof opt === "boolean") {
+          return [{ label: String(opt), value: opt }]
+        }
+        if (opt && typeof opt === "object") {
+          const optionObj = opt as { label?: unknown; value?: unknown }
+          const value = optionObj.value
+          if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+            const optionLabel = typeof optionObj.label === "string" && optionObj.label.trim().length > 0
+              ? optionObj.label
+              : String(value)
+            return [{ label: optionLabel, value }]
+          }
+        }
+        return []
+      })
+      : undefined
+
+    return [{
+      key,
+      type: type as FormField["type"],
+      label,
+      placeholder,
+      description,
+      required,
+      options,
+    }]
+  })
+
+  if (fields.length === 0) return null
+  return {
+    version: typeof rawSchema.version === "number" ? rawSchema.version : 1,
+    fields,
+  }
 }
 
-export default function WorkflowPreview({ workflowJson, focusTarget }: WorkflowPreviewProps) {
+function hasValidPosition(node: Node): boolean {
+  return Number.isFinite(node.position?.x) && Number.isFinite(node.position?.y)
+}
+
+export default function WorkflowPreview({
+  workflowJson,
+  onWorkflowLayoutChange,
+  embedded = false,
+  focusTarget,
+}: WorkflowPreviewProps) {
   const { t } = useTranslation("itsm")
   const [manualSelectedNode, setManualSelectedNode] = useState<{ id: string; data: WFNodeData } | null>(null)
   const [flowInstance, setFlowInstance] = useState<ReactFlowInstance | null>(null)
 
-  const { nodes, edges } = useMemo(() => {
-    if (!workflowJson) return { nodes: [], edges: [] }
+  const { initialNodes, initialEdges } = useMemo<{ initialNodes: Node[]; initialEdges: Edge[] }>(() => {
+    if (!workflowJson) return { initialNodes: [], initialEdges: [] }
 
     let wf: { nodes?: unknown[]; edges?: unknown[] }
     try {
       wf = typeof workflowJson === "string" ? JSON.parse(workflowJson) : workflowJson
     } catch {
-      return { nodes: [], edges: [] }
+      return { initialNodes: [], initialEdges: [] }
     }
 
     const rawNodes = (wf.nodes ?? []) as Array<{
@@ -93,22 +161,33 @@ export default function WorkflowPreview({ workflowJson, focusTarget }: WorkflowP
         data: { ...rawData, nodeType } as unknown as WFNodeData,
         selected: n.id === focusedNodeID,
         selectable: true as const,
-        draggable: false as const,
       }
     }) as unknown as Node[]
 
-    const edges = rawEdges.map((e) => ({
+    const edges: Edge[] = rawEdges.map((e) => ({
       id: e.id,
       source: e.source,
       target: e.target,
       type: "workflow",
       selected: e.id === focusedEdgeID,
       markerEnd: { type: MarkerType.ArrowClosed },
-      data: { ...e.data, readonly: true } satisfies WFEdgeData,
+      data: { ...e.data, readonly: true } as Record<string, unknown>,
     }))
 
-    return { nodes: applyDagreLayout(nodes, edges), edges }
+    const allNodesHavePosition = nodes.length > 0 && nodes.every(hasValidPosition)
+    return {
+      initialNodes: allNodesHavePosition ? nodes : applyDagreLayout(nodes, edges),
+      initialEdges: edges,
+    }
   }, [workflowJson, focusTarget])
+
+  const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes)
+  const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges)
+
+  useEffect(() => {
+    setNodes(initialNodes)
+    setEdges(initialEdges)
+  }, [initialNodes, initialEdges, setNodes, setEdges])
 
   const selectedNode = useMemo(() => {
     if (focusTarget?.kind === "workflow_edge") {
@@ -157,18 +236,44 @@ export default function WorkflowPreview({ workflowJson, focusTarget }: WorkflowP
     setManualSelectedNode({ id: node.id, data: node.data as unknown as WFNodeData })
   }, [])
 
+  const onNodeDragStop = useCallback(() => {
+    if (!onWorkflowLayoutChange) return
+    const nextWorkflow = {
+      nodes: nodes.map((node) => ({
+        id: node.id,
+        type: typeof node.type === "string" ? node.type : undefined,
+        position: node.position,
+        data: node.data,
+      })),
+      edges: edges.map((edge) => ({
+        id: edge.id,
+        source: edge.source,
+        target: edge.target,
+        data: edge.data,
+      })),
+    }
+    onWorkflowLayoutChange(nextWorkflow)
+  }, [onWorkflowLayoutChange, nodes, edges])
+
   return (
-    <div className="flex min-h-[460px] gap-3 overflow-hidden rounded-2xl border border-border/55 bg-white/38">
+    <div
+      className={embedded
+        ? "flex min-h-[460px] gap-3 overflow-hidden rounded-[1.15rem] border border-border/55 bg-gradient-to-b from-white/78 to-white/58 shadow-[0_26px_56px_-46px_rgba(15,23,42,0.52)]"
+        : "flex min-h-[460px] gap-3 overflow-hidden rounded-2xl border border-border/55 bg-white/38"}
+    >
       <div className="min-w-0 flex-1 transition-all">
         <ReactFlow
           nodes={nodes}
           edges={edges}
+          onNodesChange={onNodesChange}
+          onEdgesChange={onEdgesChange}
           nodeTypes={nodeTypes}
           edgeTypes={edgeTypes}
-          nodesDraggable={false}
+          nodesDraggable
           nodesConnectable={false}
           elementsSelectable={true}
           onNodeClick={onNodeClick}
+          onNodeDragStop={onNodeDragStop}
           onPaneClick={() => setManualSelectedNode(null)}
           onInit={setFlowInstance}
           fitView
@@ -255,17 +360,15 @@ export default function WorkflowPreview({ workflowJson, focusTarget }: WorkflowP
             )}
 
             {selectedNode.data.formSchema != null && (() => {
-              const fields = parsePreviewFields(selectedNode.data.formSchema)
-              return fields.length > 0 ? (
+              const previewSchema = parsePreviewSchema(selectedNode.data.formSchema)
+              return previewSchema != null ? (
                 <div>
-                  <span className="text-muted-foreground">{t("workflow.prop.formFields")} ({fields.length}):</span>
-                  <div className="mt-1 rounded border p-1.5 space-y-0.5">
-                    {fields.map((f) => (
-                      <div key={f.key} className="flex items-center justify-between text-xs">
-                        <span>{f.label || f.key}</span>
-                        <span className="text-muted-foreground">{f.type}{f.options ? ` (${f.options.length})` : ""}</span>
-                      </div>
-                    ))}
+                  <span className="text-muted-foreground">{t("workflow.prop.formFields")} ({previewSchema.fields.length}):</span>
+                  <div className="mt-2 max-h-[320px] overflow-auto rounded-xl border border-border/70 bg-muted/20 p-3">
+                    <FormRenderer
+                      schema={previewSchema}
+                      mode="create"
+                    />
                   </div>
                 </div>
               ) : (

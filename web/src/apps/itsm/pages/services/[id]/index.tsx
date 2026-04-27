@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, lazy, Suspense, type ReactNode } from "react"
+import { useState, useEffect, useCallback, lazy, Suspense, type ReactNode } from "react"
 import { useParams, useNavigate } from "react-router"
 import { useTranslation } from "react-i18next"
 import { useForm, useWatch } from "react-hook-form"
@@ -453,7 +453,7 @@ function ServiceHealthSection({
   const isLoading = isGenerating || refreshMut.isPending
 
   return (
-    <section className="flex min-h-full flex-col">
+    <section className="flex min-h-[500px] flex-col">
       <SectionHeader
         title={(
           <span className="inline-flex items-center gap-2">
@@ -462,12 +462,17 @@ function ServiceHealthSection({
           </span>
         )}
         action={(
-          <div className="inline-flex items-center gap-2">
-            <Badge variant={overall.badge}>{healthStatusText(displayStatus)}</Badge>
+          <div className="inline-flex h-9 items-center rounded-full border border-border/60 bg-gradient-to-r from-white/86 to-white/72 p-1 shadow-[0_14px_32px_-24px_rgba(15,23,42,0.62)]">
+            <span className="inline-flex items-center gap-1.5 rounded-full px-3 text-xs font-medium text-foreground/82">
+              <OverallIcon className={cn("h-3.5 w-3.5", overall.iconClassName)} />
+              {healthStatusText(displayStatus)}
+            </span>
+            <span className="mx-1.5 h-4 w-px bg-border/70" aria-hidden />
             <Button
               type="button"
-              variant="outline"
+              variant="ghost"
               size="sm"
+              className="h-7 rounded-full px-3 text-xs"
               disabled={isLoading}
               onClick={() => refreshMut.mutate()}
             >
@@ -481,7 +486,7 @@ function ServiceHealthSection({
           </div>
         )}
       />
-      <div className="workspace-surface flex min-h-0 flex-1 flex-col overflow-hidden rounded-[1.1rem]">
+      <div className="workspace-surface flex min-h-[460px] flex-1 flex-col overflow-hidden rounded-[1.1rem]">
         {isLoading ? (
           <div className="flex min-h-[260px] flex-1 items-center justify-center px-4 py-5">
             <div className="inline-flex items-center gap-2 text-sm text-muted-foreground">
@@ -610,20 +615,20 @@ function BasicInfoForm({ service, catalogs, slaTemplates }: {
   return (
     <Form {...form}>
       <form onSubmit={form.handleSubmit((v) => updateMut.mutate(v))} className="space-y-4">
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-[minmax(240px,1.25fr)_minmax(240px,1.15fr)_220px_190px_150px]">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-12">
           <FormField control={form.control} name="name" render={({ field }) => (
-            <FormItem>
+            <FormItem className="xl:col-span-3">
               <FormLabel>{t("itsm:services.name")}</FormLabel>
               <FormControl><Input placeholder={t("itsm:services.namePlaceholder")} {...field} /></FormControl>
               <FormMessage />
             </FormItem>
           )} />
-          <div className="space-y-1.5">
+          <div className="space-y-1.5 xl:col-span-2">
             <label className="text-sm font-medium">{t("itsm:services.code")}</label>
             <Input value={service.code} disabled />
           </div>
           <FormField control={form.control} name="catalogId" render={({ field }) => (
-            <FormItem>
+            <FormItem className="xl:col-span-3">
               <FormLabel>{t("itsm:services.catalog")}</FormLabel>
               <Select onValueChange={(v) => field.onChange(Number(v))} value={String(field.value)}>
                 <FormControl><SelectTrigger className="w-full"><SelectValue placeholder={t("itsm:services.catalogPlaceholder")} /></SelectTrigger></FormControl>
@@ -646,7 +651,7 @@ function BasicInfoForm({ service, catalogs, slaTemplates }: {
             </FormItem>
           )} />
           <FormField control={form.control} name="slaId" render={({ field }) => (
-            <FormItem>
+            <FormItem className="xl:col-span-2">
               <FormLabel>{t("itsm:services.sla")}</FormLabel>
               <Select onValueChange={(v) => field.onChange(v === "0" ? null : Number(v))} value={String(field.value ?? 0)}>
                 <FormControl><SelectTrigger className="w-full"><SelectValue placeholder={t("itsm:services.slaPlaceholder")} /></SelectTrigger></FormControl>
@@ -661,7 +666,7 @@ function BasicInfoForm({ service, catalogs, slaTemplates }: {
             </FormItem>
           )} />
           <FormField control={form.control} name="isActive" render={({ field }) => (
-            <FormItem>
+            <FormItem className="xl:col-span-2">
               <FormLabel>{t("itsm:services.status")}</FormLabel>
               <div className="flex h-9 items-center justify-between gap-2 rounded-md border border-border/70 bg-background/42 px-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.62)]">
                 <Switch checked={field.value} onCheckedChange={field.onChange} />
@@ -783,24 +788,29 @@ function SectionHeader({ title, action }: {
   action?: ReactNode
 }) {
   return (
-    <div className="mb-3 flex items-center justify-between gap-3">
+    <div className="mb-3 flex min-h-10 items-center justify-between gap-3">
       <h3 className="text-sm font-semibold text-foreground/82">{title}</h3>
       {action}
     </div>
   )
 }
 
-function SectionFrame({ title, action, children }: {
+function SectionFrame({ title, action, children, noSurface = false }: {
   title: ReactNode
   action?: ReactNode
   children: ReactNode
+  noSurface?: boolean
 }) {
   return (
     <section>
       <SectionHeader title={title} action={action} />
-      <div className="workspace-surface rounded-[1.25rem] p-5">
-        {children}
-      </div>
+      {noSurface ? (
+        children
+      ) : (
+        <div className="workspace-surface rounded-[1.25rem] p-5">
+          {children}
+        </div>
+      )}
     </section>
   )
 }
@@ -811,7 +821,9 @@ export function Component() {
   const { t } = useTranslation(["itsm", "common"])
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
+  const queryClient = useQueryClient()
   const serviceId = Number(id)
+  const canUpdate = usePermission("itsm:service:update")
   const [workflowFocus, setWorkflowFocus] = useState<{
     kind: "workflow_node" | "workflow_edge"
     refId: string
@@ -835,6 +847,28 @@ export function Component() {
   })
   const isGeneratingWorkflow = useIsMutating({ mutationKey: [...GENERATE_WORKFLOW_MUTATION_KEY, serviceId] }) > 0
 
+  const persistWorkflowLayoutMut = useMutation({
+    mutationFn: (workflowJson: unknown) => updateServiceDef(serviceId, { workflowJson } as Partial<ServiceDefItem>),
+    onMutate: async (workflowJson) => {
+      const queryKey = ["itsm-service", serviceId] as const
+      await queryClient.cancelQueries({ queryKey })
+      const prev = queryClient.getQueryData<ServiceDefItem>(queryKey)
+      if (prev) {
+        queryClient.setQueryData<ServiceDefItem>(queryKey, { ...prev, workflowJson })
+      }
+      return { prev }
+    },
+    onError: (err, _vars, ctx) => {
+      if (ctx?.prev) {
+        queryClient.setQueryData(["itsm-service", serviceId], ctx.prev)
+      }
+      toast.error(err.message)
+    },
+    onSuccess: (updated) => {
+      queryClient.setQueryData(["itsm-service", serviceId], updated)
+    },
+  })
+
   if (isLoading || catalogsLoading || slaLoading) {
     return <div className="flex h-96 items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
   }
@@ -853,8 +887,17 @@ export function Component() {
     )
   }
 
+  const handleWorkflowLayoutChange = useCallback((nextWorkflowJson: unknown) => {
+    if (!canUpdate) return
+    const current = JSON.stringify(service.workflowJson ?? null)
+    const next = JSON.stringify(nextWorkflowJson ?? null)
+    if (current === next) return
+    persistWorkflowLayoutMut.mutate(nextWorkflowJson)
+  }, [canUpdate, service.workflowJson, persistWorkflowLayoutMut])
+
   const workflowSection = (
     <SectionFrame
+      noSurface={service.engineType === "smart"}
       title={service.engineType === "smart" ? "参考路径/策略草图" : t("itsm:services.tabWorkflow")}
       action={service.engineType === "classic" && !!service.workflowJson ? (
         <Button variant="outline" size="sm" onClick={() => navigate(`/itsm/services/${serviceId}/workflow`)}>
@@ -882,7 +925,12 @@ export function Component() {
         </div>
       ) : (
         <Suspense fallback={<div className="flex h-80 items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>}>
-          <WorkflowPreview workflowJson={service.workflowJson} focusTarget={workflowFocus} />
+          <WorkflowPreview
+            workflowJson={service.workflowJson}
+            onWorkflowLayoutChange={handleWorkflowLayoutChange}
+            embedded
+            focusTarget={workflowFocus}
+          />
         </Suspense>
       )}
     </SectionFrame>
@@ -915,7 +963,7 @@ export function Component() {
       </SectionFrame>
 
       {service.engineType === "smart" ? (
-        <div className="grid items-stretch gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(320px,0.38fr)]">
+        <div className="grid items-stretch gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(280px,340px)]">
           <div className="min-w-0">{workflowSection}</div>
           <ServiceHealthSection
             serviceId={serviceId}

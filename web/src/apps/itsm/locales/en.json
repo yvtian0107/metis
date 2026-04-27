@@ -524,6 +524,36 @@
       "actionUnbound": "No action",
       "notifyUnset": "No channel"
     },
+    "edge": {
+      "rawLabel": "Raw",
+      "defaultPath": "Default path",
+      "valueSeparator": " / ",
+      "logic": {
+        "and": "and",
+        "or": "or"
+      },
+      "operator": {
+        "equals": "equals",
+        "not_equals": "not equals",
+        "contains_any": "in",
+        "gt": ">",
+        "lt": "<",
+        "gte": ">=",
+        "lte": "<=",
+        "is_empty": "is empty",
+        "is_not_empty": "is not empty"
+      },
+      "outcome": {
+        "submitted": "Submitted",
+        "completed": "Completed",
+        "approved": "Approved",
+        "rejected": "Rejected",
+        "success": "Success",
+        "failed": "Failed",
+        "timeout": "Timed out",
+        "cancelled": "Cancelled"
+      }
+    },
     "condition": {
       "add": "Add Condition",
       "addGroup": "Add Group"

@@ -247,6 +247,7 @@ func TestPathBuilderSystemPromptRequiresHumanNodeParticipants(t *testing.T) {
 		`type: "requester" | "user"`,
 		`"participants":[{"type":"position_department","department_code":"it","position_code":"network_admin"}]`,
 		`"position_code":"security_admin"`,
+		"edge.data.outcome、edge.data.condition.field、edge.data.condition.value 必须使用稳定机器值",
 	}
 	for _, snippet := range requiredSnippets {
 		if !strings.Contains(PathBuilderSystemPrompt, snippet) {

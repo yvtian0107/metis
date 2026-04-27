@@ -524,6 +524,36 @@
       "actionUnbound": "未绑定动作",
       "notifyUnset": "未设置通道"
     },
+    "edge": {
+      "rawLabel": "原始",
+      "defaultPath": "默认路径",
+      "valueSeparator": " / ",
+      "logic": {
+        "and": "且",
+        "or": "或"
+      },
+      "operator": {
+        "equals": "等于",
+        "not_equals": "不等于",
+        "contains_any": "属于",
+        "gt": "大于",
+        "lt": "小于",
+        "gte": "大于等于",
+        "lte": "小于等于",
+        "is_empty": "为空",
+        "is_not_empty": "非空"
+      },
+      "outcome": {
+        "submitted": "已提交",
+        "completed": "已完成",
+        "approved": "已通过",
+        "rejected": "已驳回",
+        "success": "成功",
+        "failed": "失败",
+        "timeout": "超时",
+        "cancelled": "已取消"
+      }
+    },
     "condition": {
       "add": "添加条件",
       "addGroup": "添加条件组"
