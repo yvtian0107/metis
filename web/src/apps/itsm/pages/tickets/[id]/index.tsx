@@ -474,10 +474,7 @@ function AIEvidencePanel({
       <div className="mt-4 space-y-5">
         {confidencePct != null && (
           <div className="space-y-2">
-            <div className="flex items-center justify-between text-xs text-muted-foreground">
-              <span>置信度边界</span>
-              <span>{confidencePct >= 80 ? "可自动推进" : confidencePct >= 50 ? "建议观察" : "需要人工确认"}</span>
-            </div>
+            <div className="text-xs text-muted-foreground">置信度</div>
             <Progress value={confidencePct} className="h-2" />
           </div>
         )}
