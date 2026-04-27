@@ -44,6 +44,13 @@ type ServiceDefService struct {
 	llmClientFactory workflowLLMClientFactory
 }
 
+type publishHealthValidationContext struct {
+	workflowNodeIDs   map[string]struct{}
+	workflowEdgeIDs   map[string]struct{}
+	actionRefs        map[string]struct{}
+	hasActionEvidence bool
+}
+
 func NewServiceDefService(i do.Injector) (*ServiceDefService, error) {
 	repo := do.MustInvoke[*ServiceDefRepo](i)
 	db := do.MustInvoke[*database.DB](i)
@@ -230,7 +237,7 @@ func (s *ServiceDefService) computePublishHealthCheckWithAI(ctx context.Context,
 		return nil, fmt.Errorf("发布健康检查客户端创建失败: %w", err)
 	}
 
-	payload, err := s.buildPublishHealthPayload(svc)
+	payload, validationCtx, err := s.buildPublishHealthPayload(svc)
 	if err != nil {
 		return nil, err
 	}
@@ -272,14 +279,14 @@ func (s *ServiceDefService) computePublishHealthCheckWithAI(ctx context.Context,
 	if err := json.Unmarshal(raw, &parsed); err != nil {
 		return nil, fmt.Errorf("发布健康检查输出格式无效: %w", err)
 	}
-	return normalizePublishHealthCheck(svc.ID, parsed.Status, parsed.Items), nil
+	return normalizePublishHealthCheck(svc.ID, parsed.Status, parsed.Items, validationCtx), nil
 }
 
-func (s *ServiceDefService) buildPublishHealthPayload(svc *ServiceDefinition) (map[string]any, error) {
+func (s *ServiceDefService) buildPublishHealthPayload(svc *ServiceDefinition) (map[string]any, publishHealthValidationContext, error) {
 	actions := make([]map[string]any, 0)
 	var actionRows []ServiceAction
 	if err := s.db.DB.Where("service_id = ? AND deleted_at IS NULL", svc.ID).Order("id asc").Find(&actionRows).Error; err != nil {
-		return nil, fmt.Errorf("读取服务动作失败: %w", err)
+		return nil, publishHealthValidationContext{}, fmt.Errorf("读取服务动作失败: %w", err)
 	}
 	for _, action := range actionRows {
 		actions = append(actions, map[string]any{
@@ -302,7 +309,7 @@ func (s *ServiceDefService) buildPublishHealthPayload(svc *ServiceDefinition) (m
 		workflow = map[string]any{}
 	}
 
-	return map[string]any{
+	payload := map[string]any{
 		"service": map[string]any{
 			"id":                svc.ID,
 			"name":              svc.Name,
@@ -320,19 +327,17 @@ func (s *ServiceDefService) buildPublishHealthPayload(svc *ServiceDefinition) (m
 			"auditLevel":       s.engineConfigSvc.AuditLevel(),
 		},
 		"actions": actions,
-	}, nil
+	}
+	return payload, buildPublishHealthValidationContext(svc, actionRows), nil
 }
 
-func normalizePublishHealthCheck(serviceID uint, status string, items []ServiceHealthItem) *ServiceHealthCheck {
+func normalizePublishHealthCheck(serviceID uint, status string, items []ServiceHealthItem, ctx publishHealthValidationContext) *ServiceHealthCheck {
 	normalizedItems := make([]ServiceHealthItem, 0, len(items))
 	maxLevel := healthLevel(normalizePublishHealthStatus(status))
 	for idx, item := range items {
 		itemStatus := normalizePublishHealthStatus(item.Status)
 		if itemStatus == "" {
 			itemStatus = "warn"
-		}
-		if itemLevel := healthLevel(itemStatus); itemLevel > maxLevel {
-			maxLevel = itemLevel
 		}
 		key := strings.TrimSpace(item.Key)
 		if key == "" {
@@ -346,22 +351,33 @@ func normalizePublishHealthCheck(serviceID uint, status string, items []ServiceH
 		if message == "" {
 			message = "请检查该项配置。"
 		}
+		recommendation := strings.TrimSpace(item.Recommendation)
+		evidence := strings.TrimSpace(item.Evidence)
+		location := ServiceHealthLocation{
+			Kind:  strings.ToLower(strings.TrimSpace(item.Location.Kind)),
+			Path:  strings.TrimSpace(item.Location.Path),
+			RefID: strings.TrimSpace(item.Location.RefID),
+		}
+		if !isValidHealthLocation(location, ctx) || recommendation == "" || evidence == "" {
+			continue
+		}
+		if itemLevel := healthLevel(itemStatus); itemLevel > maxLevel {
+			maxLevel = itemLevel
+		}
 		normalizedItems = append(normalizedItems, ServiceHealthItem{
-			Key:     key,
-			Label:   label,
-			Status:  itemStatus,
-			Message: message,
+			Key:            key,
+			Label:          label,
+			Status:         itemStatus,
+			Message:        message,
+			Location:       location,
+			Recommendation: recommendation,
+			Evidence:       evidence,
 		})
 	}
 
 	finalStatus := levelStatus(maxLevel)
 	if finalStatus != "pass" && len(normalizedItems) == 0 {
-		normalizedItems = []ServiceHealthItem{{
-			Key:     "health_summary",
-			Label:   "发布健康检查",
-			Status:  finalStatus,
-			Message: "发布健康检查返回了风险状态，但未提供详细项。",
-		}}
+		return newPublishHealthEngineFailureCheck(serviceID, "健康检查输出不合规，缺少可执行定位信息。")
 	}
 
 	return &ServiceHealthCheck{
@@ -383,8 +399,120 @@ func newPublishHealthEngineFailureCheck(serviceID uint, message string) *Service
 			Key:     "health_engine",
 			Label:   "发布健康检查引擎",
 			Status:  "fail",
-			Message: msg,
+			Message: "发布健康检查不可用，无法给出可执行诊断。",
+			Location: ServiceHealthLocation{
+				Kind: "runtime_config",
+				Path: "runtime.healthChecker",
+			},
+			Recommendation: "请检查发布健康检查引擎配置后重试。",
+			Evidence:       msg,
 		}},
+	}
+}
+
+func buildPublishHealthValidationContext(svc *ServiceDefinition, actions []ServiceAction) publishHealthValidationContext {
+	ctx := publishHealthValidationContext{
+		workflowNodeIDs: map[string]struct{}{},
+		workflowEdgeIDs: map[string]struct{}{},
+		actionRefs:      map[string]struct{}{},
+	}
+
+	for _, action := range actions {
+		ctx.actionRefs[fmt.Sprintf("%d", action.ID)] = struct{}{}
+		if code := strings.TrimSpace(action.Code); code != "" {
+			ctx.actionRefs[code] = struct{}{}
+		}
+	}
+
+	workflowHasActionNode := false
+	var parsed struct {
+		Nodes []struct {
+			ID   string         `json:"id"`
+			Type string         `json:"type"`
+			Data map[string]any `json:"data"`
+		} `json:"nodes"`
+		Edges []struct {
+			ID string `json:"id"`
+		} `json:"edges"`
+	}
+	if len(svc.WorkflowJSON) > 0 && json.Unmarshal([]byte(svc.WorkflowJSON), &parsed) == nil {
+		for _, node := range parsed.Nodes {
+			if id := strings.TrimSpace(node.ID); id != "" {
+				ctx.workflowNodeIDs[id] = struct{}{}
+			}
+			rawType := strings.ToLower(strings.TrimSpace(node.Type))
+			if rawType == "" && node.Data != nil {
+				if nodeType, ok := node.Data["nodeType"].(string); ok {
+					rawType = strings.ToLower(strings.TrimSpace(nodeType))
+				}
+			}
+			if rawType == "action" {
+				workflowHasActionNode = true
+			}
+		}
+		for _, edge := range parsed.Edges {
+			if id := strings.TrimSpace(edge.ID); id != "" {
+				ctx.workflowEdgeIDs[id] = struct{}{}
+			}
+		}
+	}
+
+	ctx.hasActionEvidence = workflowHasActionNode || collaborationSpecMentionsAction(svc.CollaborationSpec)
+	return ctx
+}
+
+func collaborationSpecMentionsAction(spec string) bool {
+	text := strings.ToLower(strings.TrimSpace(spec))
+	if text == "" {
+		return false
+	}
+	keywords := []string{
+		"自动化", "动作", "action", "webhook", "脚本", "script", "通知", "邮件", "短信", "调用接口", "api", "自动执行",
+	}
+	for _, keyword := range keywords {
+		if strings.Contains(text, keyword) {
+			return true
+		}
+	}
+	return false
+}
+
+func isValidHealthLocation(loc ServiceHealthLocation, ctx publishHealthValidationContext) bool {
+	if loc.Kind == "" || loc.Path == "" {
+		return false
+	}
+
+	switch loc.Kind {
+	case "collaboration_spec":
+		return loc.Path == "service.collaborationSpec"
+	case "workflow_node":
+		if loc.RefID == "" {
+			return false
+		}
+		if _, ok := ctx.workflowNodeIDs[loc.RefID]; !ok {
+			return false
+		}
+		return strings.HasPrefix(loc.Path, "service.workflowJson.nodes")
+	case "workflow_edge":
+		if loc.RefID == "" {
+			return false
+		}
+		if _, ok := ctx.workflowEdgeIDs[loc.RefID]; !ok {
+			return false
+		}
+		return strings.HasPrefix(loc.Path, "service.workflowJson.edges")
+	case "action":
+		if !ctx.hasActionEvidence || loc.RefID == "" {
+			return false
+		}
+		if _, ok := ctx.actionRefs[loc.RefID]; !ok {
+			return false
+		}
+		return strings.HasPrefix(loc.Path, "actions")
+	case "runtime_config":
+		return strings.HasPrefix(loc.Path, "runtime.")
+	default:
+		return false
 	}
 }
 

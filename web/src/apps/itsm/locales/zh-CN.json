@@ -691,7 +691,11 @@
   "publishHealth": {
     "refresh": "刷新检查",
     "refreshing": "检查中...",
-    "refreshSuccess": "发布健康检查已刷新"
+    "refreshSuccess": "发布健康检查已刷新",
+    "location": "定位",
+    "recommendation": "建议修复",
+    "evidence": "依据",
+    "locate": "定位到流程图"
   },
   "knowledge": {
     "title": "知识文档",

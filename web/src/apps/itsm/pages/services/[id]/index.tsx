@@ -410,7 +410,31 @@ function healthItemStatusText(status: ServiceHealthItem["status"]) {
   return "需确认"
 }
 
-function ServiceHealthSection({ serviceId, health, isGenerating }: { serviceId: number; health: ServiceHealthCheck | null; isGenerating: boolean }) {
+function healthLocationKindText(kind: ServiceHealthItem["location"]["kind"]) {
+  if (kind === "collaboration_spec") return "协作规范"
+  if (kind === "workflow_node") return "流程节点"
+  if (kind === "workflow_edge") return "流程连线"
+  if (kind === "action") return "服务动作"
+  return "运行配置"
+}
+
+function canLocateWorkflow(item: ServiceHealthItem) {
+  return (item.location.kind === "workflow_node" || item.location.kind === "workflow_edge") && !!item.location.refId
+}
+
+function ServiceHealthSection({
+  serviceId,
+  health,
+  isGenerating,
+  canLocateInWorkflow,
+  onLocateInWorkflow,
+}: {
+  serviceId: number
+  health: ServiceHealthCheck | null
+  isGenerating: boolean
+  canLocateInWorkflow: boolean
+  onLocateInWorkflow: (item: ServiceHealthItem) => void
+}) {
   const { t } = useTranslation("itsm")
   const queryClient = useQueryClient()
   const refreshMut = useMutation({
@@ -486,13 +510,41 @@ function ServiceHealthSection({ serviceId, health, isGenerating }: { serviceId: 
           {(health?.items ?? []).map((item) => {
             const tone = healthTone(item.status)
             const Icon = tone.icon
+            const location = item.location ?? { kind: "runtime_config", path: "" }
             return (
-              <div key={item.key} className="flex flex-wrap items-start gap-3 px-5 py-3.5">
+              <div key={item.key} className="flex flex-wrap items-start gap-3 px-5 py-4">
                 <Icon className={cn("mt-0.5 h-4 w-4", tone.iconClassName)} />
                 <div className="min-w-0 flex-1">
                   <p className="text-sm font-medium">{item.label}</p>
-                  <p className="text-sm text-muted-foreground">{item.message}</p>
+                  <p className="mt-1 text-sm text-muted-foreground">{item.message}</p>
+                  <div className="mt-2.5 grid gap-1.5 text-xs text-muted-foreground">
+                    <p>
+                      <span className="font-medium text-foreground/80">{t("publishHealth.location")}：</span>
+                      {healthLocationKindText(location.kind)}
+                      {location.refId ? ` · ${location.refId}` : ""}
+                      {location.path ? ` · ${location.path}` : ""}
+                    </p>
+                    <p>
+                      <span className="font-medium text-foreground/80">{t("publishHealth.recommendation")}：</span>
+                      {item.recommendation || "请根据检查结论调整相关配置。"}
+                    </p>
+                    <p>
+                      <span className="font-medium text-foreground/80">{t("publishHealth.evidence")}：</span>
+                      {item.evidence || "未提供"}
+                    </p>
+                  </div>
                 </div>
+                {canLocateInWorkflow && canLocateWorkflow({ ...item, location }) && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-7 px-2.5 text-xs"
+                    onClick={() => onLocateInWorkflow(item)}
+                  >
+                    {t("publishHealth.locate")}
+                  </Button>
+                )}
                 <Badge variant={tone.badge}>{healthItemStatusText(item.status)}</Badge>
               </div>
             )
@@ -760,6 +812,11 @@ export function Component() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const serviceId = Number(id)
+  const [workflowFocus, setWorkflowFocus] = useState<{
+    kind: "workflow_node" | "workflow_edge"
+    refId: string
+    seq: number
+  } | null>(null)
 
   const { data: service, isLoading } = useQuery({
     queryKey: ["itsm-service", serviceId],
@@ -825,7 +882,7 @@ export function Component() {
         </div>
       ) : (
         <Suspense fallback={<div className="flex h-80 items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>}>
-          <WorkflowPreview workflowJson={service.workflowJson} />
+          <WorkflowPreview workflowJson={service.workflowJson} focusTarget={workflowFocus} />
         </Suspense>
       )}
     </SectionFrame>
@@ -860,7 +917,26 @@ export function Component() {
       {service.engineType === "smart" ? (
         <div className="grid items-stretch gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(320px,0.38fr)]">
           <div className="min-w-0">{workflowSection}</div>
-          <ServiceHealthSection serviceId={serviceId} health={service.publishHealthCheck} isGenerating={isGeneratingWorkflow} />
+          <ServiceHealthSection
+            serviceId={serviceId}
+            health={service.publishHealthCheck}
+            isGenerating={isGeneratingWorkflow}
+            canLocateInWorkflow={!!service.workflowJson}
+            onLocateInWorkflow={(item) => {
+              const location = item.location
+              if (!location.refId) {
+                return
+              }
+              if (location.kind !== "workflow_node" && location.kind !== "workflow_edge") {
+                return
+              }
+              setWorkflowFocus({
+                kind: location.kind,
+                refId: location.refId,
+                seq: Date.now(),
+              })
+            }}
+          />
         </div>
       ) : (
         <>

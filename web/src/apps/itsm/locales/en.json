@@ -691,7 +691,11 @@
   "publishHealth": {
     "refresh": "Refresh Check",
     "refreshing": "Checking...",
-    "refreshSuccess": "Publish health check refreshed"
+    "refreshSuccess": "Publish health check refreshed",
+    "location": "Location",
+    "recommendation": "Recommended Fix",
+    "evidence": "Evidence",
+    "locate": "Locate in Workflow"
   },
   "knowledge": {
     "title": "Knowledge Documents",

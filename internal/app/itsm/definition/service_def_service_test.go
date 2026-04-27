@@ -230,7 +230,7 @@ func TestServiceDefServiceRefreshPublishHealthCheck_SavesAISnapshot(t *testing.T
 	svc.llmClientFactory = func(string, string, string) (llm.Client, error) {
 		return fakePublishHealthLLMClient{
 			resp: &llm.ChatResponse{
-				Content: `{"status":"warn","items":[{"key":"spec","label":"协作规范","status":"warn","message":"协作规范中缺少升级路径"}]}`,
+				Content: `{"status":"warn","items":[{"key":"spec","label":"协作规范","status":"warn","message":"协作规范中缺少升级路径","location":{"kind":"collaboration_spec","path":"service.collaborationSpec"},"recommendation":"在协作规范补充升级处理路径。","evidence":"当前协作规范未定义升级处理规则。"}]}`,
 			},
 		}, nil
 	}
@@ -348,7 +348,7 @@ func TestServiceDefServiceHealthCheck_RefreshesLatestSnapshot(t *testing.T) {
 	svc.llmClientFactory = func(string, string, string) (llm.Client, error) {
 		return fakePublishHealthLLMClient{
 			resp: &llm.ChatResponse{
-				Content: `{"status":"fail","items":[{"key":"workflow","label":"参考路径","status":"fail","message":"存在阻塞节点"}]}`,
+				Content: `{"status":"fail","items":[{"key":"workflow","label":"参考路径","status":"fail","message":"存在阻塞节点","location":{"kind":"runtime_config","path":"runtime.decisionMode"},"recommendation":"修复阻塞节点后重新检查。","evidence":"流程验证存在阻塞风险。"}]}`,
 			},
 		}, nil
 	}
@@ -362,6 +362,153 @@ func TestServiceDefServiceHealthCheck_RefreshesLatestSnapshot(t *testing.T) {
 	}
 	if latest.CheckedAt == nil || !latest.CheckedAt.After(firstCheckedAt) {
 		t.Fatalf("expected checkedAt to be refreshed, first=%s latest=%v", firstCheckedAt, latest.CheckedAt)
+	}
+}
+
+func TestServiceDefServiceRefreshPublishHealthCheck_FiltersIncompleteItems(t *testing.T) {
+	db := newTestDB(t)
+	svc := newServiceDefServiceForTest(t, db)
+	catSvc := newCatalogServiceForTest(t, db)
+
+	root, _ := catSvc.Create("Root", "root", "", "", nil, 10)
+	service, err := svc.Create(&ServiceDefinition{
+		Name:              "Smart",
+		Code:              "smart-health-incomplete-item",
+		CatalogID:         root.ID,
+		EngineType:        "smart",
+		CollaborationSpec: "申请后由主管审批",
+		WorkflowJSON:      JSONField(`{"nodes":[{"id":"start","type":"start","data":{"label":"开始"}}],"edges":[]}`),
+	})
+	if err != nil {
+		t.Fatalf("create service: %v", err)
+	}
+
+	svc.engineConfigSvc = fakePublishHealthConfigProvider{cfg: LLMEngineRuntimeConfig{
+		Model:          "gpt-test",
+		Protocol:       llm.ProtocolOpenAI,
+		BaseURL:        "https://example.test/v1",
+		APIKey:         "test-key",
+		Temperature:    0.2,
+		MaxTokens:      1024,
+		MaxRetries:     1,
+		TimeoutSeconds: 45,
+		SystemPrompt:   "health prompt",
+	}}
+	svc.llmClientFactory = func(string, string, string) (llm.Client, error) {
+		return fakePublishHealthLLMClient{
+			resp: &llm.ChatResponse{
+				Content: `{"status":"warn","items":[{"key":"spec","label":"协作规范","status":"warn","message":"缺少处理路径","location":{"kind":"collaboration_spec","path":"service.collaborationSpec"},"evidence":"协作规范没有说明驳回后的路径。"}]}`,
+			},
+		}, nil
+	}
+
+	check, err := svc.RefreshPublishHealthCheck(service.ID)
+	if err != nil {
+		t.Fatalf("refresh health check: %v", err)
+	}
+	if check.Status != "fail" {
+		t.Fatalf("expected fail status after filtering invalid items, got %+v", check)
+	}
+	if len(check.Items) != 1 || check.Items[0].Key != "health_engine" {
+		t.Fatalf("expected health_engine fail item, got %+v", check.Items)
+	}
+}
+
+func TestServiceDefServiceRefreshPublishHealthCheck_RejectsUnknownLocationPath(t *testing.T) {
+	db := newTestDB(t)
+	svc := newServiceDefServiceForTest(t, db)
+	catSvc := newCatalogServiceForTest(t, db)
+
+	root, _ := catSvc.Create("Root", "root", "", "", nil, 10)
+	service, err := svc.Create(&ServiceDefinition{
+		Name:              "Smart",
+		Code:              "smart-health-bad-location",
+		CatalogID:         root.ID,
+		EngineType:        "smart",
+		CollaborationSpec: "用户提交后由主管处理",
+		WorkflowJSON:      JSONField(`{"nodes":[{"id":"n1","type":"process","data":{"label":"处理"}}],"edges":[]}`),
+	})
+	if err != nil {
+		t.Fatalf("create service: %v", err)
+	}
+
+	svc.engineConfigSvc = fakePublishHealthConfigProvider{cfg: LLMEngineRuntimeConfig{
+		Model:          "gpt-test",
+		Protocol:       llm.ProtocolOpenAI,
+		BaseURL:        "https://example.test/v1",
+		APIKey:         "test-key",
+		Temperature:    0.2,
+		MaxTokens:      1024,
+		MaxRetries:     1,
+		TimeoutSeconds: 45,
+		SystemPrompt:   "health prompt",
+	}}
+	svc.llmClientFactory = func(string, string, string) (llm.Client, error) {
+		return fakePublishHealthLLMClient{
+			resp: &llm.ChatResponse{
+				Content: `{"status":"warn","items":[{"key":"workflow","label":"流程节点","status":"warn","message":"存在歧义","location":{"kind":"workflow_node","path":"service.unknown.nodes","refId":"n1"},"recommendation":"补充节点说明。","evidence":"节点描述不清。"}]}`,
+			},
+		}, nil
+	}
+
+	check, err := svc.RefreshPublishHealthCheck(service.ID)
+	if err != nil {
+		t.Fatalf("refresh health check: %v", err)
+	}
+	if check.Status != "fail" {
+		t.Fatalf("expected fail status after filtering unmapped location, got %+v", check)
+	}
+	if len(check.Items) != 1 || check.Items[0].Key != "health_engine" {
+		t.Fatalf("expected health_engine fail item, got %+v", check.Items)
+	}
+}
+
+func TestServiceDefServiceRefreshPublishHealthCheck_ActionIssuesNeedEvidence(t *testing.T) {
+	db := newTestDB(t)
+	svc := newServiceDefServiceForTest(t, db)
+	catSvc := newCatalogServiceForTest(t, db)
+
+	root, _ := catSvc.Create("Root", "root", "", "", nil, 10)
+	service, err := svc.Create(&ServiceDefinition{
+		Name:              "Smart",
+		Code:              "smart-health-action-evidence",
+		CatalogID:         root.ID,
+		EngineType:        "smart",
+		CollaborationSpec: "用户提交后由审批岗处理并结束。",
+		WorkflowJSON:      JSONField(`{"nodes":[{"id":"start","type":"start","data":{"label":"开始"}},{"id":"end","type":"end","data":{"label":"结束"}}],"edges":[{"id":"e1","source":"start","target":"end","data":{}}]}`),
+	})
+	if err != nil {
+		t.Fatalf("create service: %v", err)
+	}
+
+	svc.engineConfigSvc = fakePublishHealthConfigProvider{cfg: LLMEngineRuntimeConfig{
+		Model:          "gpt-test",
+		Protocol:       llm.ProtocolOpenAI,
+		BaseURL:        "https://example.test/v1",
+		APIKey:         "test-key",
+		Temperature:    0.2,
+		MaxTokens:      1024,
+		MaxRetries:     1,
+		TimeoutSeconds: 45,
+		SystemPrompt:   "health prompt",
+	}}
+	svc.llmClientFactory = func(string, string, string) (llm.Client, error) {
+		return fakePublishHealthLLMClient{
+			resp: &llm.ChatResponse{
+				Content: `{"status":"warn","items":[{"key":"action_missing","label":"动作缺失","status":"warn","message":"缺少动作","location":{"kind":"action","path":"actions[id=deploy]","refId":"deploy"},"recommendation":"补充动作配置。","evidence":"流程需要自动化动作。"}]}`,
+			},
+		}, nil
+	}
+
+	check, err := svc.RefreshPublishHealthCheck(service.ID)
+	if err != nil {
+		t.Fatalf("refresh health check: %v", err)
+	}
+	if check.Status != "fail" {
+		t.Fatalf("expected fail status after filtering action issue without evidence, got %+v", check)
+	}
+	if len(check.Items) != 1 || check.Items[0].Key != "health_engine" {
+		t.Fatalf("expected health_engine fail item, got %+v", check.Items)
 	}
 }
 

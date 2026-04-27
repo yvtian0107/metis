@@ -138,7 +138,7 @@ func deriveTicketStatusOutcome(db *gorm.DB, ticket Ticket) (string, string) {
 		status = TicketStatusSubmitted
 	}
 	if isNewTicketStatus(status) {
-		return status, outcome
+		return normalizeNewTicketStatusOutcome(db, ticket.ID, status, outcome)
 	}
 
 	switch status {
@@ -162,6 +162,53 @@ func deriveTicketStatusOutcome(db *gorm.DB, ticket Ticket) (string, string) {
 			return TicketStatusCompleted, TicketOutcomeApproved
 		}
 		return TicketStatusCompleted, TicketOutcomeFulfilled
+	default:
+		return TicketStatusSubmitted, ""
+	}
+}
+
+func normalizeNewTicketStatusOutcome(db *gorm.DB, ticketID uint, status string, outcome string) (string, string) {
+	switch status {
+	case TicketStatusSubmitted, TicketStatusWaitingHuman, TicketStatusApprovedDecisioning, TicketStatusRejectedDecisioning, TicketStatusDecisioning, TicketStatusExecutingAction:
+		return status, ""
+	case TicketStatusCompleted:
+		if outcome == TicketOutcomeApproved || outcome == TicketOutcomeFulfilled {
+			return TicketStatusCompleted, outcome
+		}
+		if outcome == TicketOutcomeRejected {
+			return TicketStatusRejected, TicketOutcomeRejected
+		}
+		lastOutcome := lastHumanOutcome(db, ticketID)
+		if lastOutcome == TicketOutcomeRejected {
+			return TicketStatusRejected, TicketOutcomeRejected
+		}
+		if lastOutcome == TicketOutcomeApproved {
+			return TicketStatusCompleted, TicketOutcomeApproved
+		}
+		return TicketStatusCompleted, TicketOutcomeFulfilled
+	case TicketStatusRejected:
+		if outcome == "" {
+			outcome = TicketOutcomeRejected
+		}
+		return TicketStatusRejected, outcome
+	case TicketStatusWithdrawn:
+		if outcome == "" {
+			outcome = TicketOutcomeWithdrawn
+		}
+		return TicketStatusWithdrawn, outcome
+	case TicketStatusCancelled:
+		if outcome == TicketOutcomeWithdrawn || hasTimelineEvent(db, ticketID, "withdrawn") {
+			return TicketStatusWithdrawn, TicketOutcomeWithdrawn
+		}
+		if outcome == "" {
+			outcome = TicketOutcomeCancelled
+		}
+		return TicketStatusCancelled, outcome
+	case TicketStatusFailed:
+		if outcome == "" {
+			outcome = TicketOutcomeFailed
+		}
+		return TicketStatusFailed, outcome
 	default:
 		return TicketStatusSubmitted, ""
 	}
@@ -669,6 +716,7 @@ func seedPolicies(enforcer *casbin.Enforcer) error {
 		{"admin", "/api/v1/itsm/tickets/approvals/pending", "GET"},
 		{"admin", "/api/v1/itsm/tickets/approvals/history", "GET"},
 		{"admin", "/api/v1/itsm/tickets/monitor", "GET"},
+		{"admin", "/api/v1/itsm/tickets/decision-quality", "GET"},
 		{"admin", "/api/v1/itsm/tickets/:id", "GET"},
 		{"admin", "/api/v1/itsm/tickets/:id/assign", "PUT"},
 		{"admin", "/api/v1/itsm/tickets/:id/cancel", "PUT"},

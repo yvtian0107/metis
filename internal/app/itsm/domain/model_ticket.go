@@ -170,6 +170,27 @@ type TicketMonitorResponse struct {
 	Total   int64                `json:"total"`
 }
 
+const DecisionQualityMetricVersion = "2026-04-27.v1"
+
+type DecisionQualityItem struct {
+	DimensionType             string  `json:"dimensionType"`
+	DimensionID               uint    `json:"dimensionId"`
+	DimensionName             string  `json:"dimensionName"`
+	ApprovalRate              float64 `json:"approvalRate"`
+	RejectionRate             float64 `json:"rejectionRate"`
+	RetryRate                 float64 `json:"retryRate"`
+	AvgDecisionLatencySeconds float64 `json:"avgDecisionLatencySeconds"`
+	RecoverySuccessRate       float64 `json:"recoverySuccessRate"`
+	DecisionCount             int64   `json:"decisionCount"`
+}
+
+type DecisionQualityResponse struct {
+	Version     string                `json:"version"`
+	WindowDays  int                   `json:"windowDays"`
+	GeneratedAt time.Time             `json:"generatedAt"`
+	Items       []DecisionQualityItem `json:"items"`
+}
+
 func (t *Ticket) ToResponse() TicketResponse {
 	return TicketResponse{
 		ID:                    t.ID,

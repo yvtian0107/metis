@@ -134,10 +134,19 @@ type ServiceDefinitionResponse struct {
 }
 
 type ServiceHealthItem struct {
-	Key     string `json:"key"`
-	Label   string `json:"label"`
-	Status  string `json:"status"` // pass | warn | fail
-	Message string `json:"message"`
+	Key            string                `json:"key"`
+	Label          string                `json:"label"`
+	Status         string                `json:"status"` // pass | warn | fail
+	Message        string                `json:"message"`
+	Location       ServiceHealthLocation `json:"location"`
+	Recommendation string                `json:"recommendation"`
+	Evidence       string                `json:"evidence"`
+}
+
+type ServiceHealthLocation struct {
+	Kind  string `json:"kind"`            // collaboration_spec | workflow_node | workflow_edge | action | runtime_config
+	Path  string `json:"path"`            // context path in publish health payload
+	RefID string `json:"refId,omitempty"` // node/edge/action reference id
 }
 
 type ServiceHealthCheck struct {

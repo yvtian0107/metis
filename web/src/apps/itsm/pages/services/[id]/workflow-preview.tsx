@@ -1,10 +1,10 @@
 "use client"
 
-import { useState, useMemo, useCallback } from "react"
+import { useState, useMemo, useCallback, useEffect } from "react"
 import { useTranslation } from "react-i18next"
 import {
   ReactFlow, Background, Controls, MiniMap,
-  type Node, MarkerType,
+  type Node, MarkerType, type ReactFlowInstance,
 } from "@xyflow/react"
 import "@xyflow/react/dist/style.css"
 import { X } from "lucide-react"
@@ -20,6 +20,11 @@ import "../../../components/workflow/style.css"
 
 interface WorkflowPreviewProps {
   workflowJson: unknown
+  focusTarget?: {
+    kind: "workflow_node" | "workflow_edge"
+    refId: string
+    seq: number
+  } | null
 }
 
 /** Format a participant for display */
@@ -53,9 +58,10 @@ function parsePreviewFields(schema: unknown): Array<{ key: string; type: string;
   return Array.isArray(s.fields) ? s.fields : []
 }
 
-export default function WorkflowPreview({ workflowJson }: WorkflowPreviewProps) {
+export default function WorkflowPreview({ workflowJson, focusTarget }: WorkflowPreviewProps) {
   const { t } = useTranslation("itsm")
-  const [selectedNode, setSelectedNode] = useState<{ id: string; data: WFNodeData } | null>(null)
+  const [manualSelectedNode, setManualSelectedNode] = useState<{ id: string; data: WFNodeData } | null>(null)
+  const [flowInstance, setFlowInstance] = useState<ReactFlowInstance | null>(null)
 
   const { nodes, edges } = useMemo(() => {
     if (!workflowJson) return { nodes: [], edges: [] }
@@ -74,6 +80,9 @@ export default function WorkflowPreview({ workflowJson }: WorkflowPreviewProps) 
       id: string; source: string; target: string; data?: Record<string, unknown>
     }>
 
+    const focusedNodeID = focusTarget?.kind === "workflow_node" ? focusTarget.refId : ""
+    const focusedEdgeID = focusTarget?.kind === "workflow_edge" ? focusTarget.refId : ""
+
     const nodes = rawNodes.map((n) => {
       const rawData = (n.data ?? {}) as Record<string, unknown>
       const nodeType = (rawData.nodeType ?? n.type ?? "process") as NodeType
@@ -82,6 +91,7 @@ export default function WorkflowPreview({ workflowJson }: WorkflowPreviewProps) 
         type: nodeType,
         position: n.position,
         data: { ...rawData, nodeType } as unknown as WFNodeData,
+        selected: n.id === focusedNodeID,
         selectable: true as const,
         draggable: false as const,
       }
@@ -92,15 +102,59 @@ export default function WorkflowPreview({ workflowJson }: WorkflowPreviewProps) 
       source: e.source,
       target: e.target,
       type: "workflow",
+      selected: e.id === focusedEdgeID,
       markerEnd: { type: MarkerType.ArrowClosed },
       data: { ...e.data, readonly: true } satisfies WFEdgeData,
     }))
 
     return { nodes: applyDagreLayout(nodes, edges), edges }
-  }, [workflowJson])
+  }, [workflowJson, focusTarget])
+
+  const selectedNode = useMemo(() => {
+    if (focusTarget?.kind === "workflow_edge") {
+      return null
+    }
+    if (manualSelectedNode) {
+      return manualSelectedNode
+    }
+    if (focusTarget?.kind !== "workflow_node") {
+      return null
+    }
+    const focusedNode = nodes.find((node) => node.id === focusTarget.refId)
+    if (!focusedNode) {
+      return null
+    }
+    return { id: focusedNode.id, data: focusedNode.data as unknown as WFNodeData }
+  }, [focusTarget, manualSelectedNode, nodes])
+
+  useEffect(() => {
+    if (!focusTarget || !flowInstance) {
+      return
+    }
+
+    if (focusTarget.kind === "workflow_node") {
+      const focusedNode = nodes.find((node) => node.id === focusTarget.refId)
+      if (!focusedNode) {
+        return
+      }
+      void flowInstance.fitView({ nodes: [{ id: focusedNode.id }], duration: 260, padding: 0.35, maxZoom: 1.2 })
+      return
+    }
+
+    const focusedEdge = edges.find((edge) => edge.id === focusTarget.refId)
+    if (!focusedEdge) {
+      return
+    }
+    void flowInstance.fitView({
+      nodes: [{ id: focusedEdge.source }, { id: focusedEdge.target }],
+      duration: 260,
+      padding: 0.4,
+      maxZoom: 1.1,
+    })
+  }, [focusTarget, flowInstance, nodes, edges])
 
   const onNodeClick = useCallback((_: React.MouseEvent, node: Node) => {
-    setSelectedNode({ id: node.id, data: node.data as unknown as WFNodeData })
+    setManualSelectedNode({ id: node.id, data: node.data as unknown as WFNodeData })
   }, [])
 
   return (
@@ -115,7 +169,8 @@ export default function WorkflowPreview({ workflowJson }: WorkflowPreviewProps) 
           nodesConnectable={false}
           elementsSelectable={true}
           onNodeClick={onNodeClick}
-          onPaneClick={() => setSelectedNode(null)}
+          onPaneClick={() => setManualSelectedNode(null)}
+          onInit={setFlowInstance}
           fitView
           className="workflow-builder-flow"
         >
@@ -143,7 +198,7 @@ export default function WorkflowPreview({ workflowJson }: WorkflowPreviewProps) 
               </span>
               <h4 className="truncate text-sm font-semibold">{t("workflow.viewer.activityDetail")}</h4>
             </div>
-            <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setSelectedNode(null)}>
+            <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setManualSelectedNode(null)}>
               <X className="h-3.5 w-3.5" />
             </Button>
           </div>

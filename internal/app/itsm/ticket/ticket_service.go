@@ -1029,6 +1029,276 @@ func (s *TicketService) Monitor(params TicketMonitorParams, operatorID uint) (*T
 	return &TicketMonitorResponse{Summary: summary, Items: items, Total: total}, nil
 }
 
+type decisionQualityTicketDim struct {
+	TicketID      uint
+	Status        string
+	DimensionID   uint
+	DimensionName string
+}
+
+type decisionQualityAccumulator struct {
+	DimensionType      string
+	DimensionID        uint
+	DimensionName      string
+	ApprovedCount      int64
+	RejectedCount      int64
+	RetryCount         int64
+	LatencyTotalSecond float64
+	LatencyCount       int64
+	RecoveryAttempt    int64
+	RecoverySuccess    int64
+}
+
+func (s *TicketService) DecisionQuality(windowDays int, dimension string, serviceID *uint, departmentID *uint) (*DecisionQualityResponse, error) {
+	if windowDays <= 0 || windowDays > 180 {
+		windowDays = 30
+	}
+	dimension = strings.TrimSpace(strings.ToLower(dimension))
+	if dimension != "department" {
+		dimension = "service"
+	}
+
+	windowStart := time.Now().Add(-time.Duration(windowDays) * 24 * time.Hour)
+	tickets, err := s.loadDecisionQualityTicketDimensions(windowStart, dimension, serviceID, departmentID)
+	if err != nil {
+		return nil, err
+	}
+	if len(tickets) == 0 {
+		return &DecisionQualityResponse{
+			Version:     DecisionQualityMetricVersion,
+			WindowDays:  windowDays,
+			GeneratedAt: time.Now(),
+			Items:       []DecisionQualityItem{},
+		}, nil
+	}
+
+	ticketIDs := make([]uint, 0, len(tickets))
+	ticketToDim := make(map[uint]decisionQualityTicketDim, len(tickets))
+	for _, ticket := range tickets {
+		ticketIDs = append(ticketIDs, ticket.TicketID)
+		ticketToDim[ticket.TicketID] = ticket
+	}
+
+	accByDim := make(map[string]*decisionQualityAccumulator)
+	getAcc := func(dim decisionQualityTicketDim) *decisionQualityAccumulator {
+		key := fmt.Sprintf("%s:%d", dimension, dim.DimensionID)
+		if existing, ok := accByDim[key]; ok {
+			return existing
+		}
+		created := &decisionQualityAccumulator{
+			DimensionType: dimension,
+			DimensionID:   dim.DimensionID,
+			DimensionName: dim.DimensionName,
+		}
+		accByDim[key] = created
+		return created
+	}
+
+	var activityRows []struct {
+		TicketID          uint
+		TransitionOutcome string
+	}
+	if err := s.ticketRepo.DB().Model(&TicketActivity{}).
+		Where("ticket_id IN ?", ticketIDs).
+		Where("activity_type IN ?", []string{engine.NodeApprove, engine.NodeForm, engine.NodeProcess}).
+		Where("transition_outcome IN ?", []string{TicketOutcomeApproved, TicketOutcomeRejected}).
+		Where("finished_at >= ?", windowStart).
+		Select("ticket_id, transition_outcome").
+		Find(&activityRows).Error; err != nil {
+		return nil, err
+	}
+	for _, row := range activityRows {
+		dim, ok := ticketToDim[row.TicketID]
+		if !ok {
+			continue
+		}
+		acc := getAcc(dim)
+		switch row.TransitionOutcome {
+		case TicketOutcomeApproved:
+			acc.ApprovedCount++
+		case TicketOutcomeRejected:
+			acc.RejectedCount++
+		}
+	}
+
+	var timelineRows []TicketTimeline
+	if err := s.ticketRepo.DB().Model(&TicketTimeline{}).
+		Where("ticket_id IN ? AND created_at >= ?", ticketIDs, windowStart).
+		Order("ticket_id ASC, created_at ASC, id ASC").
+		Find(&timelineRows).Error; err != nil {
+		return nil, err
+	}
+
+	type ticketRuntimeStat struct {
+		LastTriggerAt *time.Time
+		HasRecovery   bool
+	}
+	runtimeByTicket := make(map[uint]*ticketRuntimeStat, len(ticketIDs))
+	for _, row := range timelineRows {
+		dim, ok := ticketToDim[row.TicketID]
+		if !ok {
+			continue
+		}
+		acc := getAcc(dim)
+		rt := runtimeByTicket[row.TicketID]
+		if rt == nil {
+			rt = &ticketRuntimeStat{}
+			runtimeByTicket[row.TicketID] = rt
+		}
+
+		switch row.EventType {
+		case "activity_completed", "ai_retry", "recovery_retry", "recovery_handoff_human":
+			t := row.CreatedAt
+			rt.LastTriggerAt = &t
+		}
+
+		switch row.EventType {
+		case "ai_retry", "recovery_retry":
+			acc.RetryCount++
+		}
+		switch row.EventType {
+		case "recovery_retry", "recovery_handoff_human":
+			rt.HasRecovery = true
+		}
+
+		switch row.EventType {
+		case "ai_decision_executed", "ai_decision_pending", "workflow_completed", "ai_decision_failed":
+			if rt.LastTriggerAt != nil && row.CreatedAt.After(*rt.LastTriggerAt) {
+				acc.LatencyTotalSecond += row.CreatedAt.Sub(*rt.LastTriggerAt).Seconds()
+				acc.LatencyCount++
+			}
+		}
+	}
+
+	for ticketID, rt := range runtimeByTicket {
+		if !rt.HasRecovery {
+			continue
+		}
+		dim := ticketToDim[ticketID]
+		acc := getAcc(dim)
+		acc.RecoveryAttempt++
+		switch dim.Status {
+		case TicketStatusCompleted, TicketStatusRejected, TicketStatusWithdrawn, TicketStatusCancelled:
+			acc.RecoverySuccess++
+		}
+	}
+
+	items := make([]DecisionQualityItem, 0, len(accByDim))
+	for _, acc := range accByDim {
+		decisionTotal := acc.ApprovedCount + acc.RejectedCount
+		approvalRate := 0.0
+		rejectionRate := 0.0
+		retryRate := 0.0
+		if decisionTotal > 0 {
+			approvalRate = float64(acc.ApprovedCount) / float64(decisionTotal)
+			rejectionRate = float64(acc.RejectedCount) / float64(decisionTotal)
+			retryRate = float64(acc.RetryCount) / float64(decisionTotal)
+		}
+		avgLatency := 0.0
+		if acc.LatencyCount > 0 {
+			avgLatency = acc.LatencyTotalSecond / float64(acc.LatencyCount)
+		}
+		recoveryRate := 0.0
+		if acc.RecoveryAttempt > 0 {
+			recoveryRate = float64(acc.RecoverySuccess) / float64(acc.RecoveryAttempt)
+		}
+		items = append(items, DecisionQualityItem{
+			DimensionType:             acc.DimensionType,
+			DimensionID:               acc.DimensionID,
+			DimensionName:             acc.DimensionName,
+			ApprovalRate:              approvalRate,
+			RejectionRate:             rejectionRate,
+			RetryRate:                 retryRate,
+			AvgDecisionLatencySeconds: avgLatency,
+			RecoverySuccessRate:       recoveryRate,
+			DecisionCount:             decisionTotal,
+		})
+	}
+
+	sort.SliceStable(items, func(i, j int) bool {
+		if items[i].DecisionCount != items[j].DecisionCount {
+			return items[i].DecisionCount > items[j].DecisionCount
+		}
+		return items[i].DimensionID < items[j].DimensionID
+	})
+
+	return &DecisionQualityResponse{
+		Version:     DecisionQualityMetricVersion,
+		WindowDays:  windowDays,
+		GeneratedAt: time.Now(),
+		Items:       items,
+	}, nil
+}
+
+func (s *TicketService) loadDecisionQualityTicketDimensions(windowStart time.Time, dimension string, serviceID *uint, departmentID *uint) ([]decisionQualityTicketDim, error) {
+	switch dimension {
+	case "department":
+		return s.loadDecisionQualityByDepartment(windowStart, departmentID)
+	default:
+		return s.loadDecisionQualityByService(windowStart, serviceID)
+	}
+}
+
+func (s *TicketService) loadDecisionQualityByService(windowStart time.Time, serviceID *uint) ([]decisionQualityTicketDim, error) {
+	query := s.ticketRepo.DB().Table("itsm_tickets AS t").
+		Joins("LEFT JOIN itsm_service_definitions AS svc ON svc.id = t.service_id").
+		Where("t.deleted_at IS NULL").
+		Where("(t.created_at >= ? OR t.updated_at >= ?)", windowStart, windowStart)
+	if serviceID != nil && *serviceID > 0 {
+		query = query.Where("t.service_id = ?", *serviceID)
+	}
+	rows := make([]decisionQualityTicketDim, 0)
+	if err := query.Select(`
+		t.id AS ticket_id,
+		t.status AS status,
+		t.service_id AS dimension_id,
+		COALESCE(svc.name, '服务#' || t.service_id) AS dimension_name
+	`).Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	return rows, nil
+}
+
+func (s *TicketService) loadDecisionQualityByDepartment(windowStart time.Time, departmentID *uint) ([]decisionQualityTicketDim, error) {
+	db := s.ticketRepo.DB()
+	query := db.Table("itsm_tickets AS t").
+		Where("t.deleted_at IS NULL").
+		Where("(t.created_at >= ? OR t.updated_at >= ?)", windowStart, windowStart)
+	selectSQL := `
+		t.id AS ticket_id,
+		t.status AS status,
+		0 AS dimension_id,
+		'未分配部门' AS dimension_name
+	`
+
+	if db.Migrator().HasTable("user_positions") && db.Migrator().HasTable("departments") {
+		query = query.Joins(`
+			LEFT JOIN (
+				SELECT user_id, MIN(department_id) AS department_id
+				FROM user_positions
+				WHERE department_id IS NOT NULL
+				GROUP BY user_id
+			) AS ud ON ud.user_id = t.requester_id
+		`).
+			Joins("LEFT JOIN departments AS dept ON dept.id = ud.department_id")
+		selectSQL = `
+			t.id AS ticket_id,
+			t.status AS status,
+			COALESCE(ud.department_id, 0) AS dimension_id,
+			COALESCE(dept.name, '未分配部门') AS dimension_name
+		`
+		if departmentID != nil && *departmentID > 0 {
+			query = query.Where("ud.department_id = ?", *departmentID)
+		}
+	}
+
+	rows := make([]decisionQualityTicketDim, 0)
+	if err := query.Select(selectSQL).Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	return rows, nil
+}
+
 func (s *TicketService) Mine(requesterID uint, keyword, status string, startDate, endDate *time.Time, page, pageSize int) ([]Ticket, int64, error) {
 	params := TicketListParams{
 		RequesterID: &requesterID,

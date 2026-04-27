@@ -170,6 +170,35 @@ func (h *TicketHandler) Monitor(c *gin.Context) {
 	handler.OK(c, resp)
 }
 
+func (h *TicketHandler) DecisionQuality(c *gin.Context) {
+	windowDays, _ := strconv.Atoi(c.DefaultQuery("windowDays", "30"))
+	dimension := c.DefaultQuery("dimension", "service")
+
+	var serviceID *uint
+	if v := c.Query("serviceId"); v != "" {
+		id, err := strconv.ParseUint(v, 10, 64)
+		if err == nil {
+			uid := uint(id)
+			serviceID = &uid
+		}
+	}
+	var departmentID *uint
+	if v := c.Query("departmentId"); v != "" {
+		id, err := strconv.ParseUint(v, 10, 64)
+		if err == nil {
+			uid := uint(id)
+			departmentID = &uid
+		}
+	}
+
+	resp, err := h.svc.DecisionQuality(windowDays, dimension, serviceID, departmentID)
+	if err != nil {
+		handler.Fail(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+	handler.OK(c, resp)
+}
+
 func (h *TicketHandler) Get(c *gin.Context) {
 	id, err := ParseID(c)
 	if err != nil {

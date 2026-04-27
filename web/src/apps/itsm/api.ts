@@ -387,6 +387,25 @@ export interface TicketMonitorResponse {
   total: number
 }
 
+export interface DecisionQualityItem {
+  dimensionType: "service" | "department" | string
+  dimensionId: number
+  dimensionName: string
+  approvalRate: number
+  rejectionRate: number
+  retryRate: number
+  avgDecisionLatencySeconds: number
+  recoverySuccessRate: number
+  decisionCount: number
+}
+
+export interface DecisionQualityResponse {
+  version: string
+  windowDays: number
+  generatedAt: string
+  items: DecisionQualityItem[]
+}
+
 export interface TicketListParams {
   keyword?: string
   status?: string
@@ -424,6 +443,15 @@ export function fetchTicketMonitor(params: TicketMonitorParams) {
   p.set("page", String(params.page ?? 1))
   p.set("pageSize", String(params.pageSize ?? 20))
   return api.get<TicketMonitorResponse>(`/api/v1/itsm/tickets/monitor?${p}`)
+}
+
+export function fetchDecisionQuality(params?: { dimension?: "service" | "department"; windowDays?: number; serviceId?: number; departmentId?: number }) {
+  const p = new URLSearchParams()
+  if (params?.dimension) p.set("dimension", params.dimension)
+  if (params?.windowDays) p.set("windowDays", String(params.windowDays))
+  if (params?.serviceId) p.set("serviceId", String(params.serviceId))
+  if (params?.departmentId) p.set("departmentId", String(params.departmentId))
+  return api.get<DecisionQualityResponse>(`/api/v1/itsm/tickets/decision-quality?${p.toString()}`)
 }
 
 export function fetchTicket(id: number) {
@@ -821,6 +849,13 @@ export interface ServiceHealthItem {
   label: string
   status: "pass" | "warn" | "fail"
   message: string
+  location: {
+    kind: "collaboration_spec" | "workflow_node" | "workflow_edge" | "action" | "runtime_config"
+    path: string
+    refId?: string
+  }
+  recommendation: string
+  evidence: string
 }
 
 export interface ServiceHealthCheck {
