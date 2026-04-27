@@ -3,17 +3,32 @@ import { type TicketItem } from "../api"
 type BadgeVariant = "default" | "secondary" | "destructive" | "outline"
 
 export const TICKET_STATUS_OPTIONS: Record<string, { variant: BadgeVariant; key: string }> = {
-  pending: { variant: "secondary", key: "statusPending" },
-  in_progress: { variant: "default", key: "statusInProgress" },
-  waiting_action: { variant: "outline", key: "statusWaitingAction" },
+  submitted: { variant: "secondary", key: "statusSubmitted" },
+  waiting_human: { variant: "outline", key: "statusWaitingHuman" },
+  approved_decisioning: { variant: "outline", key: "statusApprovedDecisioning" },
+  rejected_decisioning: { variant: "outline", key: "statusRejectedDecisioning" },
+  decisioning: { variant: "outline", key: "statusDecisioning" },
+  executing_action: { variant: "outline", key: "statusExecutingAction" },
   completed: { variant: "default", key: "statusCompleted" },
-  failed: { variant: "destructive", key: "statusFailed" },
+  rejected: { variant: "destructive", key: "statusRejected" },
+  withdrawn: { variant: "secondary", key: "statusWithdrawn" },
   cancelled: { variant: "secondary", key: "statusCancelled" },
+  failed: { variant: "destructive", key: "statusFailed" },
+}
+
+const TONE_VARIANT: Record<string, BadgeVariant> = {
+  success: "default",
+  destructive: "destructive",
+  secondary: "secondary",
+  progress: "outline",
+  warning: "outline",
 }
 
 export function getTicketStatusView(ticket: TicketItem) {
-  if (ticket.engineType === "smart" && ticket.smartState === "ai_reasoning") {
-    return { variant: "outline" as const, key: "statusDecisioning" }
+  const option = TICKET_STATUS_OPTIONS[ticket.status] ?? { variant: "secondary" as const, key: "statusSubmitted" }
+  return {
+    ...option,
+    variant: TONE_VARIANT[ticket.statusTone] ?? option.variant,
+    label: ticket.statusLabel,
   }
-  return TICKET_STATUS_OPTIONS[ticket.status] ?? { variant: "secondary" as const, key: "statusPending" }
 }

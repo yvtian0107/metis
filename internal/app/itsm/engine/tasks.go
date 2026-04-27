@@ -5,12 +5,18 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
 	"metis/internal/scheduler"
+)
+
+var (
+	recoverySubmissions   = make(map[uint]time.Time)
+	recoverySubmissionsMu sync.Mutex
 )
 
 // ActionExecutePayload is the async task payload for itsm-action-execute.
@@ -67,15 +73,8 @@ func HandleActionExecute(db *gorm.DB, classicEngine *ClassicEngine, smartEngine 
 				return err
 			}
 
-			// Trigger next decision cycle
-			payload, _ := json.Marshal(SmartProgressPayload{
-				TicketID:            p.TicketID,
-				CompletedActivityID: &p.ActivityID,
-			})
 			if smartEngine != nil {
-				if err := smartEngine.SubmitProgressTask(payload); err != nil {
-					slog.Error("failed to submit smart-progress after action", "error", err, "ticketID", p.TicketID)
-				}
+				smartEngine.DispatchDecisionAsync(p.TicketID, &p.ActivityID, "action_completed")
 			}
 			return nil
 		}
@@ -205,8 +204,9 @@ func HandleWaitTimer(db *gorm.DB, classicEngine *ClassicEngine) func(ctx context
 
 // SmartProgressPayload is the async task payload for itsm-smart-progress.
 type SmartProgressPayload struct {
-	TicketID            uint  `json:"ticket_id"`
-	CompletedActivityID *uint `json:"completed_activity_id"`
+	TicketID            uint   `json:"ticket_id"`
+	CompletedActivityID *uint  `json:"completed_activity_id"`
+	TriggerReason       string `json:"trigger_reason,omitempty"`
 }
 
 // BoundaryTimerPayload is the async task payload for itsm-boundary-timer.
@@ -313,10 +313,21 @@ func HandleBoundaryTimer(db *gorm.DB, classicEngine *ClassicEngine) func(ctx con
 
 // HandleSmartRecovery scans in_progress smart tickets and resubmits decision cycles
 // for any that have no active activities and haven't been circuit-broken.
-// This runs once at startup to recover from server restarts.
+// Runs periodically (@every 10m) to recover from server restarts or lost decision cycles.
+// A per-ticket dedup map prevents resubmitting the same ticket within 10 minutes.
 func HandleSmartRecovery(db *gorm.DB, smartEngine *SmartEngine) func(ctx context.Context, payload json.RawMessage) error {
 	return func(ctx context.Context, _ json.RawMessage) error {
-		// Find all in_progress smart tickets
+		// Prune dedup entries older than 10 minutes
+		recoverySubmissionsMu.Lock()
+		cutoff := time.Now().Add(-10 * time.Minute)
+		for id, ts := range recoverySubmissions {
+			if ts.Before(cutoff) {
+				delete(recoverySubmissions, id)
+			}
+		}
+		recoverySubmissionsMu.Unlock()
+
+		// Find all orphaned decisioning smart tickets
 		type ticketRow struct {
 			ID             uint
 			Code           string
@@ -324,14 +335,18 @@ func HandleSmartRecovery(db *gorm.DB, smartEngine *SmartEngine) func(ctx context
 		}
 		var tickets []ticketRow
 		if err := db.Table("itsm_tickets").
-			Where("engine_type = ? AND status = ? AND deleted_at IS NULL", "smart", "in_progress").
+			Where("engine_type = ? AND status IN ? AND deleted_at IS NULL", "smart", []string{
+				TicketStatusApprovedDecisioning,
+				TicketStatusRejectedDecisioning,
+				TicketStatusDecisioning,
+			}).
 			Select("id, code, ai_failure_count").
 			Find(&tickets).Error; err != nil {
 			return fmt.Errorf("smart recovery: query tickets: %w", err)
 		}
 
 		if len(tickets) == 0 {
-			slog.Info("smart recovery: no in_progress smart tickets found")
+			slog.Info("smart recovery: no orphaned decisioning smart tickets found")
 			return nil
 		}
 
@@ -354,12 +369,22 @@ func HandleSmartRecovery(db *gorm.DB, smartEngine *SmartEngine) func(ctx context
 				continue
 			}
 
-			// Submit recovery task
-			payload, _ := json.Marshal(SmartProgressPayload{TicketID: t.ID})
-			if err := smartEngine.SubmitProgressTask(payload); err != nil {
-				slog.Error("smart recovery: failed to submit progress task", "ticketID", t.ID, "error", err)
+			// Dedup: skip if submitted within the last 10 minutes
+			recoverySubmissionsMu.Lock()
+			if lastSubmit, ok := recoverySubmissions[t.ID]; ok && time.Since(lastSubmit) < 10*time.Minute {
+				recoverySubmissionsMu.Unlock()
+				slog.Debug("smart recovery: skipping recently submitted ticket", "ticketID", t.ID, "code", t.Code)
 				continue
 			}
+			recoverySubmissionsMu.Unlock()
+
+			smartEngine.DispatchDecisionAsync(t.ID, nil, "recovery")
+
+			// Record submission time
+			recoverySubmissionsMu.Lock()
+			recoverySubmissions[t.ID] = time.Now()
+			recoverySubmissionsMu.Unlock()
+
 			recovered++
 			slog.Info("smart recovery: submitted progress task for orphaned ticket", "ticketID", t.ID, "code", t.Code)
 		}
@@ -378,11 +403,9 @@ func HandleSmartProgress(db *gorm.DB, smartEngine *SmartEngine) func(ctx context
 			return fmt.Errorf("invalid payload: %w", err)
 		}
 
-		slog.Info("smart-progress: running decision cycle", "ticketID", p.TicketID, "completedActivityID", p.CompletedActivityID)
+		slog.Info("smart-progress: running decision cycle", "ticketID", p.TicketID, "completedActivityID", p.CompletedActivityID, "triggerReason", p.TriggerReason)
 
-		err := db.Transaction(func(tx *gorm.DB) error {
-			return smartEngine.RunDecisionCycleForTicket(ctx, tx, p.TicketID, p.CompletedActivityID)
-		})
+		err := smartEngine.RunDecisionCycleForTicket(ctx, db.WithContext(ctx), p.TicketID, p.CompletedActivityID, p.TriggerReason)
 
 		if err != nil {
 			// Decision failures are handled internally (failure count incremented),
@@ -395,6 +418,7 @@ func HandleSmartProgress(db *gorm.DB, smartEngine *SmartEngine) func(ctx context
 			return err
 		}
 
+		slog.Info("smart-progress: decision cycle completed", "ticketID", p.TicketID, "completedActivityID", p.CompletedActivityID)
 		return nil
 	}
 }

@@ -20,7 +20,7 @@ func NewGormStore(db *gorm.DB) *GormStore {
 }
 
 func (s *GormStore) SaveTaskState(ctx context.Context, state *model.TaskState) error {
-	return withSQLiteBusyRetry(func() error {
+	return withSQLiteBusyRetry(ctx, func() error {
 		return s.db.WithContext(ctx).Save(state).Error
 	})
 }
@@ -46,14 +46,14 @@ func (s *GormStore) ListTaskStates(ctx context.Context, taskType string) ([]*mod
 }
 
 func (s *GormStore) Enqueue(ctx context.Context, exec *model.TaskExecution) error {
-	return withSQLiteBusyRetry(func() error {
+	return withSQLiteBusyRetry(ctx, func() error {
 		return s.db.WithContext(ctx).Create(exec).Error
 	})
 }
 
 func (s *GormStore) Dequeue(ctx context.Context, limit int) ([]*model.TaskExecution, error) {
 	var execs []*model.TaskExecution
-	err := withSQLiteBusyRetry(func() error {
+	err := withSQLiteBusyRetry(ctx, func() error {
 		execs = nil
 		return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 			if err := tx.Where("status = ?", ExecPending).
@@ -77,7 +77,7 @@ func (s *GormStore) Dequeue(ctx context.Context, limit int) ([]*model.TaskExecut
 }
 
 func (s *GormStore) UpdateExecution(ctx context.Context, exec *model.TaskExecution) error {
-	return withSQLiteBusyRetry(func() error {
+	return withSQLiteBusyRetry(ctx, func() error {
 		return s.db.WithContext(ctx).Save(exec).Error
 	})
 }
@@ -181,7 +181,7 @@ func (s *GormStore) Close() error {
 // DeleteOlderThan removes execution records older than the given time.
 func (s *GormStore) DeleteOlderThan(ctx context.Context, before time.Time) (int64, error) {
 	var rows int64
-	err := withSQLiteBusyRetry(func() error {
+	err := withSQLiteBusyRetry(ctx, func() error {
 		result := s.db.WithContext(ctx).
 			Where("created_at < ?", before).
 			Delete(&model.TaskExecution{})
@@ -191,16 +191,28 @@ func (s *GormStore) DeleteOlderThan(ctx context.Context, before time.Time) (int6
 	return rows, err
 }
 
-func withSQLiteBusyRetry(fn func() error) error {
+func withSQLiteBusyRetry(ctx context.Context, fn func() error) error {
 	const maxAttempts = 5
 	delay := 10 * time.Millisecond
 	var err error
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return ctxErr
+		}
 		err = fn()
 		if err == nil || !isSQLiteBusyError(err) || attempt == maxAttempts {
 			return err
 		}
-		time.Sleep(delay)
+		timer := time.NewTimer(delay)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		case <-timer.C:
+		}
 		delay *= 2
 	}
 	return err

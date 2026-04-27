@@ -50,6 +50,7 @@ export function ServiceCard({ service, canUpdate, canDelete, onDelete }: Service
   return (
     <>
       <div
+        data-testid={`itsm-service-card-${service.code}`}
         className={cn(
           "workspace-surface group relative flex min-h-[154px] cursor-pointer flex-col rounded-[1.25rem] p-4",
           "transition-colors duration-200 hover:border-border/80 hover:bg-white/50",

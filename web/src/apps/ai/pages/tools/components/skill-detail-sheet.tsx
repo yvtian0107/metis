@@ -1,5 +1,5 @@
 import { useEffect } from "react"
-import { useForm } from "react-hook-form"
+import { useForm, useWatch } from "react-hook-form"
 import { useTranslation } from "react-i18next"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { api } from "@/lib/api"
@@ -75,7 +75,7 @@ export function SkillDetailSheet({ open, onOpenChange, skill }: SkillDetailSheet
     }
   }, [open, activeDetail, form])
 
-  const authType = form.watch("authType")
+  const authType = useWatch({ control: form.control, name: "authType" })
 
   const updateMutation = useMutation({
     mutationFn: (payload: AuthFormValues) =>

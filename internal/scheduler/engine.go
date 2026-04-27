@@ -16,37 +16,47 @@ import (
 )
 
 const (
-	defaultMaxWorkers  = 5
+	defaultMaxWorkers   = 5
 	defaultPollInterval = 3 * time.Second
 	shutdownTimeout     = 30 * time.Second
 )
 
 // Engine is the core task scheduler.
 type Engine struct {
-	store    Store
-	registry map[string]*TaskDef
-	cron     *cron.Cron
-	cronIDs  map[string]cron.EntryID // task name -> cron entry ID
-	executor *executor
-	notify   chan struct{}
-	stopCh   chan struct{}
-	stopped  bool
-	mu       sync.RWMutex
+	store      Store
+	registry   map[string]*TaskDef
+	cron       *cron.Cron
+	cronIDs    map[string]cron.EntryID // task name -> cron entry ID
+	executor   *executor
+	maxWorkers int
+	notify     chan struct{}
+	stopCh     chan struct{}
+	stopped    bool
+	mu         sync.RWMutex
 }
 
 // New creates a new Engine from the IOC container.
 func New(i do.Injector) (*Engine, error) {
 	db := do.MustInvoke[*database.DB](i)
 	store := NewGormStore(db.DB)
+	maxWorkers := maxWorkersForDialector(db.DB.Dialector.Name())
 
 	return &Engine{
-		store:    store,
-		registry: make(map[string]*TaskDef),
-		cron:     cron.New(),
-		cronIDs:  make(map[string]cron.EntryID),
-		notify:   make(chan struct{}, 1),
-		stopCh:   make(chan struct{}),
+		store:      store,
+		registry:   make(map[string]*TaskDef),
+		cron:       cron.New(),
+		cronIDs:    make(map[string]cron.EntryID),
+		maxWorkers: maxWorkers,
+		notify:     make(chan struct{}, 1),
+		stopCh:     make(chan struct{}),
 	}, nil
+}
+
+func maxWorkersForDialector(dialector string) int {
+	if dialector == "sqlite" {
+		return 1
+	}
+	return defaultMaxWorkers
 }
 
 // Register adds a task definition to the registry. Must be called before Start().
@@ -149,7 +159,7 @@ func (e *Engine) Start() error {
 	}
 
 	// Initialize executor
-	e.executor = newExecutor(defaultMaxWorkers, e.store, e.registry)
+	e.executor = newExecutor(e.maxWorkers, e.store, e.registry)
 
 	// Schedule active cron tasks
 	for _, def := range e.registry {
@@ -351,7 +361,7 @@ func (e *Engine) poller() {
 }
 
 func (e *Engine) poll() {
-	execs, err := e.store.Dequeue(context.Background(), defaultMaxWorkers)
+	execs, err := e.store.Dequeue(context.Background(), e.maxWorkers)
 	if err != nil {
 		slog.Error("scheduler: poll error", "error", err)
 		return

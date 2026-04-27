@@ -1,6 +1,6 @@
 import { useEffect, useMemo } from "react"
 import { useTranslation } from "react-i18next"
-import { useForm } from "react-hook-form"
+import { useForm, useWatch } from "react-hook-form"
 import { z } from "zod"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
@@ -76,7 +76,7 @@ export function ChannelSheet({ open, onOpenChange, channel }: ChannelSheetProps)
     defaultValues: { name: "", type: "email", config: {} },
   })
 
-  const selectedType = form.watch("type")
+  const selectedType = useWatch({ control: form.control, name: "type" })
   const configSchema = useMemo(
     () => CHANNEL_TYPES[selectedType]?.configSchema ?? [],
     [selectedType],

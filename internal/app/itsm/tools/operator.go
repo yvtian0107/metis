@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"gorm.io/gorm"
 
@@ -122,6 +123,35 @@ func (o *Operator) CreateTicket(userID uint, serviceID uint, summary string, for
 	}, nil
 }
 
+// SubmitConfirmedDraft creates an ITSM ticket from a user-confirmed service desk
+// draft. It carries the draft identity so TicketService can enforce idempotency
+// and preserve the human confirmation boundary.
+func (o *Operator) SubmitConfirmedDraft(userID uint, serviceID uint, summary string, formData map[string]any, sessionID uint, draftVersion int, fieldsHash string, requestHash string) (*TicketResult, error) {
+	if o.ticketCreator == nil {
+		return nil, fmt.Errorf("ticket creation is not available")
+	}
+
+	result, err := o.ticketCreator.CreateFromAgent(context.Background(), AgentTicketRequest{
+		UserID:       userID,
+		ServiceID:    serviceID,
+		Summary:      summary,
+		FormData:     formData,
+		SessionID:    sessionID,
+		DraftVersion: draftVersion,
+		FieldsHash:   fieldsHash,
+		RequestHash:  requestHash,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("submit confirmed draft: %w", err)
+	}
+
+	return &TicketResult{
+		TicketID:   result.TicketID,
+		TicketCode: result.TicketCode,
+		Status:     result.Status,
+	}, nil
+}
+
 // ListMyTickets returns the user's non-terminal tickets.
 func (o *Operator) ListMyTickets(userID uint, status string) ([]TicketSummary, error) {
 	type row struct {
@@ -135,7 +165,7 @@ func (o *Operator) ListMyTickets(userID uint, status string) ([]TicketSummary, e
 
 	query := o.db.Table("itsm_tickets").
 		Where("requester_id = ? AND deleted_at IS NULL", userID).
-		Where("status NOT IN ?", []string{"completed", "cancelled", "failed"})
+		Where("status NOT IN ?", []string{"completed", "rejected", "withdrawn", "cancelled", "failed"})
 	if status != "" {
 		query = query.Where("status = ?", status)
 	}
@@ -169,7 +199,7 @@ func (o *Operator) ListMyTickets(userID uint, status string) ([]TicketSummary, e
 	for _, r := range rows {
 		// can_withdraw: non-terminal + no claimed assignments
 		canWithdraw := false
-		if r.Status != "completed" && r.Status != "cancelled" && r.Status != "failed" {
+		if r.Status != "completed" && r.Status != "rejected" && r.Status != "withdrawn" && r.Status != "cancelled" && r.Status != "failed" {
 			var claimedCount int64
 			o.db.Table("itsm_ticket_assignments").
 				Where("ticket_id = ? AND claimed_at IS NOT NULL", r.ID).
@@ -208,6 +238,7 @@ func (o *Operator) WithdrawTicket(userID uint, ticketCode string, reason string)
 }
 
 // ValidateParticipants checks if workflow participants can be resolved.
+// Uses engine.ParticipantResolver for consistent validation with the runtime engine.
 func (o *Operator) ValidateParticipants(serviceID uint, formData map[string]any) (*ParticipantValidation, error) {
 	// Load workflow JSON.
 	var svc struct {
@@ -220,73 +251,62 @@ func (o *Operator) ValidateParticipants(serviceID uint, formData map[string]any)
 	}
 
 	if svc.WorkflowJSON == "" {
-		// No workflow defined — skip validation.
 		return &ParticipantValidation{OK: true}, nil
 	}
 
-	// Parse workflow nodes.
-	var workflow struct {
-		Nodes []struct {
-			ID    string `json:"id"`
-			Type  string `json:"type"`
-			Label string `json:"label"`
-			Data  struct {
-				ParticipantType string `json:"participantType"`
-				PositionCode    string `json:"positionCode"`
-				DepartmentCode  string `json:"departmentCode"`
-				UserID          *uint  `json:"userId"`
-			} `json:"data"`
-		} `json:"nodes"`
-	}
-	if err := json.Unmarshal([]byte(svc.WorkflowJSON), &workflow); err != nil {
+	def, err := engine.ParseWorkflowDef(json.RawMessage(svc.WorkflowJSON))
+	if err != nil {
 		return &ParticipantValidation{OK: true}, nil // Can't parse, skip.
 	}
 
-		// Check each process node.
-		for _, node := range workflow.Nodes {
-			if node.Type != "process" {
+	for _, node := range def.Nodes {
+		if node.Type != "process" && node.Type != "form" {
+			continue
+		}
+		nd, err := engine.ParseNodeData(node.Data)
+		if err != nil || len(nd.Participants) == 0 {
+			continue
+		}
+		nodeLabel := nd.Label
+		if nodeLabel == "" {
+			nodeLabel = node.ID
+		}
+
+		for _, p := range nd.Participants {
+			// Skip requester/requester_manager — can't validate before ticket exists
+			if p.Type == "requester" || p.Type == "requester_manager" {
 				continue
 			}
-		d := node.Data
-		if d.ParticipantType == "user" && d.UserID != nil {
-			// Direct user assignment — check user exists and is active.
-			var count int64
-			o.db.Table("users").Where("id = ? AND is_active = ?", *d.UserID, true).Count(&count)
-			if count == 0 {
+
+			if o.resolver == nil {
+				continue
+			}
+			userIDs, err := o.resolver.Resolve(o.db, 0, p)
+			if err != nil {
+				// orgResolver nil errors mean the org module isn't installed — skip
+				if strings.Contains(err.Error(), "安装组织架构模块") {
+					continue
+				}
 				return &ParticipantValidation{
 					OK:            false,
-					FailureReason: fmt.Sprintf("指定用户(ID=%d)不存在或已停用", *d.UserID),
-					NodeLabel:     node.Label,
-					Guidance:      "请联系管理员检查用户状态",
+					FailureReason: err.Error(),
+					NodeLabel:     nodeLabel,
+					Guidance:      "请联系管理员检查参与人配置",
 				}, nil
 			}
-		}
-		if d.ParticipantType == "position" && d.PositionCode != "" {
-			if o.orgResolver == nil {
-				// Org App not installed — skip position validation.
-				continue
-			}
-			// Position-based — check if any active user holds the position.
-			var userIDs []uint
-			var err error
-			if d.DepartmentCode != "" {
-				userIDs, err = o.orgResolver.FindUsersByPositionAndDepartment(d.PositionCode, d.DepartmentCode)
-			} else {
-				userIDs, err = o.orgResolver.FindUsersByPositionCode(d.PositionCode)
-			}
-			if err != nil {
-				return nil, fmt.Errorf("validate participants: %w", err)
-			}
 			if len(userIDs) == 0 {
-				reason := fmt.Sprintf("岗位[%s]", d.PositionCode)
-				if d.DepartmentCode != "" {
-					reason += fmt.Sprintf("+部门[%s]", d.DepartmentCode)
+				reason := fmt.Sprintf("节点[%s]的参与人（%s）无可用人员", nodeLabel, p.Type)
+				if p.PositionCode != "" {
+					reason = fmt.Sprintf("岗位[%s]", p.PositionCode)
+					if p.DepartmentCode != "" {
+						reason += fmt.Sprintf("+部门[%s]", p.DepartmentCode)
+					}
+					reason += " 下无可用人员"
 				}
-				reason += " 下无可用人员"
 				return &ParticipantValidation{
 					OK:            false,
 					FailureReason: reason,
-					NodeLabel:     node.Label,
+					NodeLabel:     nodeLabel,
 					Guidance:      "请联系 IT 管理员补充人员配置后再提单",
 				}, nil
 			}
@@ -307,12 +327,15 @@ func parseFormFields(schemaJSON string) []FormField {
 	var fields []FormField
 	for _, f := range schema.Fields {
 		ff := FormField{
-			Key:         f.Key,
-			Label:       f.Label,
-			Type:        f.Type,
-			Description: f.Description,
-			Placeholder: f.Placeholder,
-			Required:    f.Required,
+			Key:          f.Key,
+			Label:        f.Label,
+			Type:         f.Type,
+			Description:  f.Description,
+			Placeholder:  f.Placeholder,
+			DefaultValue: f.DefaultValue,
+			Required:     f.Required,
+			Validation:   f.Validation,
+			Props:        f.Props,
 		}
 		// Check validation rules for "required".
 		for _, v := range f.Validation {
@@ -320,7 +343,6 @@ func parseFormFields(schemaJSON string) []FormField {
 				ff.Required = true
 			}
 		}
-		// Extract options for select/radio fields.
 		for _, opt := range f.Options {
 			if opt.Label != "" || opt.Value != nil {
 				ff.Options = append(ff.Options, FormOption{
@@ -344,51 +366,89 @@ func computeFieldsHash(fields []FormField) string {
 func extractRoutingHint(workflowJSON string) *RoutingFieldHint {
 	var workflow struct {
 		Nodes []struct {
-			Type string `json:"type"`
-			Data struct {
-				Conditions []struct {
-					Field string `json:"field"`
-					Value string `json:"value"`
-					Label string `json:"label"`
-				} `json:"conditions"`
+			ID    string `json:"id"`
+			Label string `json:"label"`
+			Data  struct {
+				Label string `json:"label"`
 			} `json:"data"`
 		} `json:"nodes"`
+		Edges []struct {
+			Target string `json:"target"`
+			Data   struct {
+				Condition struct {
+					Field string `json:"field"`
+					Value any    `json:"value"`
+				} `json:"condition"`
+			} `json:"data"`
+		} `json:"edges"`
 	}
 	if err := json.Unmarshal([]byte(workflowJSON), &workflow); err != nil {
 		return nil
 	}
 
+	nodeLabels := make(map[string]string, len(workflow.Nodes))
 	for _, node := range workflow.Nodes {
-		if node.Type != "exclusive_gateway" {
-			continue
+		label := node.Data.Label
+		if label == "" {
+			label = node.Label
 		}
-		if len(node.Data.Conditions) == 0 {
-			continue
-		}
-
-		fieldKey := node.Data.Conditions[0].Field
-		if fieldKey == "" {
-			continue
-		}
-
-		routeMap := make(map[string]string)
-		for _, c := range node.Data.Conditions {
-			if c.Value != "" {
-				label := c.Label
-				if label == "" {
-					label = c.Value
-				}
-				routeMap[c.Value] = label
-			}
-		}
-
-		if len(routeMap) > 0 {
-			return &RoutingFieldHint{
-				FieldKey:       fieldKey,
-				OptionRouteMap: routeMap,
-			}
-		}
+		nodeLabels[node.ID] = label
 	}
 
-	return nil
+	var fieldKey string
+	routeMap := make(map[string]string)
+	for _, edge := range workflow.Edges {
+		condition := edge.Data.Condition
+		if condition.Field == "" {
+			continue
+		}
+		normalizedField := normalizeRoutingFieldKey(condition.Field)
+		if normalizedField == "" {
+			continue
+		}
+		if fieldKey == "" {
+			fieldKey = normalizedField
+		}
+		if fieldKey != normalizedField {
+			continue
+		}
+		routeLabel := nodeLabels[edge.Target]
+		for _, value := range routingConditionValues(condition.Value) {
+			if value == "" {
+				continue
+			}
+			if routeLabel == "" {
+				routeLabel = value
+			}
+			routeMap[value] = routeLabel
+		}
+	}
+	if fieldKey == "" || len(routeMap) == 0 {
+		return nil
+	}
+	return &RoutingFieldHint{FieldKey: fieldKey, OptionRouteMap: routeMap}
+}
+
+func normalizeRoutingFieldKey(field string) string {
+	field = strings.TrimSpace(field)
+	field = strings.TrimPrefix(field, "form.")
+	return field
+}
+
+func routingConditionValues(raw any) []string {
+	switch value := raw.(type) {
+	case string:
+		return []string{value}
+	case []any:
+		values := make([]string, 0, len(value))
+		for _, item := range value {
+			values = append(values, strings.TrimSpace(fmt.Sprintf("%v", item)))
+		}
+		return values
+	default:
+		if raw == nil {
+			return nil
+		}
+		return []string{strings.TrimSpace(fmt.Sprintf("%v", raw))}
+	}
 }

@@ -1,56 +1,185 @@
 "use client"
 
-import { useState, useMemo } from "react"
-import { useTranslation } from "react-i18next"
+import { useEffect, useMemo, useState } from "react"
 import { useNavigate } from "react-router"
-import { useQuery } from "@tanstack/react-query"
-import { Search, Ticket } from "lucide-react"
-import { useListPage } from "@/hooks/use-list-page"
+import { useTranslation } from "react-i18next"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import {
+  AlertTriangle,
+  ArrowUpRight,
+  Bot,
+  CheckCircle2,
+  CircleX,
+  Clock3,
+  Loader2,
+  RefreshCcw,
+  Route,
+  ShieldAlert,
+  Ticket,
+  UserPlus,
+} from "lucide-react"
+import { toast } from "sonner"
 import { withActiveMenuPermission } from "@/lib/navigation-state"
+import { cn } from "@/lib/utils"
+import { usePermission } from "@/hooks/use-permission"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
+import { ButtonGroup } from "@/components/ui/button-group"
 import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
-} from "@/components/ui/select"
-import {
-  DataTableCard, DataTableEmptyRow, DataTableLoadingRow,
-  DataTablePagination, DataTableToolbar, DataTableToolbarGroup,
+  DataTableCard,
+  DataTableEmptyRow,
+  DataTableLoadingRow,
+  DataTablePagination,
+  DataTableToolbar,
+  DataTableToolbarGroup,
 } from "@/components/ui/data-table"
 import {
-  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
-} from "@/components/ui/table"
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import {
-  type TicketItem, fetchPriorities, fetchServiceDefs,
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet"
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table"
+import { Textarea } from "@/components/ui/textarea"
+import { WorkspaceSearchField, WorkspaceStatus } from "@/components/workspace/primitives"
+import {
+  assignTicket,
+  cancelTicket,
+  fetchPriorities,
+  fetchServiceDefs,
+  fetchTicket,
+  fetchTicketActivities,
+  fetchTicketMonitor,
+  fetchTicketTimeline,
+  fetchUsers,
+  progressTicket,
+  type ActivityItem,
+  type TicketMonitorItem,
+  type TimelineItem,
 } from "../../api"
+import { OverrideActions } from "../../components/override-actions"
 import { SLABadge } from "../../components/sla-badge"
-import { TICKET_STATUS_OPTIONS } from "../../components/ticket-status"
 import { TicketStatusBadge } from "../../components/ticket-status-badge"
+import { TICKET_STATUS_OPTIONS } from "../../components/ticket-status"
 import { TICKET_MENU_PERMISSION } from "./navigation"
+
+const PAGE_SIZE = 20
+const ACTIVE_STATUSES = new Set(["submitted", "waiting_human", "approved_decisioning", "rejected_decisioning", "decisioning", "executing_action"])
+const HUMAN_ACTIVITY_TYPES = new Set(["approve", "form", "process"])
+
+const RISK_OPTIONS = [
+  { value: "all", labelKey: "monitor.riskAll" },
+  { value: "blocked", labelKey: "monitor.riskBlocked" },
+  { value: "risk", labelKey: "monitor.riskRisk" },
+  { value: "normal", labelKey: "monitor.riskNormal" },
+] as const
+
+function formatDate(value?: string | null) {
+  return value ? new Date(value).toLocaleString() : "-"
+}
+
+function formatWaiting(minutes: number) {
+  if (!minutes || minutes < 1) return "<1m"
+  if (minutes < 60) return `${minutes}m`
+  const h = Math.floor(minutes / 60)
+  const m = minutes % 60
+  return m > 0 ? `${h}h ${m}m` : `${h}h`
+}
+
+function riskTone(riskLevel: string): "danger" | "warning" | "neutral" {
+  if (riskLevel === "blocked") return "danger"
+  if (riskLevel === "risk") return "warning"
+  return "neutral"
+}
+
+function riskLabel(riskLevel: string, t: (key: string) => string) {
+  if (riskLevel === "blocked") return t("monitor.riskBlocked")
+  if (riskLevel === "risk") return t("monitor.riskRisk")
+  return t("monitor.riskNormal")
+}
+
+function engineLabel(engineType: string, t: (key: string) => string) {
+  return engineType === "smart" ? t("monitor.engineSmart") : t("monitor.engineClassic")
+}
+
+function activeHumanActivity(activities: ActivityItem[], currentActivityId?: number | null) {
+  return activities.find((a) => a.id === currentActivityId && ["pending", "in_progress"].includes(a.status) && HUMAN_ACTIVITY_TYPES.has(a.activityType))
+    ?? activities.find((a) => ["pending", "in_progress"].includes(a.status) && HUMAN_ACTIVITY_TYPES.has(a.activityType))
+}
+
+function MetricStrip({
+  label,
+  value,
+  tone = "neutral",
+}: {
+  label: string
+  value: number
+  tone?: "neutral" | "danger" | "warning" | "success" | "info"
+}) {
+  return (
+    <div className="flex min-w-[8rem] items-center justify-between gap-3 border-b border-border/45 py-2 sm:border-b-0 sm:border-r sm:pr-4 last:border-r-0">
+      <span className="text-xs font-medium text-muted-foreground">{label}</span>
+      <span className={cn(
+        "font-mono text-lg font-semibold tabular-nums",
+        tone === "danger" && "text-red-600",
+        tone === "warning" && "text-amber-600",
+        tone === "success" && "text-emerald-600",
+        tone === "info" && "text-sky-600",
+      )}>
+        {value}
+      </span>
+    </div>
+  )
+}
 
 export function Component() {
   const { t } = useTranslation(["itsm", "common"])
-  const navigate = useNavigate()
+  const [keyword, setKeyword] = useState("")
+  const [submittedKeyword, setSubmittedKeyword] = useState("")
+  const [riskFilter, setRiskFilter] = useState("all")
+  const [engineFilter, setEngineFilter] = useState("all")
+  const [statusFilter, setStatusFilter] = useState("all")
+  const [priorityFilter, setPriorityFilter] = useState("all")
+  const [serviceFilter, setServiceFilter] = useState("all")
+  const [page, setPage] = useState(1)
+  const [selectedTicket, setSelectedTicket] = useState<TicketMonitorItem | null>(null)
 
-  const [statusFilter, setStatusFilter] = useState("")
-  const [priorityFilter, setPriorityFilter] = useState("")
-  const [serviceFilter, setServiceFilter] = useState("")
+  const monitorParams = useMemo(() => ({
+    keyword: submittedKeyword || undefined,
+    riskLevel: riskFilter === "all" ? undefined : riskFilter,
+    engineType: engineFilter === "all" ? undefined : engineFilter,
+    status: statusFilter === "all" ? undefined : statusFilter,
+    priorityId: priorityFilter === "all" ? undefined : Number(priorityFilter),
+    serviceId: serviceFilter === "all" ? undefined : Number(serviceFilter),
+    page,
+    pageSize: PAGE_SIZE,
+  }), [engineFilter, page, priorityFilter, riskFilter, serviceFilter, statusFilter, submittedKeyword])
 
-  const extraParams = useMemo(() => {
-    const params: Record<string, string> = {}
-    if (statusFilter) params.status = statusFilter
-    if (priorityFilter) params.priorityId = priorityFilter
-    if (serviceFilter) params.serviceId = serviceFilter
-    return params
-  }, [statusFilter, priorityFilter, serviceFilter])
-
-  const {
-    keyword, setKeyword, page, setPage,
-    items, total, totalPages, isLoading, handleSearch,
-  } = useListPage<TicketItem>({
-    queryKey: "itsm-tickets",
-    endpoint: "/api/v1/itsm/tickets",
-    extraParams,
+  const { data, isLoading, isFetching, refetch } = useQuery({
+    queryKey: ["itsm-ticket-monitor", monitorParams],
+    queryFn: () => fetchTicketMonitor(monitorParams),
   })
+
+  useEffect(() => {
+    const interval = window.setInterval(() => {
+      void refetch()
+    }, 60000)
+    return () => window.clearInterval(interval)
+  }, [refetch])
 
   const { data: priorities = [] } = useQuery({
     queryKey: ["itsm-priorities"],
@@ -63,102 +192,136 @@ export function Component() {
   })
   const services = servicesData?.items ?? []
 
+  const items = data?.items ?? []
+  const summary = data?.summary
+  const total = data?.total ?? 0
+  const totalPages = Math.ceil(total / PAGE_SIZE)
+
+  function resetPageAnd(run: () => void) {
+    run()
+    setPage(1)
+  }
+
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold">{t("itsm:tickets.title")}</h2>
+    <div className="workspace-page">
+      <div className="workspace-page-header">
+        <div className="min-w-0">
+          <h2 className="workspace-page-title">{t("tickets.title")}</h2>
+          <p className="workspace-page-description">{t("tickets.monitorDesc")}</p>
+        </div>
+        <Button variant="outline" size="sm" onClick={() => {
+          resetPageAnd(() => setSubmittedKeyword(keyword))
+          void refetch()
+        }} disabled={isFetching}>
+          {isFetching ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCcw className="h-4 w-4" />}
+          {t("monitor.refresh")}
+        </Button>
       </div>
 
+      <section className="workspace-surface rounded-[1.25rem] px-4 py-3">
+        <div className="grid gap-x-4 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7">
+          <MetricStrip label={t("monitor.activeTotal")} value={summary?.activeTotal ?? 0} tone="info" />
+          <MetricStrip label={t("monitor.stuckTotal")} value={summary?.stuckTotal ?? 0} tone={(summary?.stuckTotal ?? 0) > 0 ? "danger" : "success"} />
+          <MetricStrip label={t("monitor.slaRiskTotal")} value={summary?.slaRiskTotal ?? 0} tone={(summary?.slaRiskTotal ?? 0) > 0 ? "warning" : "neutral"} />
+          <MetricStrip label={t("monitor.aiIncidentTotal")} value={summary?.aiIncidentTotal ?? 0} tone={(summary?.aiIncidentTotal ?? 0) > 0 ? "danger" : "neutral"} />
+          <MetricStrip label={t("monitor.completedTodayTotal")} value={summary?.completedTodayTotal ?? 0} tone="success" />
+          <MetricStrip label={t("monitor.smartActiveTotal")} value={summary?.smartActiveTotal ?? 0} />
+          <MetricStrip label={t("monitor.classicActiveTotal")} value={summary?.classicActiveTotal ?? 0} />
+        </div>
+      </section>
+
       <DataTableToolbar>
-        <DataTableToolbarGroup>
-          <form onSubmit={handleSearch} className="flex w-full flex-col gap-2 sm:flex-row sm:items-center sm:flex-wrap">
-            <div className="relative w-full sm:max-w-sm">
-              <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-              <Input placeholder={t("itsm:tickets.searchPlaceholder")} value={keyword} onChange={(e) => setKeyword(e.target.value)} className="pl-8" />
-            </div>
-            <Select value={statusFilter || "all"} onValueChange={(v) => { setStatusFilter(v === "all" ? "" : v); setPage(1) }}>
-              <SelectTrigger className="w-[140px]"><SelectValue placeholder={t("itsm:tickets.allStatuses")} /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">{t("itsm:tickets.allStatuses")}</SelectItem>
-                {Object.entries(TICKET_STATUS_OPTIONS).map(([k, v]) => (
-                  <SelectItem key={k} value={k}>{t(`itsm:tickets.${v.key}`)}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Select value={priorityFilter || "all"} onValueChange={(v) => { setPriorityFilter(v === "all" ? "" : v); setPage(1) }}>
-              <SelectTrigger className="w-[140px]"><SelectValue placeholder={t("itsm:tickets.allPriorities")} /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">{t("itsm:tickets.allPriorities")}</SelectItem>
-                {priorities.map((p) => (
-                  <SelectItem key={p.id} value={String(p.id)}>
-                    <span className="mr-1.5 inline-block h-2.5 w-2.5 rounded-full" style={{ backgroundColor: p.color }} />
-                    {p.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Select value={serviceFilter || "all"} onValueChange={(v) => { setServiceFilter(v === "all" ? "" : v); setPage(1) }}>
-              <SelectTrigger className="w-[160px]"><SelectValue placeholder={t("itsm:tickets.allServices")} /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">{t("itsm:tickets.allServices")}</SelectItem>
-                {services.map((s) => (
-                  <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Button type="submit" variant="outline" size="sm">{t("common:search")}</Button>
+        <DataTableToolbarGroup className="lg:flex-wrap">
+          <form
+            className="flex min-w-0 flex-1 flex-col gap-2 sm:flex-row sm:items-center"
+            onSubmit={(event) => {
+              event.preventDefault()
+              resetPageAnd(() => setSubmittedKeyword(keyword))
+            }}
+          >
+            <WorkspaceSearchField
+              value={keyword}
+              onChange={setKeyword}
+              placeholder={t("tickets.searchPlaceholder")}
+              className="sm:w-80"
+            />
+            <Button type="submit" size="sm" variant="outline">{t("common:search")}</Button>
           </form>
+          <ButtonGroup className="overflow-x-auto">
+            {RISK_OPTIONS.map((option) => (
+              <Button
+                key={option.value}
+                type="button"
+                variant={riskFilter === option.value ? "default" : "outline"}
+                size="sm"
+                onClick={() => resetPageAnd(() => setRiskFilter(option.value))}
+              >
+                {t(option.labelKey)}
+              </Button>
+            ))}
+          </ButtonGroup>
         </DataTableToolbarGroup>
+        <div className="flex flex-wrap items-center gap-2">
+          <Select value={engineFilter} onValueChange={(v) => resetPageAnd(() => setEngineFilter(v))}>
+            <SelectTrigger className="h-8 w-[128px]"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">{t("monitor.engineAll")}</SelectItem>
+              <SelectItem value="smart">{t("monitor.engineSmart")}</SelectItem>
+              <SelectItem value="classic">{t("monitor.engineClassic")}</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select value={statusFilter} onValueChange={(v) => resetPageAnd(() => setStatusFilter(v))}>
+            <SelectTrigger className="h-8 w-[136px]"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">{t("tickets.allStatuses")}</SelectItem>
+              {Object.entries(TICKET_STATUS_OPTIONS).map(([k, v]) => (
+                <SelectItem key={k} value={k}>{t(`tickets.${v.key}`)}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select value={priorityFilter} onValueChange={(v) => resetPageAnd(() => setPriorityFilter(v))}>
+            <SelectTrigger className="h-8 w-[136px]"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">{t("tickets.allPriorities")}</SelectItem>
+              {priorities.map((p) => (
+                <SelectItem key={p.id} value={String(p.id)}>{p.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select value={serviceFilter} onValueChange={(v) => resetPageAnd(() => setServiceFilter(v))}>
+            <SelectTrigger className="h-8 w-[164px]"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">{t("tickets.allServices")}</SelectItem>
+              {services.map((service) => (
+                <SelectItem key={service.id} value={String(service.id)}>{service.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
       </DataTableToolbar>
 
-      <DataTableCard>
-        <Table>
+      <DataTableCard className="overflow-x-auto">
+        <Table className="min-w-[1120px]">
           <TableHeader>
             <TableRow>
-              <TableHead className="w-[180px] min-w-[180px]">{t("itsm:tickets.code")}</TableHead>
-              <TableHead className="min-w-[200px]">{t("itsm:tickets.ticketTitle")}</TableHead>
-              <TableHead className="w-[90px]">{t("itsm:tickets.requester")}</TableHead>
-              <TableHead className="w-[100px]">{t("itsm:tickets.priority")}</TableHead>
-              <TableHead className="w-[100px]">{t("itsm:tickets.status")}</TableHead>
-              <TableHead className="w-[100px]">{t("itsm:tickets.service")}</TableHead>
-              <TableHead className="w-[110px]">当前责任方</TableHead>
-              <TableHead className="min-w-[160px]">下一步</TableHead>
-              <TableHead className="w-[150px]">{t("itsm:tickets.slaStatus")}</TableHead>
-              <TableHead className="w-[140px]">{t("itsm:tickets.createdAt")}</TableHead>
+              <TableHead className="w-[112px]">{t("monitor.risk")}</TableHead>
+              <TableHead className="min-w-[240px]">{t("tickets.ticketTitle")}</TableHead>
+              <TableHead className="w-[180px]">{t("tickets.service")}</TableHead>
+              <TableHead className="w-[140px]">{t("monitor.owner")}</TableHead>
+              <TableHead className="min-w-[180px]">{t("monitor.currentStep")}</TableHead>
+              <TableHead className="w-[110px]">{t("monitor.waiting")}</TableHead>
+              <TableHead className="w-[140px]">{t("tickets.slaStatus")}</TableHead>
+              <TableHead className="w-[154px]">{t("tickets.updatedAt")}</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {isLoading ? (
-              <DataTableLoadingRow colSpan={9} />
+              <DataTableLoadingRow colSpan={8} />
             ) : items.length === 0 ? (
-              <DataTableEmptyRow colSpan={9} icon={Ticket} title={t("itsm:tickets.empty")} />
+              <DataTableEmptyRow colSpan={8} icon={Ticket} title={t("monitor.empty")} />
             ) : (
               items.map((item) => (
-                <TableRow
-                  key={item.id}
-                  className="cursor-pointer"
-                  onClick={() => navigate(`/itsm/tickets/${item.id}`, { state: withActiveMenuPermission(TICKET_MENU_PERMISSION.list) })}
-                >
-                  <TableCell className="font-mono text-sm whitespace-nowrap">{item.code}</TableCell>
-                  <TableCell className="font-medium">{item.title}</TableCell>
-                  <TableCell className="text-sm">{item.requesterName}</TableCell>
-                  <TableCell>
-                    <span className="inline-flex items-center gap-1.5 text-sm">
-                      <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ backgroundColor: item.priorityColor }} />
-                      {item.priorityName}
-                    </span>
-                  </TableCell>
-                  <TableCell>
-                    <TicketStatusBadge ticket={item} />
-                  </TableCell>
-                  <TableCell className="text-sm text-muted-foreground">{item.serviceName}</TableCell>
-                  <TableCell className="text-sm">{item.currentOwnerName || item.assigneeName || "—"}</TableCell>
-                  <TableCell className="text-sm text-muted-foreground">{item.nextStepSummary || "等待受理"}</TableCell>
-                  <TableCell>
-                    <SLABadge slaStatus={item.slaStatus} slaResolutionDeadline={item.slaResolutionDeadline} />
-                  </TableCell>
-                  <TableCell className="text-sm text-muted-foreground">{new Date(item.createdAt).toLocaleString()}</TableCell>
-                </TableRow>
+                <MonitorRow key={item.id} item={item} onOpen={() => setSelectedTicket(item)} />
               ))
             )}
           </TableBody>
@@ -166,6 +329,325 @@ export function Component() {
       </DataTableCard>
 
       <DataTablePagination total={total} page={page} totalPages={totalPages} onPageChange={setPage} />
+
+      <MonitorTicketSheet
+        monitorItem={selectedTicket}
+        open={selectedTicket != null}
+        onOpenChange={(open) => {
+          if (!open) setSelectedTicket(null)
+        }}
+      />
+    </div>
+  )
+}
+
+function MonitorRow({ item, onOpen }: { item: TicketMonitorItem; onOpen: () => void }) {
+  const { t } = useTranslation("itsm")
+  const primaryReason = item.stuckReasons?.[0]
+  return (
+    <TableRow className="cursor-pointer align-top hover:bg-muted/25" onClick={onOpen}>
+      <TableCell>
+        <div className="flex items-center gap-2">
+          <span className={cn(
+            "h-9 w-1 rounded-full",
+            item.riskLevel === "blocked" && "bg-red-500",
+            item.riskLevel === "risk" && "bg-amber-500",
+            item.riskLevel === "normal" && "bg-muted-foreground/30",
+          )} />
+          <WorkspaceStatus tone={riskTone(item.riskLevel)} label={riskLabel(item.riskLevel, t)} />
+        </div>
+      </TableCell>
+      <TableCell>
+        <div className="min-w-0">
+          <div className="flex min-w-0 items-center gap-2">
+            <span className="font-mono text-xs text-muted-foreground">{item.code}</span>
+            <TicketStatusBadge ticket={item} />
+          </div>
+          <p className="mt-1 line-clamp-1 font-medium text-foreground">{item.title}</p>
+          {primaryReason ? <p className="mt-1 line-clamp-1 text-xs text-muted-foreground">{primaryReason}</p> : null}
+        </div>
+      </TableCell>
+      <TableCell>
+        <div className="min-w-0">
+          <p className="truncate text-sm font-medium">{item.serviceName || "-"}</p>
+          <p className="mt-1 inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+            {item.engineType === "smart" ? <Bot className="h-3.5 w-3.5" /> : <Route className="h-3.5 w-3.5" />}
+            {engineLabel(item.engineType, t)}
+          </p>
+        </div>
+      </TableCell>
+      <TableCell className="text-sm">{item.currentOwnerName || item.assigneeName || "-"}</TableCell>
+      <TableCell>
+        <p className="line-clamp-1 text-sm font-medium">{item.currentActivityName || item.nextStepSummary || t("monitor.waitingSystem")}</p>
+        <p className="mt-1 text-xs text-muted-foreground">{item.currentActivityType || item.smartState || "-"}</p>
+      </TableCell>
+      <TableCell className="font-mono text-sm tabular-nums">{formatWaiting(item.waitingMinutes)}</TableCell>
+      <TableCell>
+        <SLABadge slaStatus={item.slaStatus} slaResolutionDeadline={item.slaResolutionDeadline} />
+      </TableCell>
+      <TableCell className="text-xs text-muted-foreground">{formatDate(item.updatedAt)}</TableCell>
+    </TableRow>
+  )
+}
+
+function MonitorTicketSheet({
+  monitorItem,
+  open,
+  onOpenChange,
+}: {
+  monitorItem: TicketMonitorItem | null
+  open: boolean
+  onOpenChange: (open: boolean) => void
+}) {
+  const { t } = useTranslation(["itsm", "common"])
+  const navigate = useNavigate()
+  const queryClient = useQueryClient()
+  const canAssign = usePermission("itsm:ticket:assign")
+  const canCancel = usePermission("itsm:ticket:cancel")
+  const canOverride = usePermission("itsm:ticket:override")
+  const [assigneeId, setAssigneeId] = useState("")
+  const [opinion, setOpinion] = useState("")
+  const [cancelReason, setCancelReason] = useState("")
+  const ticketId = monitorItem?.id ?? null
+
+  const enabled = open && ticketId != null
+  const { data: ticket } = useQuery({
+    queryKey: ["itsm-ticket", ticketId],
+    queryFn: () => fetchTicket(ticketId!),
+    enabled,
+  })
+  const { data: activities = [] } = useQuery({
+    queryKey: ["itsm-ticket-activities", ticketId],
+    queryFn: () => fetchTicketActivities(ticketId!),
+    enabled,
+  })
+  const { data: timeline = [] } = useQuery({
+    queryKey: ["itsm-ticket-timeline", ticketId],
+    queryFn: () => fetchTicketTimeline(ticketId!),
+    enabled,
+  })
+  const { data: users = [] } = useQuery({
+    queryKey: ["users-for-monitor-actions"],
+    queryFn: () => fetchUsers(),
+    enabled,
+  })
+
+  const currentActivity = ticket ? activeHumanActivity(activities, ticket.currentActivityId) : undefined
+  const isActive = ticket ? ACTIVE_STATUSES.has(ticket.status) : false
+
+  function invalidate() {
+    if (!ticketId) return
+    queryClient.invalidateQueries({ queryKey: ["itsm-ticket-monitor"] })
+    queryClient.invalidateQueries({ queryKey: ["itsm-ticket", ticketId] })
+    queryClient.invalidateQueries({ queryKey: ["itsm-ticket-activities", ticketId] })
+    queryClient.invalidateQueries({ queryKey: ["itsm-ticket-timeline", ticketId] })
+  }
+
+  const assignMut = useMutation({
+    mutationFn: () => assignTicket(ticketId!, Number(assigneeId)),
+    onSuccess: () => {
+      toast.success(t("itsm:tickets.assignSuccess"))
+      setAssigneeId("")
+      invalidate()
+    },
+    onError: (err) => toast.error(err.message),
+  })
+
+  const progressMut = useMutation({
+    mutationFn: (outcome: "approved" | "rejected") => progressTicket(ticketId!, {
+      activityId: currentActivity!.id,
+      outcome,
+      opinion,
+    }),
+    onSuccess: () => {
+      toast.success(t("itsm:tickets.progressSuccess"))
+      setOpinion("")
+      invalidate()
+    },
+    onError: (err) => toast.error(err.message),
+  })
+
+  const cancelMut = useMutation({
+    mutationFn: () => cancelTicket(ticketId!, cancelReason.trim()),
+    onSuccess: () => {
+      toast.success(t("itsm:tickets.cancelSuccess"))
+      setCancelReason("")
+      invalidate()
+    },
+    onError: (err) => toast.error(err.message),
+  })
+
+  return (
+    <Sheet open={open} onOpenChange={onOpenChange}>
+      <SheetContent className="w-full border-l-border/70 bg-background shadow-none backdrop-blur-none sm:max-w-[560px]">
+        <SheetHeader className="border-b border-border/55 pr-12">
+          <SheetTitle className="flex items-center gap-2">
+            <ShieldAlert className="h-4 w-4" />
+            {ticket?.code ?? t("monitor.ticketDiagnosis")}
+          </SheetTitle>
+          <SheetDescription>{ticket?.title ?? t("monitor.loadingTicket")}</SheetDescription>
+        </SheetHeader>
+
+        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 pb-4">
+          {!ticket ? (
+            <div className="flex items-center gap-2 py-10 text-sm text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              {t("monitor.loadingTicket")}
+            </div>
+          ) : (
+            <>
+              <section className="space-y-3 border-b border-border/50 pb-4">
+                <div className="flex flex-wrap items-center gap-2">
+                  <TicketStatusBadge ticket={ticket} />
+                  <WorkspaceStatus tone={ticket.engineType === "smart" ? "info" : "neutral"} label={engineLabel(ticket.engineType, t)} />
+                  <SLABadge slaStatus={ticket.slaStatus} slaResolutionDeadline={ticket.slaResolutionDeadline} />
+                </div>
+                <div className="grid gap-3 text-sm sm:grid-cols-2">
+                  <Fact label={t("tickets.service")} value={ticket.serviceName || "-"} />
+                  <Fact label={t("monitor.owner")} value={ticket.currentOwnerName || ticket.assigneeName || "-"} />
+                  <Fact label={t("monitor.currentStep")} value={currentActivity?.name || monitorItem?.currentActivityName || ticket.nextStepSummary || "-"} />
+                  <Fact label={t("tickets.updatedAt")} value={formatDate(ticket.updatedAt)} />
+                </div>
+              </section>
+
+              <section className="space-y-2 border-b border-border/50 pb-4">
+                <h3 className="text-sm font-semibold">{t("monitor.blockingReasons")}</h3>
+                {monitorItem?.stuckReasons?.length ? (
+                  <div className="space-y-2">
+                    {monitorItem.stuckReasons.map((reason) => (
+                      <p key={reason} className="flex gap-2 rounded-lg border border-red-200/70 bg-red-50/65 px-3 py-2 text-sm text-red-800">
+                        <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                        <span>{reason}</span>
+                      </p>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="rounded-lg border border-border/50 bg-background/35 px-3 py-2 text-sm text-muted-foreground">
+                    {t("monitor.noBlockingReasons")}
+                  </p>
+                )}
+              </section>
+
+              {isActive && (
+                <section className="space-y-3 border-b border-border/50 pb-4">
+                  <h3 className="text-sm font-semibold">{t("monitor.manualActions")}</h3>
+                  {currentActivity ? (
+                    <div className="space-y-2">
+                      <Textarea
+                        value={opinion}
+                        onChange={(event) => setOpinion(event.target.value)}
+                        rows={3}
+                        placeholder={t("tickets.approvalOpinionPlaceholder")}
+                      />
+                      <div className="grid grid-cols-2 gap-2">
+                        <Button size="sm" disabled={progressMut.isPending} onClick={() => progressMut.mutate("approved")}>
+                          <CheckCircle2 className="h-4 w-4" />
+                          {t("tickets.approve")}
+                        </Button>
+                        <Button size="sm" variant="outline" className="text-destructive" disabled={progressMut.isPending} onClick={() => progressMut.mutate("rejected")}>
+                          <CircleX className="h-4 w-4" />
+                          {t("tickets.reject")}
+                        </Button>
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="rounded-lg border border-border/50 bg-background/35 px-3 py-2 text-sm text-muted-foreground">
+                      {t("monitor.noHumanActivity")}
+                    </p>
+                  )}
+
+                  {canAssign && (
+                    <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
+                      <Select value={assigneeId} onValueChange={setAssigneeId}>
+                        <SelectTrigger><SelectValue placeholder={t("tickets.assigneePlaceholder")} /></SelectTrigger>
+                        <SelectContent>
+                          {users.map((user) => (
+                            <SelectItem key={user.id} value={String(user.id)}>{user.username}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <Button size="sm" variant="outline" disabled={!assigneeId || assignMut.isPending} onClick={() => assignMut.mutate()}>
+                        <UserPlus className="h-4 w-4" />
+                        {t("tickets.assign")}
+                      </Button>
+                    </div>
+                  )}
+
+                  {ticket.engineType === "smart" && canOverride && (
+                    <OverrideActions
+                      ticketId={ticket.id}
+                      currentActivityId={ticket.currentActivityId}
+                      aiFailureCount={ticket.aiFailureCount}
+                      triggerClassName="w-full justify-center"
+                      onSuccess={invalidate}
+                    />
+                  )}
+
+                  {canCancel && (
+                    <div className="space-y-2">
+                      <Textarea
+                        value={cancelReason}
+                        onChange={(event) => setCancelReason(event.target.value)}
+                        rows={2}
+                        placeholder={t("tickets.cancelReasonPlaceholder")}
+                      />
+                      <Button size="sm" variant="outline" className="w-full text-destructive" disabled={cancelMut.isPending} onClick={() => cancelMut.mutate()}>
+                        <CircleX className="h-4 w-4" />
+                        {t("tickets.cancel")}
+                      </Button>
+                    </div>
+                  )}
+                </section>
+              )}
+
+              <section className="space-y-2">
+                <div className="flex items-center justify-between gap-3">
+                  <h3 className="text-sm font-semibold">{t("monitor.recentTimeline")}</h3>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => navigate(`/itsm/tickets/${ticket.id}`, { state: withActiveMenuPermission(TICKET_MENU_PERMISSION.list) })}
+                  >
+                    <ArrowUpRight className="h-4 w-4" />
+                    {t("monitor.openDetail")}
+                  </Button>
+                </div>
+                <div className="space-y-2">
+                  {timeline.slice(0, 5).map((event) => (
+                    <TimelineLine key={event.id} event={event} />
+                  ))}
+                  {timeline.length === 0 && (
+                    <p className="rounded-lg border border-border/50 bg-background/35 px-3 py-2 text-sm text-muted-foreground">
+                      {t("monitor.noTimeline")}
+                    </p>
+                  )}
+                </div>
+              </section>
+            </>
+          )}
+        </div>
+      </SheetContent>
+    </Sheet>
+  )
+}
+
+function Fact({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="min-w-0">
+      <p className="text-xs text-muted-foreground">{label}</p>
+      <p className="mt-1 truncate font-medium">{value}</p>
+    </div>
+  )
+}
+
+function TimelineLine({ event }: { event: TimelineItem }) {
+  return (
+    <div className="grid grid-cols-[1rem_minmax(0,1fr)] gap-2 text-sm">
+      <Clock3 className="mt-0.5 h-3.5 w-3.5 text-muted-foreground" />
+      <div className="min-w-0">
+        <p className="line-clamp-2">{event.message || event.content}</p>
+        <p className="mt-0.5 text-xs text-muted-foreground">{formatDate(event.createdAt)}</p>
+      </div>
     </div>
   )
 }

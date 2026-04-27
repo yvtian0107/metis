@@ -33,12 +33,15 @@ type StartParams struct {
 }
 
 type ProgressParams struct {
-	TicketID   uint
-	ActivityID uint
-	Outcome    string
-	Result     json.RawMessage // form data or processing result
-	Opinion    string          // human approval / rejection opinion
-	OperatorID uint
+	TicketID              uint
+	ActivityID            uint
+	Outcome               string
+	Result                json.RawMessage // form data or processing result
+	Opinion               string          // human approval / rejection opinion
+	OperatorID            uint
+	OperatorPositionIDs   []uint
+	OperatorDepartmentIDs []uint
+	OperatorOrgScopeReady bool
 }
 
 type CancelParams struct {
@@ -149,9 +152,98 @@ const (
 const (
 	ActivityPending    = "pending"
 	ActivityInProgress = "in_progress"
+	ActivityApproved   = "approved"
+	ActivityRejected   = "rejected"
 	ActivityCompleted  = "completed"
 	ActivityCancelled  = "cancelled"
 )
+
+const (
+	TicketStatusSubmitted           = "submitted"
+	TicketStatusWaitingHuman        = "waiting_human"
+	TicketStatusApprovedDecisioning = "approved_decisioning"
+	TicketStatusRejectedDecisioning = "rejected_decisioning"
+	TicketStatusDecisioning         = "decisioning"
+	TicketStatusExecutingAction     = "executing_action"
+	TicketStatusCompleted           = "completed"
+	TicketStatusRejected            = "rejected"
+	TicketStatusWithdrawn           = "withdrawn"
+	TicketStatusCancelled           = "cancelled"
+	TicketStatusFailed              = "failed"
+)
+
+const (
+	TicketOutcomeApproved  = "approved"
+	TicketOutcomeRejected  = "rejected"
+	TicketOutcomeFulfilled = "fulfilled"
+	TicketOutcomeWithdrawn = "withdrawn"
+	TicketOutcomeCancelled = "cancelled"
+	TicketOutcomeFailed    = "failed"
+)
+
+func IsTerminalTicketStatus(status string) bool {
+	switch status {
+	case TicketStatusCompleted, TicketStatusRejected, TicketStatusWithdrawn, TicketStatusCancelled, TicketStatusFailed:
+		return true
+	default:
+		return false
+	}
+}
+
+func HumanActivityResultStatus(outcome string) string {
+	switch outcome {
+	case ActivityRejected:
+		return ActivityRejected
+	default:
+		return ActivityApproved
+	}
+}
+
+func TicketDecisioningStatusForOutcome(outcome string) string {
+	if outcome == ActivityRejected {
+		return TicketStatusRejectedDecisioning
+	}
+	if outcome == ActivityApproved {
+		return TicketStatusApprovedDecisioning
+	}
+	return TicketStatusDecisioning
+}
+
+func humanOrCompletedActivityStatus(activityType string, outcome string) string {
+	if IsHumanNode(activityType) {
+		return HumanActivityResultStatus(outcome)
+	}
+	return ActivityCompleted
+}
+
+func ticketCancelStatus(eventType string) string {
+	if eventType == "withdrawn" {
+		return TicketStatusWithdrawn
+	}
+	return TicketStatusCancelled
+}
+
+func ticketCancelOutcome(eventType string) string {
+	if eventType == "withdrawn" {
+		return TicketOutcomeWithdrawn
+	}
+	return TicketOutcomeCancelled
+}
+
+func ticketStatusForDecisionActivity(activityType string) string {
+	switch activityType {
+	case NodeAction, NodeNotify, NodeScript:
+		return TicketStatusExecutingAction
+	case NodeApprove, NodeForm, NodeProcess, NodeWait:
+		return TicketStatusWaitingHuman
+	default:
+		return TicketStatusDecisioning
+	}
+}
+
+func CompletedActivityStatuses() []string {
+	return []string{ActivityCompleted, ActivityApproved, ActivityRejected, ActivityCancelled}
+}
 
 // Smart engine errors
 var (

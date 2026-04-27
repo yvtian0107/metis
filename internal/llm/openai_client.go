@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	openai "github.com/sashabaranov/go-openai"
@@ -211,7 +212,7 @@ func (c *openaiClient) buildRequest(req ChatRequest) openai.ChatCompletionReques
 	if req.MaxTokens > 0 {
 		oaiReq.MaxCompletionTokens = req.MaxTokens
 	}
-	if req.Temperature != nil {
+	if req.Temperature != nil && !openAIModelHasFixedSampling(req.Model) {
 		oaiReq.Temperature = *req.Temperature
 	}
 
@@ -247,4 +248,9 @@ func (c *openaiClient) buildRequest(req ChatRequest) openai.ChatCompletionReques
 	}
 
 	return oaiReq
+}
+
+func openAIModelHasFixedSampling(model string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(model))
+	return normalized == "gpt-5.4" || strings.HasPrefix(normalized, "gpt-5.4-")
 }

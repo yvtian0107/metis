@@ -1,36 +1,36 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
 # Repository Instructions
 
-## Working Style
-
 - 默认用中文与用户交流。
-- `AGENTS.md` 是指向 `CLAUDE.md` 的软链接；更新说明文件时改 `CLAUDE.md`，不要删除或重建这个链接。
-- `DESIGN.md` 是前端设计沉淀文档，记录已经落地并验证过的页面结构、视觉语言、交互规则和不再使用的旧模式。做 UI 相关改动时，先参考它；当设计方向或已实现模式发生稳定变化时，同步更新它。
-- `openspec/` 是规格工件；`support-files/refer/` 是参考代码。除非用户明确要求，否则不要修改这两处。
+- `AGENTS.md` 是指向 `CLAUDE.md` 的软链接；更新说明只改 `CLAUDE.md`，不要删除或重建链接。
+- `openspec/` 是规格工件，`support-files/refer/` 是参考代码；除非用户明确要求，否则不要修改。
+- 做 UI 改动先读 `DESIGN.md`；当前基线是安静工作台，CRUD 新建/编辑优先 `Sheet`，不要改成 `Dialog`。
 
 ## Commands
 
-- 前端只用 Bun，目录在 `web/`；安装依赖用 `make web-install`，不要改用 `npm`/`pnpm`/`yarn`。
-- 本地开发用 `make dev` 一条命令启动 Go 服务和 Vite；它会自动寻找空闲后端/前端端口，并让 Vite 代理 `/api` 到本次后端端口。根目录存在 `.env.dev` 时，`make dev` 会先执行 `make seed-dev`，自动安装本地开发库并使用 `admin / password` 登录。
-- 开发环境需要跳过安装向导时用 `make seed-dev`；它只在 `-tags dev` 下可用，要求 `.env.dev` 存在，并会生成/复用 `config.yml`、初始化 DB、执行 App Seed、补齐 AI/ITSM 开发配置、标记已安装。
-- 需要只调前端时用 `make web-dev`，默认代理 `/api` 到 `http://localhost:8080`；可用 `VITE_API_TARGET=http://localhost:<port> make web-dev` 指定代理目标。
-- 后端快速编译验证用 `go build -tags dev ./cmd/server`；`make build` 会先构建 `web/dist`，再产出嵌入前端的 `./server`。
-- Sidecar 是独立二进制，入口在 `cmd/sidecar`；验证构建用 `make build-sidecar`。
-- 前端验证用 `cd web && bun run lint` 和 `cd web && bun run build`；仓库当前没有前端测试。
-- 常用测试：`make test`、`make test-license`、`make test-bdd`、`make test-llm`。`make test-llm` 依赖根目录 `.env.test`，模板在 `.env.test.example`。
+- 前端包管理只用 Bun。`web/` 安装依赖用 `make web-install`，不要改用 `npm`/`pnpm`/`yarn`。
+- 联调优先 `make dev`：会先恢复完整前端 registry；若根目录存在 `.env.dev`，会先执行 `make seed-dev`，再由 `cmd/dev` 自动找空闲 `3000+/8000+` 端口并同时启动 Go 服务和 Vite，把 `/api` 代理到本次后端端口。
+- 只跑前端用 `make web-dev`；默认代理 `http://localhost:8080`，需要别的后端时用 `VITE_API_TARGET=http://localhost:<port> make web-dev`。
+- 常用验证：后端 `go build -tags dev ./cmd/server`、`go test ./...`、`go test ./path/to/pkg -run TestName`；前端 `cd web && bun run lint && bun run build`；Sidecar `make build-sidecar`。
+- 前端测试走 Bun，例如 `cd web && bun test src/components/chat-workspace/message-timeline.test.ts`。`web/tsconfig.app.json` 默认排除 `src/**/*.test.*`，所以 `bun run build` 不会检查测试文件。
+- 需要 edition / 模块过滤构建时只用 `make web-build` 或 `APPS=... ./scripts/gen-registry.sh` 这套流程；脚本会改写 `web/src/apps/_bootstrap.ts` 和 `web/tsconfig.app.json`，异常残留用 `make web-full-registry` 恢复。
+- `make test-llm`、`make test-bdd`、`make test-bdd-vpn` 都要求根目录 `.env.test`。
 
 ## Architecture
 
-- 这是单仓库双端项目：后端入口在 `cmd/server/main.go`，前端入口在 `web/src/main.tsx`；生产态由 Go 二进制嵌入 `web/dist`，开发态 `embed_dev.go` 提供空 FS，所以开发时由 `cmd/dev` 同时拉起后端和 Vite。
-- 可插拔 App 的真实接口以 `internal/app/app.go` 为准，不要照抄 `internal/app/README.md` 里的旧签名；当前接口是 `Seed(db, enforcer, install bool)`。
-- 新增 App 时至少同步三处：`internal/app/<name>/`、`cmd/server/edition_*.go`、`web/src/apps/<name>/module.ts`。前端路由还依赖 `web/src/apps/_bootstrap.ts` 的副作用导入。
-- `handler.Register()` 返回的 `*gin.RouterGroup` 已经挂好 `JWT -> PasswordExpiry -> Casbin -> DataScope -> Audit`；App 路由默认都走这条链。
-- `cmd/server/edition_full.go` 的空白导入顺序会影响 `init() -> app.Register()` 顺序，也会影响启动时的 `Models -> Providers -> Seed -> Routes -> Tasks` 顺序；有跨 App 依赖时不要随意改导入顺序。
+- 单仓库：后端入口 `cmd/server/main.go`，开发编排入口 `cmd/dev/main.go`，前端入口 `web/src/main.tsx`。生产构建把 `web/dist` 嵌进 Go 二进制；`-tags dev` 下前端不嵌入，走 Vite。Sidecar 是独立进程，入口 `cmd/sidecar/main.go`。
+- 后端使用 GORM（SQLite）、Gin、Casbin（RBAC）、samber/do v2（依赖注入容器）。
+- 可插拔 App 的真实接口以 `internal/app/app.go` 为准，当前 `Seed` 签名是 `Seed(db, enforcer, install bool)`；`internal/app/README.md` 有旧说明时不要信。App 可以实现可选接口（`LocaleProvider`、`OrgResolver`、`AIAgentProvider`、`ToolRegistryProvider` 等），消费方需判空处理。
+- 新增 App 至少同步：`internal/app/<name>/`、对应 `cmd/server/edition_*.go` 的空白导入、`web/src/apps/<name>/module.ts`，以及 `scripts/gen-registry.sh` 的 `ALL_APPS`。前端是否生效还取决于 `web/src/apps/_bootstrap.ts` 的副作用导入。
+- `cmd/server/edition_full.go` 的空白导入顺序决定 `app.Register()` 顺序，分三层：Tier 0（org/node/apm/observe/license）→ Tier 1（ai）→ Tier 2（itsm）；启动时按 `Models -> Providers -> Seed -> Routes -> Tasks` 装配；有跨 App 依赖时不要随意重排。
+- `handler.Register()` 返回的 `/api/v1` 鉴权链固定为 `JWT -> PasswordExpiry -> Casbin -> DataScope -> Audit`；App 路由默认挂在这条链后面。
 
 ## Gotchas
 
-- `scripts/gen-registry.sh` 会重写 `web/src/apps/_bootstrap.ts`；过滤构建时还会重写 `web/tsconfig.app.json`。新增或删除前端 App 时，要同步更新脚本里的 `ALL_APPS`。如果过滤构建被中断，用 `make web-full-registry` 恢复全量状态。
-- 后端响应格式统一是 `R{code,message,data}`，不是裸 JSON；前端优先复用 `web/src/lib/api.ts`，它已经处理了 token 刷新和并发 401 排队。
-- 运行时配置不走 `.env`：基础密钥和数据库在 `config.yml`，很多运行参数（如 `server_port`、OTel）在数据库 `SystemConfig`；LLM 测试读取 `.env.test`。开发态 `-tags dev` 额外支持本地 `.env.dev`，用于自动初始化开发 AI 供应商、`gpt-4o` 模型和 ITSM 智能引擎绑定。
-- 需要“登录即可、无需细粒度权限”的 API 时，除了注册路由，还要更新 `internal/middleware/casbin.go` 的 `casbinWhitelist` 或 `casbinWhitelistPrefixes`；否则会被 Casbin 拦截。
-- React Compiler 已开启（见 `web/vite.config.ts` 的 `reactCompilerPreset()`）；前端改动避免在所有 hooks 之前提前 `return`、避免在 effect 里同步 `setState`、避免在 render 里读写 `ref.current`。
-- 前端 UI 约定见 `DESIGN.md`；它既包含通用约定，也包含像【供应商管理】这种模块的当前实现基线。最常用的一条是新建/编辑表单优先用 `Sheet`，不要用 `Dialog`。
+- 后端统一响应是 `R{code,message,data}`，不是裸 JSON；前端优先复用 `web/src/lib/api.ts`，里面已经处理 token 刷新、并发 401 排队和 `FormData` 上传。
+- 某个 API 若只要求“已登录”不要求细粒度权限，除了注册路由，还要同步更新 `internal/middleware/casbin.go` 的白名单、前缀白名单或 `KeyMatch` 规则，否则会被 Casbin 拦住。
+- 运行时配置主要来自 `config.yml` 和数据库里的 `SystemConfig`，不是通用 `.env`；`.env.dev` 只给开发 bootstrap，`.env.test` 只给测试。
+- React Compiler 已在 `web/vite.config.ts` 开启；前端改动避免破坏 hooks 顺序、在 effect 里同步 `setState`、或在 render 中读写 `ref.current`。

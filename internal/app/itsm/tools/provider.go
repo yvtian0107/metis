@@ -11,10 +11,12 @@ import (
 
 // ITSMTool defines a tool that ITSM registers into the ai_tools table.
 type ITSMTool struct {
-	Name             string
-	DisplayName      string
-	Description      string
-	ParametersSchema json.RawMessage
+	Name                string
+	DisplayName         string
+	Description         string
+	ParametersSchema    json.RawMessage
+	RuntimeConfigSchema json.RawMessage
+	RuntimeConfig       json.RawMessage
 }
 
 // AllTools returns the ITSM tool definitions.
@@ -31,6 +33,19 @@ func AllTools() []ITSMTool {
 				},
 				"required": ["query"]
 			}`),
+			RuntimeConfigSchema: json.RawMessage(`{
+				"type": "object",
+				"kind": "llm",
+				"title": "服务匹配运行时",
+				"properties": {
+					"modelId": {"type": "integer", "title": "模型", "minimum": 1},
+					"temperature": {"type": "number", "title": "温度", "minimum": 0, "maximum": 1, "default": 0.2},
+					"maxTokens": {"type": "integer", "title": "最大 Token", "minimum": 256, "maximum": 8192, "default": 1024},
+					"timeoutSeconds": {"type": "integer", "title": "超时时间", "minimum": 5, "maximum": 300, "default": 30}
+				},
+				"required": ["modelId", "temperature", "maxTokens", "timeoutSeconds"]
+			}`),
+			RuntimeConfig: json.RawMessage(`{"modelId":0,"temperature":0.2,"maxTokens":1024,"timeoutSeconds":30}`),
 		},
 		{
 			Name:        "itsm.service_confirm",
@@ -255,10 +270,16 @@ func SeedTools(db *gorm.DB) error {
 		if err := db.Table("ai_tools").Where("name = ?", tool.Name).Select("id").First(&existing).Error; err == nil {
 			// Update existing
 			db.Table("ai_tools").Where("id = ?", existing.ID).Updates(map[string]any{
-				"display_name":      tool.DisplayName,
-				"description":       tool.Description,
-				"parameters_schema": string(tool.ParametersSchema),
+				"display_name":          tool.DisplayName,
+				"description":           tool.Description,
+				"parameters_schema":     string(tool.ParametersSchema),
+				"runtime_config_schema": string(tool.RuntimeConfigSchema),
 			})
+			if len(tool.RuntimeConfig) > 0 {
+				db.Table("ai_tools").
+					Where("id = ? AND (runtime_config IS NULL OR runtime_config = '')", existing.ID).
+					Update("runtime_config", string(tool.RuntimeConfig))
+			}
 			slog.Info("ITSM tools seed: updated tool", "name", tool.Name)
 		} else {
 			// Create new
@@ -269,12 +290,14 @@ func SeedTools(db *gorm.DB) error {
 				toolkit = "sla"
 			}
 			if err := db.Table("ai_tools").Create(map[string]any{
-				"toolkit":           toolkit,
-				"name":              tool.Name,
-				"display_name":      tool.DisplayName,
-				"description":       tool.Description,
-				"parameters_schema": string(tool.ParametersSchema),
-				"is_active":         true,
+				"toolkit":               toolkit,
+				"name":                  tool.Name,
+				"display_name":          tool.DisplayName,
+				"description":           tool.Description,
+				"parameters_schema":     string(tool.ParametersSchema),
+				"runtime_config_schema": string(tool.RuntimeConfigSchema),
+				"runtime_config":        string(tool.RuntimeConfig),
+				"is_active":             true,
 			}).Error; err != nil {
 				slog.Error("ITSM tools seed: failed to create tool", "name", tool.Name, "error", err)
 				continue
@@ -325,8 +348,11 @@ itsm.service_match ->（需要确认时 itsm.service_confirm）-> itsm.service_l
 ## 字段填槽策略
 
 - 优先使用 service_load.prefill_suggestions；它是工具从用户原话确定提取出的字段，不属于脑补。
-- form_data 必须使用 service_load.form_fields 的 key。select/radio 字段优先使用 option.value，不使用用户随口表达。
+- form_data 必须使用 service_load.form_fields 的 key 和字段类型约定的 JSON 值形态：text/textarea/email/url/select/radio/date/datetime/user_picker/dept_picker/rich_text 为 string；number 为 number；switch 与无 options 的 checkbox 为 boolean；multi_select 与有 options 的 checkbox 为 string[]；date_range 为 {"start":"YYYY-MM-DD","end":"YYYY-MM-DD"}；table 为行对象数组。
+- select/radio/multi_select/checkbox(options) 必须使用 option.value；不能把用户随口表达、逗号拼接字符串或 label 当作 value。
+- table 字段必须按 service_load.form_fields.props.columns 生成行数据；每行 key 使用 column.key，不确定的必填列必须追问。
 - 只补确定信息；账号、设备型号、时间窗口、处理人等不能从用户话里确定时保持缺失。
+- system.current_user_profile.user.username 只是登录名，不是邮箱。涉及“邮箱”“Email”“我的邮箱”“账号邮箱”时，只能使用用户原文中的完整邮箱地址，或工具明确返回的邮箱字段；没有明确邮箱时必须追问，不得把用户名、姓名或账号名当邮箱。
 - 用户已经给出的用途或原因，不要追问“是否还有其他具体原因”。复合字段如“设备与用途说明”不是独立设备型号字段；已有用途时不要追问设备型号。
 - 追问缺失字段时只问 missing_required_fields 里的缺口，不把已预填字段重复问一遍。
 - 路由字段存在 option_route_map 时，draft_prepare 前先判断是否跨路由；跨路由要让用户选择当前办理哪一路，同一路由多原因可合并为单值并在 summary/说明字段保留完整诉求。
@@ -357,7 +383,7 @@ const decisionAgentSystemPrompt = `你是流程决策智能体，负责为智能
 ## 工具使用顺序
 
 1. 必须先调用 decision.ticket_context，读取 status、current_activities、activity_history、action_progress、parallel_groups 和 is_terminal。
-2. 本轮由 activity_completed 触发时，必须读取 completed_activity 和 completed_requirements；已完成且满足当前规范的人工活动不得重复生成。
+2. 本轮由 activity_completed 触发时，必须读取 completed_activity、completed_requirements 和 workflow_context；已完成且满足当前规范的人工活动不得重复生成；被 rejected 的人工活动必须先解释驳回原因、协作规范定义的恢复路径以及 workflow_json 与该路径的关系，不得无新证据重复创建同一处理任务。
 3. 有服务知识库或规范不明确时，调用 decision.knowledge_search；无结果或不可用时可降级，但 reasoning 要说明。
 4. 服务配置了动作时，先 decision.list_actions；规范要求同步预检、放行等动作时，优先用 decision.execute_action 元调用执行并观察结果。
 5. 需要人工活动时，调用 decision.resolve_participant；候选大于 1 时可用 decision.user_workload 做负载选择。
@@ -369,12 +395,14 @@ const decisionAgentSystemPrompt = `你是流程决策智能体，负责为智能
 - decision.ticket_context.action_progress.all_completed=true 只代表动作完成，不自动代表流程结束；必须同时满足服务规范允许结束、当前无待处理项、处理前置已完成。
 - 只有在 current_activities 为空、parallel_groups 无未完成项、规范允许结束且前置动作/人工活动都完成时，才能输出 next_step_type=complete。
 - 如果 completed_activity 已满足最后一个待处理人工前置条件，优先输出 complete，不要再次输出同一 process/form 活动。
+- 如果 completed_activity.outcome=rejected 或 satisfied=false，必须按协作规范定义的恢复路径处理；协作规范未显式定义补充信息或返工路径时，不得退回申请人补充；不得只因为原表单字段仍匹配就再次创建刚被驳回的同一处理任务。
 - is_terminal=true 时不再创建活动。
 
 ## 输出约束
 
 - 最终只输出 JSON DecisionPlan，不输出解释性正文。
-- participant_type=user 时必须填 participant_id；participant_type=position_department 时必须填 position_code 和 department_code。
+- activities 中每个活动可包含 node_id 字段（对应 workflow_json 中的节点 ID，可选）；有 workflow_json 时建议填写，帮助引擎精确定位当前步骤在流程图中的位置。
+- participant_type=requester 表示当前工单申请人，无需 participant_id；participant_type=user 时必须填 participant_id；participant_type=position_department 时必须填 position_code 和 department_code。
 - 不允许把姓名当 username，不允许把岗位名称当 position_code，不允许把部门名称当 department_code。
 - confidence 必须反映证据强度：未解析到参与者、知识冲突、动作失败或上下文不足时降低置信度。`
 

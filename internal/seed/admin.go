@@ -10,8 +10,14 @@ import (
 	"metis/internal/pkg/token"
 )
 
-// UpsertInstallAdmin creates or updates the development/install admin account.
-func UpsertInstallAdmin(db *gorm.DB, username, password, email string, roleID uint) error {
+type UserOrgIdentity struct {
+	DeptCode string
+	PosCode  string
+	Primary  bool
+}
+
+// UpsertLocalUser creates or updates a local password user.
+func UpsertLocalUser(db *gorm.DB, username, password, email string, roleID uint) error {
 	hashed, err := token.HashPassword(password)
 	if err != nil {
 		return err
@@ -45,24 +51,15 @@ func UpsertInstallAdmin(db *gorm.DB, username, password, email string, roleID ui
 	return db.Model(&model.User{}).Where("id = ?", existing.ID).Updates(updates).Error
 }
 
-// AssignInstallAdminOrgIdentity binds the install admin to built-in IT org posts.
-func AssignInstallAdminOrgIdentity(db *gorm.DB, username string) error {
+// UpsertInstallAdmin creates or updates the development/install admin account.
+func UpsertInstallAdmin(db *gorm.DB, username, password, email string, roleID uint) error {
+	return UpsertLocalUser(db, username, password, email, roleID)
+}
+
+func AssignUserOrgIdentities(db *gorm.DB, username string, identities []UserOrgIdentity) error {
 	var user struct{ ID uint }
 	if err := db.Table("users").Where("username = ?", username).Select("id").First(&user).Error; err != nil {
 		return err
-	}
-
-	identities := []struct {
-		DeptCode string
-		PosCode  string
-		Primary  bool
-	}{
-		{DeptCode: "it", PosCode: "it_admin", Primary: true},
-		{DeptCode: "it", PosCode: "db_admin"},
-		{DeptCode: "it", PosCode: "network_admin"},
-		{DeptCode: "it", PosCode: "security_admin"},
-		{DeptCode: "it", PosCode: "ops_admin"},
-		{DeptCode: "headquarters", PosCode: "serial_reviewer"},
 	}
 
 	return db.Transaction(func(tx *gorm.DB) error {
@@ -122,6 +119,18 @@ func AssignInstallAdminOrgIdentity(db *gorm.DB, username string) error {
 			}
 		}
 		return nil
+	})
+}
+
+// AssignInstallAdminOrgIdentity binds the install admin to built-in IT org posts.
+func AssignInstallAdminOrgIdentity(db *gorm.DB, username string) error {
+	return AssignUserOrgIdentities(db, username, []UserOrgIdentity{
+		{DeptCode: "it", PosCode: "it_admin", Primary: true},
+		{DeptCode: "it", PosCode: "db_admin"},
+		{DeptCode: "it", PosCode: "network_admin"},
+		{DeptCode: "it", PosCode: "security_admin"},
+		{DeptCode: "it", PosCode: "ops_admin"},
+		{DeptCode: "headquarters", PosCode: "serial_reviewer"},
 	})
 }
 

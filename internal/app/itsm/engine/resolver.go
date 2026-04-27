@@ -22,6 +22,9 @@ func NewParticipantResolver(orgResolver app.OrgResolver) *ParticipantResolver {
 // Resolve returns user IDs for a given participant configuration.
 func (r *ParticipantResolver) Resolve(tx *gorm.DB, ticketID uint, p Participant) ([]uint, error) {
 	switch p.Type {
+	case "requester":
+		return r.resolveRequester(tx, ticketID)
+
 	case "user":
 		uid, err := strconv.ParseUint(p.Value, 10, 64)
 		if err != nil {
@@ -45,7 +48,7 @@ func (r *ParticipantResolver) Resolve(tx *gorm.DB, ticketID uint, p Participant)
 		if err != nil {
 			return nil, fmt.Errorf("invalid position ID %q: %w", p.Value, err)
 		}
-		return r.orgResolver.FindUsersByPositionID(uint(posID))
+		return r.resolveUsersByPositionID(tx, uint(posID))
 
 	case "department":
 		if r.orgResolver == nil {
@@ -55,7 +58,7 @@ func (r *ParticipantResolver) Resolve(tx *gorm.DB, ticketID uint, p Participant)
 		if err != nil {
 			return nil, fmt.Errorf("invalid department ID %q: %w", p.Value, err)
 		}
-		return r.orgResolver.FindUsersByDepartmentID(uint(deptID))
+		return r.resolveUsersByDepartmentID(tx, uint(deptID))
 
 	case "position_department":
 		if r.orgResolver == nil {
@@ -64,11 +67,22 @@ func (r *ParticipantResolver) Resolve(tx *gorm.DB, ticketID uint, p Participant)
 		if p.PositionCode == "" || p.DepartmentCode == "" {
 			return nil, fmt.Errorf("position_department 类型需要同时指定 position_code 和 department_code")
 		}
-		return r.orgResolver.FindUsersByPositionAndDepartment(p.PositionCode, p.DepartmentCode)
+		return r.resolveUsersByPositionAndDepartment(tx, p.PositionCode, p.DepartmentCode)
 
 	default:
 		return nil, fmt.Errorf("unsupported participant type: %s", p.Type)
 	}
+}
+
+func (r *ParticipantResolver) resolveRequester(tx *gorm.DB, ticketID uint) ([]uint, error) {
+	var ticket ticketModel
+	if err := tx.First(&ticket, ticketID).Error; err != nil {
+		return nil, fmt.Errorf("ticket not found: %w", err)
+	}
+	if ticket.RequesterID == 0 {
+		return nil, nil
+	}
+	return []uint{ticket.RequesterID}, nil
 }
 
 func (r *ParticipantResolver) resolveRequesterManager(tx *gorm.DB, ticketID uint) ([]uint, error) {
@@ -77,18 +91,49 @@ func (r *ParticipantResolver) resolveRequesterManager(tx *gorm.DB, ticketID uint
 		return nil, fmt.Errorf("ticket not found: %w", err)
 	}
 
-	if r.orgResolver == nil {
-		return nil, fmt.Errorf("参与人解析失败：requester_manager 类型需要安装组织架构模块")
-	}
-
-	managerID, err := r.orgResolver.FindManagerByUserID(ticket.RequesterID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to find manager for user %d: %w", ticket.RequesterID, err)
-	}
-	if managerID == 0 {
+	if ticket.RequesterID == 0 {
 		return nil, nil
 	}
-	return []uint{managerID}, nil
+
+	var user struct {
+		ManagerID *uint
+	}
+	if err := tx.Table("users").Where("id = ?", ticket.RequesterID).Select("manager_id").First(&user).Error; err != nil {
+		return nil, fmt.Errorf("failed to find manager for user %d: %w", ticket.RequesterID, err)
+	}
+	if user.ManagerID == nil {
+		return nil, nil
+	}
+	return []uint{*user.ManagerID}, nil
+}
+
+func (r *ParticipantResolver) resolveUsersByPositionID(tx *gorm.DB, positionID uint) ([]uint, error) {
+	var userIDs []uint
+	err := tx.Table("user_positions").
+		Joins("JOIN users ON users.id = user_positions.user_id").
+		Where("user_positions.position_id = ? AND users.is_active = ?", positionID, true).
+		Pluck("DISTINCT users.id", &userIDs).Error
+	return userIDs, err
+}
+
+func (r *ParticipantResolver) resolveUsersByDepartmentID(tx *gorm.DB, departmentID uint) ([]uint, error) {
+	var userIDs []uint
+	err := tx.Table("user_positions").
+		Joins("JOIN users ON users.id = user_positions.user_id").
+		Where("user_positions.department_id = ? AND users.is_active = ?", departmentID, true).
+		Pluck("DISTINCT users.id", &userIDs).Error
+	return userIDs, err
+}
+
+func (r *ParticipantResolver) resolveUsersByPositionAndDepartment(tx *gorm.DB, posCode, deptCode string) ([]uint, error) {
+	var userIDs []uint
+	err := tx.Table("user_positions").
+		Joins("JOIN positions ON positions.id = user_positions.position_id").
+		Joins("JOIN departments ON departments.id = user_positions.department_id").
+		Joins("JOIN users ON users.id = user_positions.user_id").
+		Where("positions.code = ? AND departments.code = ? AND users.is_active = ?", posCode, deptCode, true).
+		Pluck("DISTINCT users.id", &userIDs).Error
+	return userIDs, err
 }
 
 // resolveForToolArgs is the JSON structure for decision.resolve_participant tool arguments.

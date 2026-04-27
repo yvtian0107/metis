@@ -9,7 +9,8 @@ import (
 	"gorm.io/gorm"
 
 	"metis/internal/app"
-	"metis/internal/app/node"
+	. "metis/internal/app/ai/runtime"
+	nodenode "metis/internal/app/node/node"
 	"metis/internal/handler"
 	"metis/internal/scheduler"
 	"metis/internal/service"
@@ -50,7 +51,7 @@ func (a *AIApp) Seed(db *gorm.DB, enforcer *casbin.Enforcer, _ bool) error {
 		slog.Error("knowledge data migration failed", "error", err)
 		// Non-fatal: don't block startup
 	}
-	return seedAI(db, enforcer)
+	return SeedAI(db, enforcer)
 }
 
 func (a *AIApp) Providers(i do.Injector) {
@@ -89,6 +90,7 @@ func (a *AIApp) Providers(i do.Injector) {
 	do.Provide(i, NewKnowledgeCompileService)
 	// Tool registry
 	do.Provide(i, NewToolRepo)
+	do.Provide(i, NewToolRuntimeService)
 	do.Provide(i, NewToolService)
 	do.Provide(i, NewToolHandler)
 	do.Provide(i, NewMCPServerRepo)
@@ -248,6 +250,7 @@ func (a *AIApp) Routes(api *gin.RouterGroup) {
 	{
 		tools.GET("", toolH.List)
 		tools.PUT("/:id", toolH.Update)
+		tools.PATCH("/:id/runtime", toolH.UpdateRuntime)
 	}
 
 	capabilitySetH := do.MustInvoke[*CapabilitySetHandler](a.injector)
@@ -322,6 +325,7 @@ func (a *AIApp) Routes(api *gin.RouterGroup) {
 		sessions.GET("/:sid", sessionH.Get)
 		sessions.PUT("/:sid", sessionH.Update)
 		sessions.DELETE("/:sid", sessionH.Delete)
+		sessions.POST("/:sid/chat", sessionH.Chat)
 		sessions.POST("/:sid/messages", sessionH.SendMessage)
 		sessions.PUT("/:sid/messages/:mid", sessionH.EditMessage)
 		sessions.GET("/:sid/stream", sessionH.Stream)
@@ -340,16 +344,16 @@ func (a *AIApp) Routes(api *gin.RouterGroup) {
 
 	// Agent knowledge query API (Sidecar token auth, bypasses JWT+Casbin)
 	r := do.MustInvoke[*gin.Engine](a.injector)
-	nodeRepo := do.MustInvoke[*node.NodeRepo](a.injector)
+	nodeRepo := do.MustInvoke[*nodenode.NodeRepo](a.injector)
 	queryH := do.MustInvoke[*KnowledgeQueryHandler](a.injector)
 
-	sidecarAPI := r.Group("/api/v1/ai/sidecar", node.NodeTokenMiddleware(nodeRepo))
+	sidecarAPI := r.Group("/api/v1/ai/sidecar", nodenode.NodeTokenMiddleware(nodeRepo))
 	{
 		sidecarAPI.POST("/knowledge/search", queryH.Search)
 	}
 
 	// Internal API for Agent to download skill packages (Node token auth)
-	internal := r.Group("/api/v1/ai/internal", node.NodeTokenMiddleware(nodeRepo))
+	internal := r.Group("/api/v1/ai/internal", nodenode.NodeTokenMiddleware(nodeRepo))
 	{
 		internal.GET("/skills/:id/package", skillH.Package)
 	}

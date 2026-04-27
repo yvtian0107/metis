@@ -1,9 +1,9 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { useNavigate } from "react-router"
-import { ClipboardCheck, History, Search } from "lucide-react"
+import { ClipboardCheck, History, RefreshCw, Search } from "lucide-react"
 import { useListPage } from "@/hooks/use-list-page"
 import { withActiveMenuPermission } from "@/lib/navigation-state"
 import { Button } from "@/components/ui/button"
@@ -69,10 +69,19 @@ export function ApprovalListPage({ mode }: { mode: ApprovalListMode }) {
     total,
     totalPages,
     isLoading,
+    isFetching,
+    refetch,
   } = useListPage<TicketItem>({
     queryKey: config.queryKey,
     endpoint: config.endpoint,
   })
+
+  useEffect(() => {
+    const interval = window.setInterval(() => {
+      void refetch()
+    }, 60000)
+    return () => window.clearInterval(interval)
+  }, [refetch])
 
   return (
     <div className="workspace-page">
@@ -96,6 +105,9 @@ export function ApprovalListPage({ mode }: { mode: ApprovalListMode }) {
               />
             </div>
             <Button type="submit" variant="outline" size="sm">{t("common:search")}</Button>
+            <Button type="button" variant="outline" size="icon" aria-label={t("common:refresh")} onClick={() => void refetch()} disabled={isFetching}>
+              <RefreshCw className={`h-4 w-4 ${isFetching ? "animate-spin" : ""}`} />
+            </Button>
           </form>
         </DataTableToolbarGroup>
       </DataTableToolbar>
@@ -123,6 +135,7 @@ export function ApprovalListPage({ mode }: { mode: ApprovalListMode }) {
             ) : (
               items.map((item) => (
                 <TableRow
+                  data-testid={`itsm-ticket-row-${item.code}`}
                   key={item.id}
                   className="cursor-pointer"
                   onClick={() => navigate(`/itsm/tickets/${item.id}`, { state: withActiveMenuPermission(config.permission) })}

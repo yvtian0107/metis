@@ -1,7 +1,7 @@
 import { useMemo, useState, type ComponentType, type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { ExternalLink, Route, Save, SearchCheck, ShieldAlert } from "lucide-react"
+import { ExternalLink, Route, Save, ShieldAlert } from "lucide-react"
 import { useNavigate } from "react-router"
 import { toast } from "sonner"
 import { Alert, AlertDescription } from "@/components/ui/alert"
@@ -75,117 +75,6 @@ function EngineSettingSection({
         <div className="min-w-0">{children}</div>
       </CardContent>
     </Card>
-  )
-}
-
-function ServiceMatcherFields({
-  providerId,
-  modelId,
-  temperature,
-  maxTokens,
-  timeoutSeconds,
-  onProviderChange,
-  onModelChange,
-  onTemperatureChange,
-  onMaxTokensChange,
-  onTimeoutSecondsChange,
-}: {
-  providerId: number
-  modelId: number
-  temperature: number
-  maxTokens: number
-  timeoutSeconds: number
-  onProviderChange: (id: number) => void
-  onModelChange: (id: number) => void
-  onTemperatureChange: (v: number) => void
-  onMaxTokensChange: (v: number) => void
-  onTimeoutSecondsChange: (v: number) => void
-}) {
-  const { t } = useTranslation("itsm")
-  const navigate = useNavigate()
-
-  const { data: providers = [] } = useQuery({
-    queryKey: ["ai-providers"],
-    queryFn: fetchProviders,
-  })
-
-  const { data: models = [] } = useQuery({
-    queryKey: ["ai-models", providerId],
-    queryFn: () => fetchModels(providerId),
-    enabled: providerId > 0,
-  })
-
-  if (providers.length === 0) {
-    return (
-      <Alert>
-        <AlertDescription className="flex items-center justify-between gap-4">
-          <span>{t("engineConfig.noProviders")}</span>
-          <Button variant="link" size="sm" className="h-auto p-0" onClick={() => navigate("/ai/providers")}>
-            {t("engineConfig.goToProviders")}
-            <ExternalLink className="ml-1 h-3 w-3" />
-          </Button>
-        </AlertDescription>
-      </Alert>
-    )
-  }
-
-  return (
-    <div className="grid gap-4 lg:grid-cols-2 2xl:grid-cols-[minmax(180px,220px)_minmax(220px,280px)_minmax(260px,1fr)_160px_180px] 2xl:items-start">
-      <div className="space-y-1.5">
-        <Label>{t("engineConfig.provider")}</Label>
-        <Select
-          value={providerId ? String(providerId) : ""}
-          onValueChange={(v) => {
-            onProviderChange(Number(v))
-            onModelChange(0)
-          }}
-        >
-          <SelectTrigger className="w-full">
-            <SelectValue placeholder={t("engineConfig.providerPlaceholder")} />
-          </SelectTrigger>
-          <SelectContent>
-            {providers.map((p) => (
-              <SelectItem key={p.id} value={String(p.id)}>
-                {p.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
-      <div className="space-y-1.5">
-        <Label>{t("engineConfig.model")}</Label>
-        <Select value={modelId ? String(modelId) : ""} onValueChange={(v) => onModelChange(Number(v))} disabled={!providerId}>
-          <SelectTrigger className="w-full">
-            <SelectValue placeholder={t("engineConfig.modelPlaceholder")} />
-          </SelectTrigger>
-          <SelectContent>
-            {models.map((m) => (
-              <SelectItem key={m.id} value={String(m.id)}>
-                {m.displayName}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
-      <div className="space-y-2">
-        <div className="flex items-center justify-between gap-3">
-          <Label>{t("engineConfig.temperature")}</Label>
-          <span className="rounded-full border border-border/55 bg-background/35 px-2 py-0.5 font-mono text-[11px] text-muted-foreground">{temperature.toFixed(2)}</span>
-        </div>
-        <Slider min={0} max={1} step={0.05} value={[temperature]} onValueChange={([v]) => onTemperatureChange(v)} />
-      </div>
-      <div className="space-y-1.5">
-        <Label>{t("engineConfig.maxTokens")}</Label>
-        <Input type="number" min={256} max={8192} value={maxTokens} onChange={(e) => onMaxTokensChange(Number(e.target.value))} />
-      </div>
-      <div className="space-y-1.5">
-        <Label>{t("engineConfig.timeoutSeconds")}</Label>
-        <div className="flex items-center gap-2">
-          <Input type="number" min={5} max={300} value={timeoutSeconds} onChange={(e) => onTimeoutSecondsChange(Number(e.target.value))} />
-          <span className="text-xs text-muted-foreground">{t("engineConfig.seconds")}</span>
-        </div>
-      </div>
-    </div>
   )
 }
 
@@ -302,11 +191,6 @@ function PathBuilderFields({
 
 function configFormKey(config: EngineSettingsConfig) {
   return [
-    config.runtime.serviceMatcher.providerId,
-    config.runtime.serviceMatcher.modelId,
-    config.runtime.serviceMatcher.temperature,
-    config.runtime.serviceMatcher.maxTokens,
-    config.runtime.serviceMatcher.timeoutSeconds,
     config.runtime.pathBuilder.providerId,
     config.runtime.pathBuilder.modelId,
     config.runtime.pathBuilder.temperature,
@@ -326,11 +210,6 @@ function EngineSettingsForm({ config }: { config: EngineSettingsConfig }) {
     queryFn: () => fetchUsers(),
   })
 
-  const [matchProviderId, setMatchProviderId] = useState(config.runtime.serviceMatcher.providerId)
-  const [matchModelId, setMatchModelId] = useState(config.runtime.serviceMatcher.modelId)
-  const [matchTemperature, setMatchTemperature] = useState(config.runtime.serviceMatcher.temperature)
-  const [matchMaxTokens, setMatchMaxTokens] = useState(config.runtime.serviceMatcher.maxTokens)
-  const [matchTimeoutSeconds, setMatchTimeoutSeconds] = useState(config.runtime.serviceMatcher.timeoutSeconds)
   const [pathProviderId, setPathProviderId] = useState(config.runtime.pathBuilder.providerId)
   const [pathModelId, setPathModelId] = useState(config.runtime.pathBuilder.modelId)
   const [pathTemperature, setPathTemperature] = useState(config.runtime.pathBuilder.temperature)
@@ -361,12 +240,6 @@ function EngineSettingsForm({ config }: { config: EngineSettingsConfig }) {
   function handleSave() {
     saveMut.mutate({
       runtime: {
-        serviceMatcher: {
-          modelId: matchModelId,
-          temperature: matchTemperature,
-          maxTokens: matchMaxTokens,
-          timeoutSeconds: matchTimeoutSeconds,
-        },
         pathBuilder: {
           modelId: pathModelId,
           temperature: pathTemperature,
@@ -390,26 +263,6 @@ function EngineSettingsForm({ config }: { config: EngineSettingsConfig }) {
           {saveMut.isPending ? t("common:saving") : t("common:save")}
         </Button>
       </div>
-
-      <EngineSettingSection
-        icon={SearchCheck}
-        title={t("itsm:engineConfig.serviceMatcherTitle")}
-        description={t("itsm:engineConfig.serviceMatcherDesc")}
-        health={healthByKey.get("serviceMatcher")}
-      >
-        <ServiceMatcherFields
-          providerId={matchProviderId}
-          modelId={matchModelId}
-          temperature={matchTemperature}
-          maxTokens={matchMaxTokens}
-          timeoutSeconds={matchTimeoutSeconds}
-          onProviderChange={setMatchProviderId}
-          onModelChange={setMatchModelId}
-          onTemperatureChange={setMatchTemperature}
-          onMaxTokensChange={setMatchMaxTokens}
-          onTimeoutSecondsChange={setMatchTimeoutSeconds}
-        />
-      </EngineSettingSection>
 
       <EngineSettingSection
         icon={Route}

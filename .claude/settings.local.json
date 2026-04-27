@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(grep -n \"OperatorOrgScopeReady\\\\|operatorOrgScope\\\\|OperatorPositionIDs\" /Users/umr/Documents/codespace/metis/internal/app/itsm/engine/*.go)",
+      "Bash(grep *)",
+      "Bash(find *)",
+      "Bash(openspec new *)",
+      "Bash(openspec status *)",
+      "Bash(openspec instructions *)"
+    ]
+  }
+}

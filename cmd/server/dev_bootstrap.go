@@ -247,8 +247,8 @@ func bindDevITSMEngine(db *gorm.DB, modelID uint) error {
 			"itsm.smart_ticket.service_matcher.timeout_seconds": "30",
 			"itsm.smart_ticket.path.model_id":                   strconv.FormatUint(uint64(modelID), 10),
 			"itsm.smart_ticket.path.temperature":                "0.3",
-			"itsm.smart_ticket.path.max_retries":                "3",
-			"itsm.smart_ticket.path.timeout_seconds":            "120",
+			"itsm.smart_ticket.path.max_retries":                "1",
+			"itsm.smart_ticket.path.timeout_seconds":            "60",
 		}
 		for key, value := range values {
 			if err := upsertSystemConfig(tx, key, value); err != nil {

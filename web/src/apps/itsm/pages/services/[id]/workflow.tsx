@@ -1,15 +1,12 @@
 "use client"
 
-import { useMemo } from "react"
 import { useTranslation } from "react-i18next"
 import { useParams, useNavigate } from "react-router"
-import { useQuery, useMutation } from "@tanstack/react-query"
+import { useQuery } from "@tanstack/react-query"
 import { ArrowLeft } from "lucide-react"
-import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
-import { type Node, type Edge } from "@xyflow/react"
-import { WorkflowEditor } from "../../../components/workflow"
-import { fetchServiceDef, updateServiceDef } from "../../../api"
+import { ClassicWorkflowWorkbench } from "./classic-workflow-workbench"
+import { fetchCatalogTree, fetchServiceDef, fetchSLATemplates } from "../../../api"
 
 export function Component() {
   const { t } = useTranslation("itsm")
@@ -23,23 +20,14 @@ export function Component() {
     enabled: !!serviceId,
   })
 
-  const initialData = useMemo(() => {
-    if (!service?.workflowJson) return undefined
-    try {
-      const wf = typeof service.workflowJson === "string"
-        ? JSON.parse(service.workflowJson)
-        : service.workflowJson
-      return { nodes: wf.nodes ?? [], edges: wf.edges ?? [] }
-    } catch {
-      return undefined
-    }
-  }, [service])
+  const { data: catalogs } = useQuery({
+    queryKey: ["itsm-catalogs"],
+    queryFn: () => fetchCatalogTree(),
+  })
 
-  const saveMut = useMutation({
-    mutationFn: (data: { nodes: Node[]; edges: Edge[] }) =>
-      updateServiceDef(serviceId, { workflowJson: data } as Record<string, unknown>),
-    onSuccess: () => toast.success(t("workflow.saveSuccess")),
-    onError: (err) => toast.error(err.message),
+  const { data: slaTemplates } = useQuery({
+    queryKey: ["itsm-sla"],
+    queryFn: () => fetchSLATemplates(),
   })
 
   if (isLoading) {
@@ -57,30 +45,5 @@ export function Component() {
     )
   }
 
-  return (
-    <div className="flex h-[calc(100vh-120px)] flex-col overflow-hidden rounded-[1.15rem] border border-border/55 bg-background/60">
-      <div className="flex min-h-14 items-center justify-between gap-3 border-b border-border/55 bg-white/52 px-4">
-        <div className="flex min-w-0 items-center gap-3">
-          <Button variant="ghost" size="icon-sm" onClick={() => navigate(-1)}>
-            <ArrowLeft className="h-4 w-4" />
-          </Button>
-          <div className="min-w-0">
-            <h2 className="truncate text-sm font-semibold">{t("workflow.editorTitle", { name: service?.name ?? "" })}</h2>
-            <p className="text-xs text-muted-foreground">{t("workflow.editorSubtitle")}</p>
-          </div>
-        </div>
-        <Button variant="outline" size="sm" onClick={() => navigate(`/itsm/services/${serviceId}`)}>
-          {t("workflow.back")}
-        </Button>
-      </div>
-      <div className="min-h-0 flex-1">
-        <WorkflowEditor
-          initialData={initialData}
-          onSave={(data) => saveMut.mutate(data)}
-          saving={saveMut.isPending}
-          serviceId={serviceId}
-        />
-      </div>
-    </div>
-  )
+  return <ClassicWorkflowWorkbench service={service} catalogs={catalogs ?? []} slaTemplates={slaTemplates ?? []} />
 }

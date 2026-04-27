@@ -57,9 +57,9 @@ services:
     ports:
       - "5432:5432"
     environment:
-      POSTGRES_DB: metis
+      POSTGRES_DB: postgres
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: metis
+      POSTGRES_PASSWORD: password
 
   falkordb:
     image: falkordb/falkordb:latest

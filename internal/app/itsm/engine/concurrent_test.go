@@ -167,11 +167,11 @@ func TestProgress_SequentialCallsSameActivity(t *testing.T) {
 		t.Fatalf("first Progress call should succeed, got: %v", err)
 	}
 
-	// Verify the activity is now completed
+	// Verify the human activity records the submitted outcome directly.
 	var act activityModel
 	db.First(&act, activityID)
-	if act.Status != ActivityCompleted {
-		t.Errorf("activity status after first Progress: got %q, want %q", act.Status, ActivityCompleted)
+	if act.Status != ActivityApproved {
+		t.Errorf("activity status after first Progress: got %q, want %q", act.Status, ActivityApproved)
 	}
 
 	// Second call on the same activity should fail
@@ -212,11 +212,11 @@ func TestProgress_ActivityNotFound(t *testing.T) {
 // UPDATE lock would serialize access and exactly 1 goroutine would succeed.
 //
 // This test validates:
-// 1. At least 1 goroutine succeeds (the workflow advances).
-// 2. Every goroutine either succeeds or receives an expected error
-//    (ErrActivityNotActive or ErrTokenNotActive — the latter occurs when the
-//    token was already completed by another goroutine reaching the end node).
-// 3. No panics or unexpected errors occur under concurrent access.
+//  1. At least 1 goroutine succeeds (the workflow advances).
+//  2. Every goroutine either succeeds or receives an expected error
+//     (ErrActivityNotActive or ErrTokenNotActive — the latter occurs when the
+//     token was already completed by another goroutine reaching the end node).
+//  3. No panics or unexpected errors occur under concurrent access.
 func TestProgress_ConcurrentGoroutines(t *testing.T) {
 	db, eng, ticketID, _, activityID := setupConcurrencyTest(t)
 

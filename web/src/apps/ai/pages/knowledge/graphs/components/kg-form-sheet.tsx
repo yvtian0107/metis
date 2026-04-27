@@ -1,5 +1,5 @@
 import { useEffect, useMemo } from "react"
-import { useForm } from "react-hook-form"
+import { useForm, useWatch } from "react-hook-form"
 import { z } from "zod"
 import { zodResolver } from "@/lib/form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
@@ -87,8 +87,8 @@ export function KgFormSheet({ open, onOpenChange, knowledgeGraph }: KgFormSheetP
     },
   })
 
-  const selectedCompileProviderId = form.watch("compileProviderId") ?? ""
-  const selectedEmbeddingProviderId = form.watch("embeddingProviderId") ?? ""
+  const selectedCompileProviderId = useWatch({ control: form.control, name: "compileProviderId" }) ?? ""
+  const selectedEmbeddingProviderId = useWatch({ control: form.control, name: "embeddingProviderId" }) ?? ""
 
   // Fetch LLM models for compile
   const { data: llmModelsData } = useQuery({

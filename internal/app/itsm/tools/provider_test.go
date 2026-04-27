@@ -7,7 +7,7 @@ import (
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 
-	aiapp "metis/internal/app/ai"
+	aiapp "metis/internal/app/ai/runtime"
 )
 
 func TestSeedAgentsUpdatesExistingPresetAgentPrompt(t *testing.T) {

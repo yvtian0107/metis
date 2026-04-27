@@ -20,7 +20,7 @@ type ActionConfig struct {
 	URL     string            `json:"url"`
 	Method  string            `json:"method"`
 	Headers map[string]string `json:"headers"`
-	Body    string            `json:"body"` // template with {{ticket.*}} variables
+	Body    string            `json:"body"`    // template with {{ticket.*}} variables
 	Timeout int               `json:"timeout"` // seconds, default 30
 	Retries int               `json:"retries"` // default 3
 }
@@ -186,15 +186,15 @@ type serviceActionModel struct {
 func (serviceActionModel) TableName() string { return "itsm_service_actions" }
 
 type actionExecutionModel struct {
-	ID              uint   `gorm:"primaryKey;autoIncrement"`
-	TicketID        uint   `gorm:"column:ticket_id;not null"`
-	ActivityID      uint   `gorm:"column:activity_id;not null"`
-	ServiceActionID uint   `gorm:"column:service_action_id;not null"`
-	Status          string `gorm:"column:status;size:16;default:pending"`
-	RequestPayload  string `gorm:"column:request_payload;type:text"`
-	ResponsePayload string `gorm:"column:response_payload;type:text"`
-	FailureReason   string `gorm:"column:failure_reason;type:text"`
-	RetryCount      int    `gorm:"column:retry_count;default:0"`
+	ID              uint      `gorm:"primaryKey;autoIncrement"`
+	TicketID        uint      `gorm:"column:ticket_id;not null"`
+	ActivityID      uint      `gorm:"column:activity_id;not null"`
+	ServiceActionID uint      `gorm:"column:service_action_id;not null"`
+	Status          string    `gorm:"column:status;size:16;default:pending"`
+	RequestPayload  string    `gorm:"column:request_payload;type:text"`
+	ResponsePayload string    `gorm:"column:response_payload;type:text"`
+	FailureReason   string    `gorm:"column:failure_reason;type:text"`
+	RetryCount      int       `gorm:"column:retry_count;default:0"`
 	CreatedAt       time.Time `gorm:"column:created_at;autoCreateTime"`
 }
 

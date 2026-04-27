@@ -23,11 +23,13 @@ type decisionToolContext struct {
 	data                DecisionDataProvider
 	ticketID            uint
 	serviceID           uint
+	workflowJSON        string
 	knowledgeSearcher   KnowledgeSearcher
 	resolver            *ParticipantResolver
 	knowledgeBaseIDs    []uint
 	actionExecutor      *ActionExecutor
 	completedActivityID *uint
+	configProvider      EngineConfigProvider
 }
 
 // allDecisionTools returns the complete set of decision domain tools.
@@ -82,6 +84,7 @@ func toolTicketContext() decisionToolDef {
 				"title":       ticket.Title,
 				"description": ticket.Description,
 				"status":      ticket.Status,
+				"outcome":     ticket.Outcome,
 				"source":      ticket.Source,
 				"is_terminal": isTerminalTicketStatus(ticket.Status),
 			}
@@ -114,13 +117,16 @@ func toolTicketContext() decisionToolDef {
 				entry := activityFactMap(&a, assignments)
 				history = append(history, entry)
 				if a.Status == ActivityCompleted && isHumanActivityType(a.ActivityType) {
+					satisfied := isPositiveActivityOutcome(a.TransitionOutcome)
 					completedRequirements = append(completedRequirements, map[string]any{
-						"type":             a.ActivityType,
-						"name":             a.Name,
-						"outcome":          a.TransitionOutcome,
-						"operator_opinion": a.DecisionReasoning,
-						"participants":     assignmentFacts(assignments),
-						"satisfied":        isPositiveActivityOutcome(a.TransitionOutcome),
+						"type":                       a.ActivityType,
+						"name":                       a.Name,
+						"node_id":                    a.NodeID,
+						"outcome":                    a.TransitionOutcome,
+						"operator_opinion":           a.DecisionReasoning,
+						"participants":               assignmentFacts(assignments),
+						"satisfied":                  satisfied,
+						"requires_recovery_decision": !satisfied,
 					})
 				}
 			}
@@ -131,7 +137,12 @@ func toolTicketContext() decisionToolDef {
 				if completed, err := ctx.data.GetActivityByID(ctx.ticketID, *ctx.completedActivityID); err == nil {
 					assignments, _ := ctx.data.GetActivityAssignments(completed.ID)
 					result["completed_activity"] = activityFactMap(completed, assignments)
+					if workflowCtx := buildWorkflowContext(ctx.workflowJSON, completed); workflowCtx != nil {
+						result["workflow_context"] = workflowCtx
+					}
 				}
+			} else if workflowCtx := buildWorkflowContext(ctx.workflowJSON, nil); workflowCtx != nil {
+				result["workflow_context"] = workflowCtx
 			}
 
 			currentActivities, _ := ctx.data.GetCurrentActivities(ctx.ticketID)
@@ -215,8 +226,19 @@ func activityFactMap(a *activityModel, assignments []ActivityAssignmentInfo) map
 		"status":  a.Status,
 		"outcome": a.TransitionOutcome,
 	}
+	if a.NodeID != "" {
+		entry["node_id"] = a.NodeID
+	}
 	if a.FinishedAt != nil {
 		entry["completed_at"] = a.FinishedAt.Format(time.RFC3339)
+	}
+	if a.Status == ActivityCompleted && isHumanActivityType(a.ActivityType) {
+		satisfied := isPositiveActivityOutcome(a.TransitionOutcome)
+		entry["satisfied"] = satisfied
+		if !satisfied {
+			entry["requires_recovery_decision"] = true
+			entry["recovery_reason"] = "人工节点已驳回；下一轮必须基于协作规范和 workflow_json 解释驳回后的恢复路径，不得无新证据重复创建同一处理任务。"
+		}
 	}
 	if a.AIReasoning != "" {
 		entry["ai_reasoning"] = a.AIReasoning
@@ -230,6 +252,9 @@ func activityFactMap(a *activityModel, assignments []ActivityAssignmentInfo) map
 		if err := json.Unmarshal([]byte(a.AIDecision), &decision); err == nil {
 			entry["source_decision"] = decision
 		}
+	}
+	if a.FormData != "" {
+		entry["form_data"] = json.RawMessage(a.FormData)
 	}
 	facts := assignmentFacts(assignments)
 	if len(facts) > 0 {
@@ -284,12 +309,7 @@ func isPositiveActivityOutcome(outcome string) bool {
 }
 
 func isTerminalTicketStatus(status string) bool {
-	switch status {
-	case "completed", "cancelled", "failed":
-		return true
-	default:
-		return false
-	}
+	return IsTerminalTicketStatus(status)
 }
 
 // --- Tool: decision.knowledge_search ---
@@ -362,11 +382,11 @@ func toolResolveParticipant() decisionToolDef {
 	return decisionToolDef{
 		Def: llm.ToolDef{
 			Name:        "decision.resolve_participant",
-			Description: "按参与人类型解析出具体用户。支持 user/position/department/position_department/requester_manager",
+			Description: "按参与人类型解析出具体用户。支持 requester/user/position/department/position_department/requester_manager",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"type":            map[string]any{"type": "string", "description": "参与人类型: user|position|department|position_department|requester_manager"},
+					"type":            map[string]any{"type": "string", "description": "参与人类型: requester|user|position|department|position_department|requester_manager"},
 					"value":           map[string]any{"type": "string", "description": "类型相关值（user类型为user_id或username, position类型为position_code等）"},
 					"position_code":   map[string]any{"type": "string", "description": "岗位代码（position_department类型时必填）"},
 					"department_code": map[string]any{"type": "string", "description": "部门代码（position_department类型时必填）"},
@@ -477,7 +497,14 @@ func toolSimilarHistory() decisionToolDef {
 				return toolError(fmt.Sprintf("参数格式错误: %v", err))
 			}
 			if params.Limit <= 0 {
-				params.Limit = 5
+				defaultLimit := 5
+				if ctx.configProvider != nil {
+					defaultLimit = ctx.configProvider.SimilarHistoryLimit()
+					if defaultLimit <= 0 {
+						defaultLimit = 5
+					}
+				}
+				params.Limit = defaultLimit
 			}
 
 			rows, _ := ctx.data.GetSimilarHistory(ctx.serviceID, ctx.ticketID, params.Limit)
@@ -548,6 +575,14 @@ func toolSLAStatus() decisionToolDef {
 				})
 			}
 
+			// Resolve thresholds from config or use defaults
+			criticalThreshold := int64(1800)
+			warningThreshold := int64(3600)
+			if ctx.configProvider != nil {
+				criticalThreshold = int64(ctx.configProvider.SLACriticalThresholdSeconds())
+				warningThreshold = int64(ctx.configProvider.SLAWarningThresholdSeconds())
+			}
+
 			now := time.Now()
 			result := map[string]any{
 				"has_sla":    true,
@@ -560,9 +595,9 @@ func toolSLAStatus() decisionToolDef {
 				result["response_remaining_seconds"] = remaining
 				if remaining < 0 {
 					urgency = "breached"
-				} else if remaining < 1800 { // 30 minutes
+				} else if remaining < criticalThreshold {
 					urgency = "critical"
-				} else if remaining < 3600 { // 1 hour
+				} else if remaining < warningThreshold {
 					urgency = "warning"
 				}
 			}

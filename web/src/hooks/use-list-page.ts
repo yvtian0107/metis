@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useState, type FormEvent } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { api, type PaginatedResponse } from "@/lib/api"
 
@@ -15,7 +15,7 @@ export function useListPage<T>({ queryKey, endpoint, pageSize = 20, extraParams,
   const [searchKeyword, setSearchKeyword] = useState("")
   const [page, setPage] = useState(1)
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isFetching, refetch } = useQuery({
     queryKey: [queryKey, searchKeyword, page, extraParams],
     enabled,
     queryFn: () => {
@@ -30,7 +30,7 @@ export function useListPage<T>({ queryKey, endpoint, pageSize = 20, extraParams,
     },
   })
 
-  function handleSearch(e: React.FormEvent) {
+  function handleSearch(e: FormEvent) {
     e.preventDefault()
     setSearchKeyword(keyword)
     setPage(1)
@@ -49,6 +49,8 @@ export function useListPage<T>({ queryKey, endpoint, pageSize = 20, extraParams,
     total,
     totalPages,
     isLoading,
+    isFetching,
+    refetch,
     handleSearch,
   }
 }

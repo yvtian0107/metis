@@ -347,7 +347,7 @@ Seed 阶段 SHALL 内置 5 个 SLA 模板（幂等，按 code 判重）：
 |------|------|-----------|----------|-----------|
 | `copilot-account-request` | Copilot 账号申请 | `account-access:provisioning` | `rapid-workplace` | 否 |
 | `boss-serial-change-request` | 高风险变更协同申请（Boss） | `application-platform:release` | `infra-change` | 否 |
-| `db-backup-whitelist-action-e2e` | 生产数据库备份白名单临时放行申请 | `application-platform:database` | `infra-change` | 是（2个） |
+| `db-backup-whitelist-action-flow` | 生产数据库备份白名单临时放行申请 | `application-platform:database` | `infra-change` | 是（2个） |
 | `prod-server-temporary-access` | 生产服务器临时访问申请 | `infra-network:compute` | `critical-business` | 否 |
 | `vpn-access-request` | VPN 开通申请 | `infra-network:network` | `standard` | 否 |
 
@@ -355,7 +355,7 @@ Seed 阶段 SHALL 内置 5 个 SLA 模板（幂等，按 code 判重）：
 
 1. **copilot-account-request**: "收集提单用户的Github账号信息和申请理由（可选），交给信息部的IT管理员审批，审批通过后结束流程。"
 2. **boss-serial-change-request**: 收集申请主题、类别、风险等级、时间、影响范围、回滚要求、影响模块、变更明细表。先交 serial-reviewer 审批，再交 it 部 ops_admin 岗位审批。
-3. **db-backup-whitelist-action-e2e**: 进入申请节点时执行预检动作，提交后交 it 部与 built-in Org 种子一致的数据库管理员岗位审批，通过后执行白名单放行动作。
+3. **db-backup-whitelist-action-flow**: 进入申请节点时执行预检动作，提交后交 it 部与 built-in Org 种子一致的数据库管理员岗位审批，通过后执行白名单放行动作。
 4. **prod-server-temporary-access**: 收集访问服务器、时段、目的、原因。按原因路由到 ops_admin / network_admin / security_admin 审批。
 5. **vpn-access-request**: 收集 VPN 账号、设备用途、访问原因。按原因路由到 network_admin / security_admin 审批。
 
@@ -382,7 +382,7 @@ Seed 阶段 SHALL 内置 5 个 SLA 模板（幂等，按 code 判重）：
 
 ### Requirement: 内置服务动作种子数据
 
-系统 SHALL 在 `seedServiceDefinitions()` 中为 `db-backup-whitelist-action-e2e` 服务额外创建 2 个 ServiceAction：
+系统 SHALL 在 `seedServiceDefinitions()` 中为 `db-backup-whitelist-action-flow` 服务额外创建 2 个 ServiceAction：
 
 | code | 名称 | HTTP Method | 说明 |
 |------|------|-------------|------|

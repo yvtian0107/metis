@@ -72,9 +72,9 @@ func (e *ClassicEngine) Start(ctx context.Context, tx *gorm.DB, params StartPara
 		return fmt.Errorf("start node's target %q not found", targetNodeID)
 	}
 
-	// Update ticket status to in_progress
+	// Update ticket status to waiting_human before the first workflow node runs.
 	if err := tx.Model(&ticketModel{}).Where("id = ?", params.TicketID).
-		Update("status", "in_progress").Error; err != nil {
+		Update("status", TicketStatusWaitingHuman).Error; err != nil {
 		return err
 	}
 
@@ -92,8 +92,12 @@ func (e *ClassicEngine) Start(ctx context.Context, tx *gorm.DB, params StartPara
 
 	// Write start form bindings as process variables
 	if params.StartFormSchema != "" && params.StartFormData != "" {
-		if err := writeFormBindings(tx, params.TicketID, token.ScopeID, params.StartFormSchema, params.StartFormData, "form:start"); err != nil {
+		if err := writeFormBindings(tx, params.TicketID, token.ScopeID, params.StartFormSchema, params.StartFormData, "form:start", ""); err != nil {
 			slog.Warn("failed to write start form bindings", "ticketID", params.TicketID, "error", err)
+			if fve, ok := err.(*FormValidationError); ok {
+				e.recordTimeline(tx, params.TicketID, nil, params.RequesterID, "form_validation_failed",
+					fmt.Sprintf("开始表单验证失败: %s", fve.Error()))
+			}
 		}
 	}
 
@@ -146,7 +150,7 @@ func (e *ClassicEngine) Progress(ctx context.Context, tx *gorm.DB, params Progre
 	}
 
 	now := time.Now()
-	if completedAssignment, completed, err := completePendingAssignment(tx, e.resolver, activity.ID, params.OperatorID, now); err != nil {
+	if completedAssignment, completed, err := completePendingAssignment(tx, e.resolver, activity.ID, params.OperatorID, params.Outcome, now, params.OperatorPositionIDs, params.OperatorDepartmentIDs, params.OperatorOrgScopeReady); err != nil {
 		return err
 	} else if completed && completedAssignment != nil {
 		if completedAssignment.DelegatedFrom != nil {
@@ -162,7 +166,7 @@ func (e *ClassicEngine) Progress(ctx context.Context, tx *gorm.DB, params Progre
 	}
 
 	updates := map[string]any{
-		"status":             ActivityCompleted,
+		"status":             humanOrCompletedActivityStatus(activity.ActivityType, params.Outcome),
 		"transition_outcome": params.Outcome,
 		"finished_at":        now,
 	}
@@ -179,8 +183,12 @@ func (e *ClassicEngine) Progress(ctx context.Context, tx *gorm.DB, params Progre
 	// Write form bindings as process variables (if activity had a form with bindings)
 	if activity.FormSchema != "" && len(params.Result) > 0 {
 		source := fmt.Sprintf("form:%d", params.ActivityID)
-		if err := writeFormBindings(tx, params.TicketID, token.ScopeID, activity.FormSchema, string(params.Result), source); err != nil {
+		if err := writeFormBindings(tx, params.TicketID, token.ScopeID, activity.FormSchema, string(params.Result), source, activity.NodeID); err != nil {
 			slog.Warn("failed to write form bindings on progress", "ticketID", params.TicketID, "activityID", params.ActivityID, "error", err)
+			if fve, ok := err.(*FormValidationError); ok {
+				e.recordTimeline(tx, params.TicketID, &params.ActivityID, params.OperatorID, "form_validation_failed",
+					fmt.Sprintf("表单验证失败: %s", fve.Error()))
+			}
 		}
 	}
 
@@ -238,14 +246,15 @@ func (e *ClassicEngine) Cancel(ctx context.Context, tx *gorm.DB, params CancelPa
 	// Cancel all pending assignments
 	if err := tx.Model(&assignmentModel{}).
 		Where("ticket_id = ? AND status = ?", params.TicketID, "pending").
-		Update("status", "cancelled").Error; err != nil {
+		Update("status", ActivityCancelled).Error; err != nil {
 		return err
 	}
 
 	// Update ticket
 	now := time.Now()
 	if err := tx.Model(&ticketModel{}).Where("id = ?", params.TicketID).Updates(map[string]any{
-		"status":      "cancelled",
+		"status":      ticketCancelStatus(params.EventType),
+		"outcome":     ticketCancelOutcome(params.EventType),
 		"finished_at": now,
 	}).Error; err != nil {
 		return err

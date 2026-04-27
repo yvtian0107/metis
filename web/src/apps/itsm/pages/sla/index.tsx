@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react"
 import type { ReactNode } from "react"
 import { useTranslation } from "react-i18next"
-import { useForm } from "react-hook-form"
+import { useForm, useWatch } from "react-hook-form"
 import { z } from "zod"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
@@ -42,10 +42,13 @@ import {
   WorkspaceIconAction,
   WorkspaceBooleanStatus,
 } from "@/components/workspace/primitives"
+import { ParticipantPicker } from "../../components/workflow/panels/participant-picker"
+import type { Participant } from "../../components/workflow/types"
 import {
   type SLATemplateItem, type EscalationRuleItem,
   fetchSLATemplates, createSLATemplate, updateSLATemplate, deleteSLATemplate,
   fetchEscalationRules, createEscalationRule, updateEscalationRule, deleteEscalationRule,
+  fetchNotificationChannels, fetchPriorities,
 } from "../../api"
 
 function useSLASchema() {
@@ -62,11 +65,40 @@ function useSLASchema() {
 type SLAFormValues = z.infer<ReturnType<typeof useSLASchema>>
 
 function useEscalationSchema() {
+  const participantSchema = z.object({
+    type: z.string().min(1),
+    value: z.string().optional(),
+    id: z.union([z.string(), z.number()]).optional(),
+    name: z.string().optional(),
+    position_code: z.string().optional(),
+    department_code: z.string().optional(),
+  })
   return z.object({
     triggerType: z.enum(["response_timeout", "resolution_timeout"]),
     level: z.number().min(1),
     waitMinutes: z.number().min(1),
     actionType: z.enum(["notify", "reassign", "escalate_priority"]),
+    recipients: z.array(participantSchema),
+    channelId: z.number(),
+    subjectTemplate: z.string().optional(),
+    bodyTemplate: z.string().optional(),
+    assigneeCandidates: z.array(participantSchema),
+    priorityId: z.number(),
+  }).superRefine((value, ctx) => {
+    if (value.actionType === "notify") {
+      if (value.recipients.length === 0) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["recipients"], message: "请选择通知接收人" })
+      }
+      if (!value.channelId) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["channelId"], message: "请选择通知方式" })
+      }
+    }
+    if (value.actionType === "reassign" && value.assigneeCandidates.length === 0) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["assigneeCandidates"], message: "请选择改派候选人" })
+    }
+    if (value.actionType === "escalate_priority" && !value.priorityId) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["priorityId"], message: "请选择目标优先级" })
+    }
   })
 }
 
@@ -90,6 +122,61 @@ function RuleActionBadge({ children }: { children: ReactNode }) {
   )
 }
 
+interface EscalationTargetConfig {
+  recipients?: Participant[]
+  channelId?: number
+  subjectTemplate?: string
+  bodyTemplate?: string
+  assigneeCandidates?: Participant[]
+  priorityId?: number
+}
+
+const defaultNotifySubject = "SLA 升级通知：{{ticket.code}}"
+const defaultNotifyBody = "工单 {{ticket.code}} 已触发 SLA 升级规则，请及时处理。"
+
+function readTargetConfig(value: unknown): EscalationTargetConfig {
+  if (!value || typeof value !== "object") return {}
+  return value as EscalationTargetConfig
+}
+
+function buildTargetConfig(v: EscalationFormValues): EscalationTargetConfig {
+  if (v.actionType === "notify") {
+    return {
+      recipients: v.recipients,
+      channelId: v.channelId,
+      subjectTemplate: v.subjectTemplate ?? "",
+      bodyTemplate: v.bodyTemplate ?? "",
+    }
+  }
+  if (v.actionType === "reassign") {
+    return { assigneeCandidates: v.assigneeCandidates }
+  }
+  return { priorityId: v.priorityId }
+}
+
+function escalationPayload(v: EscalationFormValues) {
+  return {
+    triggerType: v.triggerType,
+    level: v.level,
+    waitMinutes: v.waitMinutes,
+    actionType: v.actionType,
+    targetConfig: buildTargetConfig(v),
+  }
+}
+
+function participantLabel(p: Participant) {
+  if (p.type === "requester_manager") return "提交人上级"
+  if (p.type === "position_department") {
+    return [p.department_code, p.position_code].filter(Boolean).join(" / ") || "岗位+部门"
+  }
+  return p.name ?? p.value ?? p.type
+}
+
+function formatParticipants(items: Participant[] | undefined) {
+  if (!items || items.length === 0) return "未配置"
+  return items.map(participantLabel).join("、")
+}
+
 function EscalationRules({ slaId }: { slaId: number }) {
   const { t } = useTranslation(["itsm", "common"])
   const queryClient = useQueryClient()
@@ -103,36 +190,74 @@ function EscalationRules({ slaId }: { slaId: number }) {
     queryKey: ["itsm-escalation-rules", slaId],
     queryFn: () => fetchEscalationRules(slaId),
   })
+  const { data: channels = [] } = useQuery({
+    queryKey: ["itsm-notification-channels"],
+    queryFn: () => fetchNotificationChannels(),
+  })
+  const { data: priorities = [] } = useQuery({
+    queryKey: ["itsm-priorities-for-sla"],
+    queryFn: () => fetchPriorities(),
+  })
 
   const form = useForm<EscalationFormValues>({
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     resolver: zodResolver(escSchema as any),
-    defaultValues: { triggerType: "response_timeout", level: 1, waitMinutes: 30, actionType: "notify" },
+    defaultValues: {
+      triggerType: "response_timeout",
+      level: 1,
+      waitMinutes: 30,
+      actionType: "notify",
+      recipients: [],
+      channelId: 0,
+      subjectTemplate: defaultNotifySubject,
+      bodyTemplate: defaultNotifyBody,
+      assigneeCandidates: [],
+      priorityId: 0,
+    },
   })
+  const actionType = useWatch({ control: form.control, name: "actionType" })
 
   useEffect(() => {
     if (formOpen) {
       if (editing) {
+        const cfg = readTargetConfig(editing.targetConfig)
         form.reset({
           triggerType: editing.triggerType as "response_timeout" | "resolution_timeout",
           level: editing.level,
           waitMinutes: editing.waitMinutes,
           actionType: editing.actionType as "notify" | "reassign" | "escalate_priority",
+          recipients: cfg.recipients ?? [],
+          channelId: cfg.channelId ?? 0,
+          subjectTemplate: cfg.subjectTemplate ?? defaultNotifySubject,
+          bodyTemplate: cfg.bodyTemplate ?? defaultNotifyBody,
+          assigneeCandidates: cfg.assigneeCandidates ?? [],
+          priorityId: cfg.priorityId ?? 0,
         })
       } else {
-        form.reset({ triggerType: "response_timeout", level: 1, waitMinutes: 30, actionType: "notify" })
+        form.reset({
+          triggerType: "response_timeout",
+          level: 1,
+          waitMinutes: 30,
+          actionType: "notify",
+          recipients: [],
+          channelId: channels[0]?.id ?? 0,
+          subjectTemplate: defaultNotifySubject,
+          bodyTemplate: defaultNotifyBody,
+          assigneeCandidates: [],
+          priorityId: priorities[0]?.id ?? 0,
+        })
       }
     }
-  }, [formOpen, editing, form])
+  }, [formOpen, editing, form, channels, priorities])
 
   const createMut = useMutation({
-    mutationFn: (v: EscalationFormValues) => createEscalationRule(slaId, v),
+    mutationFn: (v: EscalationFormValues) => createEscalationRule(slaId, escalationPayload(v)),
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["itsm-escalation-rules", slaId] }); setFormOpen(false); toast.success(t("itsm:sla.escalation.createSuccess")) },
     onError: (err) => toast.error(err.message),
   })
 
   const updateMut = useMutation({
-    mutationFn: (v: EscalationFormValues) => updateEscalationRule(slaId, editing!.id, v),
+    mutationFn: (v: EscalationFormValues) => updateEscalationRule(slaId, editing!.id, escalationPayload(v)),
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["itsm-escalation-rules", slaId] }); setFormOpen(false); toast.success(t("itsm:sla.escalation.updateSuccess")) },
     onError: (err) => toast.error(err.message),
   })
@@ -155,6 +280,15 @@ function EscalationRules({ slaId }: { slaId: number }) {
   const minuteUnit = t("itsm:sla.minuteShort")
   const triggerLabel = (v: string) => v === "response_timeout" ? t("itsm:sla.escalation.responseTimeout") : t("itsm:sla.escalation.resolutionTimeout")
   const actionLabel = (v: string) => ({ notify: t("itsm:sla.escalation.notify"), reassign: t("itsm:sla.escalation.reassign"), escalate_priority: t("itsm:sla.escalation.escalatePriority") })[v] ?? v
+  const channelName = (id: number | undefined) => channels.find((channel) => channel.id === id)?.name ?? (id ? `#${id}` : "未配置")
+  const priorityName = (id: number | undefined) => priorities.find((priority) => priority.id === id)?.name ?? (id ? `#${id}` : "未配置")
+  const targetSummary = (rule: EscalationRuleItem) => {
+    const cfg = readTargetConfig(rule.targetConfig)
+    if (rule.actionType === "notify") return `${formatParticipants(cfg.recipients)} / ${channelName(cfg.channelId)}`
+    if (rule.actionType === "reassign") return formatParticipants(cfg.assigneeCandidates)
+    if (rule.actionType === "escalate_priority") return priorityName(cfg.priorityId)
+    return "未配置"
+  }
 
   return (
     <TableRow>
@@ -189,6 +323,7 @@ function EscalationRules({ slaId }: { slaId: number }) {
                     <TableHead className="w-[72px]">{t("itsm:sla.escalation.level")}</TableHead>
                     <TableHead className="w-[132px]">{t("itsm:sla.escalation.waitMinutes")}</TableHead>
                     <TableHead>{t("itsm:sla.escalation.actionType")}</TableHead>
+                    <TableHead>{t("itsm:sla.escalation.targetConfig")}</TableHead>
                     <DataTableActionsHead className="min-w-24">{t("common:actions")}</DataTableActionsHead>
                   </TableRow>
                 </TableHeader>
@@ -199,6 +334,7 @@ function EscalationRules({ slaId }: { slaId: number }) {
                       <TableCell className="text-sm tabular-nums">{rule.level}</TableCell>
                       <TableCell className="text-sm tabular-nums">{formatMinutes(rule.waitMinutes, minuteUnit)}</TableCell>
                       <TableCell><RuleActionBadge>{actionLabel(rule.actionType)}</RuleActionBadge></TableCell>
+                      <TableCell className="max-w-[260px] truncate text-sm text-muted-foreground">{targetSummary(rule)}</TableCell>
                       <DataTableActionsCell>
                         <DataTableActions>
                           {canUpdate && (
@@ -233,7 +369,7 @@ function EscalationRules({ slaId }: { slaId: number }) {
           )}
 
           <Sheet open={formOpen} onOpenChange={setFormOpen}>
-            <SheetContent className="sm:max-w-md">
+            <SheetContent className="sm:max-w-xl">
               <SheetHeader>
                 <SheetTitle>{editing ? t("itsm:sla.escalation.edit") : t("itsm:sla.escalation.create")}</SheetTitle>
                 <SheetDescription>{t("itsm:sla.escalation.sheetDesc")}</SheetDescription>
@@ -284,6 +420,70 @@ function EscalationRules({ slaId }: { slaId: number }) {
                         <FormMessage />
                       </FormItem>
                     )} />
+                    {actionType === "notify" && (
+                      <>
+                        <FormField control={form.control} name="recipients" render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>{t("itsm:sla.escalation.recipients")}</FormLabel>
+                            <ParticipantPicker participants={field.value} onChange={field.onChange} />
+                            <FormMessage />
+                          </FormItem>
+                        )} />
+                        <FormField control={form.control} name="channelId" render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>{t("itsm:sla.escalation.channel")}</FormLabel>
+                            <Select value={String(field.value || "")} onValueChange={(value) => field.onChange(Number(value))}>
+                              <FormControl><SelectTrigger><SelectValue placeholder={t("itsm:sla.escalation.channelPlaceholder")} /></SelectTrigger></FormControl>
+                              <SelectContent>
+                                {channels.map((channel) => (
+                                  <SelectItem key={channel.id} value={String(channel.id)}>{channel.name} / {channel.type}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                            <FormMessage />
+                          </FormItem>
+                        )} />
+                        <FormField control={form.control} name="subjectTemplate" render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>{t("itsm:sla.escalation.subjectTemplate")}</FormLabel>
+                            <FormControl><Input {...field} value={field.value ?? ""} /></FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )} />
+                        <FormField control={form.control} name="bodyTemplate" render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>{t("itsm:sla.escalation.bodyTemplate")}</FormLabel>
+                            <FormControl><Textarea rows={4} {...field} value={field.value ?? ""} /></FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )} />
+                      </>
+                    )}
+                    {actionType === "reassign" && (
+                      <FormField control={form.control} name="assigneeCandidates" render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>{t("itsm:sla.escalation.assigneeCandidates")}</FormLabel>
+                          <ParticipantPicker participants={field.value} onChange={field.onChange} />
+                          <FormMessage />
+                        </FormItem>
+                      )} />
+                    )}
+                    {actionType === "escalate_priority" && (
+                      <FormField control={form.control} name="priorityId" render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>{t("itsm:sla.escalation.targetPriority")}</FormLabel>
+                          <Select value={String(field.value || "")} onValueChange={(value) => field.onChange(Number(value))}>
+                            <FormControl><SelectTrigger><SelectValue placeholder={t("itsm:sla.escalation.targetPriorityPlaceholder")} /></SelectTrigger></FormControl>
+                            <SelectContent>
+                              {priorities.map((priority) => (
+                                <SelectItem key={priority.id} value={String(priority.id)}>{priority.name} / {priority.code}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          <FormMessage />
+                        </FormItem>
+                      )} />
+                    )}
                   </WorkspaceFormSection>
                   <SheetFooter>
                     <Button type="submit" size="sm" disabled={isPending}>

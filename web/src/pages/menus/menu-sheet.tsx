@@ -1,7 +1,7 @@
 import { useEffect, useMemo } from "react"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
-import { useForm } from "react-hook-form"
+import { useForm, useWatch, type Resolver } from "react-hook-form"
 import { z } from "zod"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
@@ -83,7 +83,7 @@ export function MenuSheet({ open, onOpenChange, menu, parentId }: MenuSheetProps
   })
 
   const form = useForm<FormValues>({
-    resolver: zodResolver(localSchema) as any,
+    resolver: zodResolver(localSchema) as Resolver<FormValues>,
     defaultValues: {
       parentId: null,
       name: "",
@@ -165,7 +165,7 @@ export function MenuSheet({ open, onOpenChange, menu, parentId }: MenuSheetProps
 
   const isPending = createMutation.isPending || updateMutation.isPending
   const error = createMutation.error || updateMutation.error
-  const menuType = form.watch("type")
+  const menuType = useWatch({ control: form.control, name: "type" })
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>

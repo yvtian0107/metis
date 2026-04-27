@@ -5,6 +5,10 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/samber/do/v2"
 	"gorm.io/gorm"
+	"metis/internal/app/observe/auth"
+	"metis/internal/app/observe/bootstrap"
+	"metis/internal/app/observe/domain"
+	"metis/internal/app/observe/token"
 
 	"metis/internal/app"
 	"metis/internal/scheduler"
@@ -21,23 +25,23 @@ type ObserveApp struct {
 func (a *ObserveApp) Name() string { return "observe" }
 
 func (a *ObserveApp) Models() []any {
-	return []any{&IntegrationToken{}}
+	return []any{&domain.IntegrationToken{}}
 }
 
 func (a *ObserveApp) Seed(db *gorm.DB, enforcer *casbin.Enforcer, _ bool) error {
-	return seedObserve(db, enforcer)
+	return bootstrap.SeedObserve(db, enforcer)
 }
 
 func (a *ObserveApp) Providers(i do.Injector) {
 	a.injector = i
-	do.Provide(i, NewIntegrationTokenRepo)
-	do.Provide(i, NewIntegrationTokenService)
-	do.Provide(i, NewIntegrationTokenHandler)
-	do.Provide(i, NewAuthHandler)
+	do.Provide(i, token.NewIntegrationTokenRepo)
+	do.Provide(i, token.NewIntegrationTokenService)
+	do.Provide(i, token.NewIntegrationTokenHandler)
+	do.Provide(i, auth.NewAuthHandler)
 }
 
 func (a *ObserveApp) Routes(api *gin.RouterGroup) {
-	tokenH := do.MustInvoke[*IntegrationTokenHandler](a.injector)
+	tokenH := do.MustInvoke[*token.IntegrationTokenHandler](a.injector)
 
 	// JWT + Casbin protected routes
 	tokens := api.Group("/observe/tokens")
@@ -49,7 +53,7 @@ func (a *ObserveApp) Routes(api *gin.RouterGroup) {
 	api.GET("/observe/settings", tokenH.GetSettings)
 
 	// ForwardAuth verify endpoint — bypasses JWT+Casbin, registered on raw Engine
-	authH := do.MustInvoke[*AuthHandler](a.injector)
+	authH := do.MustInvoke[*auth.AuthHandler](a.injector)
 	r := do.MustInvoke[*gin.Engine](a.injector)
 	r.GET("/api/v1/observe/auth/verify", authH.Verify)
 }

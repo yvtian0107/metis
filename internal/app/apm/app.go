@@ -5,6 +5,9 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/samber/do/v2"
 	"gorm.io/gorm"
+	"metis/internal/app/apm/bootstrap"
+	"metis/internal/app/apm/clickhouse"
+	"metis/internal/app/apm/trace"
 
 	"metis/internal/app"
 	"metis/internal/scheduler"
@@ -23,19 +26,19 @@ func (a *APMApp) Name() string { return "apm" }
 func (a *APMApp) Models() []any { return nil }
 
 func (a *APMApp) Seed(db *gorm.DB, enforcer *casbin.Enforcer, _ bool) error {
-	return seedAPM(db, enforcer)
+	return bootstrap.SeedAPM(db, enforcer)
 }
 
 func (a *APMApp) Providers(i do.Injector) {
 	a.injector = i
-	do.Provide(i, NewClickHouseClient)
-	do.Provide(i, NewRepository)
-	do.Provide(i, NewService)
-	do.Provide(i, NewHandler)
+	do.Provide(i, clickhouse.NewClickHouseClient)
+	do.Provide(i, trace.NewRepository)
+	do.Provide(i, trace.NewService)
+	do.Provide(i, trace.NewHandler)
 }
 
 func (a *APMApp) Routes(api *gin.RouterGroup) {
-	h := do.MustInvoke[*Handler](a.injector)
+	h := do.MustInvoke[*trace.Handler](a.injector)
 
 	traces := api.Group("/apm/traces")
 	{

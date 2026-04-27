@@ -284,19 +284,6 @@ SmartEngine.Cancel SHALL 取消工单所有活跃活动、取消待处理 assign
 - **WHEN** body 模板包含 `{{ticket.id}}` 和 `{{ticket.status}}`
 - **THEN** 替换行为 SHALL 与扩展前一致
 
-### Requirement: 对话全链路 E2E 场景
-系统 SHALL 提供 `vpn_e2e_dialog_flow.feature`，覆盖从用户自然语言对话到工单创建再到引擎触发的完整流程。
-
-#### Scenario: 网络支持完整对话到创单
-- **WHEN** 用户通过服务台 Agent 描述 VPN 网络支持需求并提供完整信息
-- **THEN** Agent SHALL 完成服务匹配 → 服务装载 → 信息采集 → 草稿整理 → 确认 → 创单的完整流程
-- **AND** 创单后智能引擎 SHALL 被触发，生成合法的决策活动
-
-#### Scenario: 安全合规完整对话到创单
-- **WHEN** 用户通过服务台 Agent 描述 VPN 安全合规需求并提供完整信息
-- **THEN** Agent SHALL 完成完整对话流程并创建工单
-- **AND** 智能引擎决策 SHALL 路由到安全相关岗位
-
 ### Requirement: 多对话模式覆盖场景
 系统 SHALL 提供 `vpn_dialog_coverage.feature`，使用 Scenario Outline 覆盖 6 种对话模式。
 

@@ -72,8 +72,8 @@ func TestClassicProgressCompletesApproveAssignment(t *testing.T) {
 	if err := db.Where("activity_id = ?", activity.ID).First(&assignment).Error; err != nil {
 		t.Fatalf("find assignment: %v", err)
 	}
-	if assignment.Status != "completed" {
-		t.Fatalf("expected assignment completed, got %q", assignment.Status)
+	if assignment.Status != ActivityApproved {
+		t.Fatalf("expected assignment approved, got %q", assignment.Status)
 	}
 	if assignment.AssigneeID == nil || *assignment.AssigneeID != 1 {
 		t.Fatalf("expected assignee_id=1, got %v", assignment.AssigneeID)

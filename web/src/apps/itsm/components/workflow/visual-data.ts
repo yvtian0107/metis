@@ -7,11 +7,11 @@ export type WorkflowNodeGroup = {
 }
 
 export const WORKFLOW_NODE_GROUPS: WorkflowNodeGroup[] = [
-  { label: "workflow.group.events", types: ["start", "end", "timer", "signal"] },
   { label: "workflow.group.human", types: ["form", "process"] },
   { label: "workflow.group.automation", types: ["action", "script", "notify"] },
   { label: "workflow.group.control", types: ["exclusive", "parallel", "inclusive"] },
-  { label: "workflow.group.composite", types: ["subprocess", "wait"] },
+  { label: "workflow.group.composite", types: ["wait", "subprocess"] },
+  { label: "workflow.group.events", types: ["end"] },
 ]
 
 export function getNodeAccent(nodeType?: NodeType): string {
@@ -50,14 +50,14 @@ export function buildNodeSummary(data: WFNodeData, t: (key: string) => string): 
   }
 
   if (data.nodeType === "action") {
-    parts.push(data.actionId ? t("workflow.summary.actionBound") : t("workflow.summary.actionUnbound"))
+    parts.push(data.action_id ? t("workflow.summary.actionBound") : t("workflow.summary.actionUnbound"))
   }
 
   if (data.nodeType === "notify") {
-    parts.push(data.channelType ?? t("workflow.summary.notifyUnset"))
+    parts.push(data.channel_id ? `#${data.channel_id}` : t("workflow.summary.notifyUnset"))
   }
 
-  if (data.nodeType === "timer" && data.duration) {
+  if ((data.nodeType === "timer" || data.wait_mode === "timer") && data.duration) {
     parts.push(data.duration)
   }
 

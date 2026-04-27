@@ -159,7 +159,7 @@ export function Component() {
     enabled: !!license?.productId,
   })
 
-  function createLifecycleMutation(method: "patch" | "post", path: string, successKey: string) {
+  function useLifecycleMutation(method: "patch" | "post", path: string, successKey: string) {
     return useMutation({
       mutationFn: () => api[method](path),
       onSuccess: () => {
@@ -171,9 +171,9 @@ export function Component() {
     })
   }
 
-  const revokeMutation = createLifecycleMutation("patch", `/api/v1/license/licenses/${id}/revoke`, "revokeSuccess")
-  const suspendMutation = createLifecycleMutation("post", `/api/v1/license/licenses/${id}/suspend`, "suspendSuccess")
-  const reactivateMutation = createLifecycleMutation("post", `/api/v1/license/licenses/${id}/reactivate`, "reactivateSuccess")
+  const revokeMutation = useLifecycleMutation("patch", `/api/v1/license/licenses/${id}/revoke`, "revokeSuccess")
+  const suspendMutation = useLifecycleMutation("post", `/api/v1/license/licenses/${id}/suspend`, "suspendSuccess")
+  const reactivateMutation = useLifecycleMutation("post", `/api/v1/license/licenses/${id}/reactivate`, "reactivateSuccess")
 
   async function handleExport() {
     if (!id) return

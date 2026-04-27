@@ -13,7 +13,10 @@ import (
 	"metis/internal/repository"
 )
 
-var ErrChannelNotFound = errors.New("error.channel.not_found")
+var (
+	ErrChannelNotFound = errors.New("error.channel.not_found")
+	ErrChannelDisabled = errors.New("message channel is disabled")
+)
 
 type MessageChannelService struct {
 	repo           *repository.MessageChannelRepo
@@ -157,12 +160,23 @@ func (s *MessageChannelService) TestChannel(id uint) error {
 }
 
 func (s *MessageChannelService) SendTest(id uint, to []string, subject, body string) error {
+	return s.send(id, to, subject, body, false)
+}
+
+func (s *MessageChannelService) Send(id uint, to []string, subject, body string) error {
+	return s.send(id, to, subject, body, true)
+}
+
+func (s *MessageChannelService) send(id uint, to []string, subject, body string, requireEnabled bool) error {
 	ch, err := s.repo.FindByID(id)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return ErrChannelNotFound
 		}
 		return err
+	}
+	if requireEnabled && !ch.Enabled {
+		return ErrChannelDisabled
 	}
 
 	driver, err := s.DriverResolver(ch.Type)

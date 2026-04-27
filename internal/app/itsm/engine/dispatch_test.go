@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
@@ -14,6 +16,11 @@ import (
 type noopSubmitter struct{}
 
 func (*noopSubmitter) SubmitTask(string, json.RawMessage) error { return nil }
+
+func dispatchTestDSN(t *testing.T) string {
+	name := strings.NewReplacer("/", "_", " ", "_").Replace(t.Name())
+	return fmt.Sprintf("file:%s_%d?mode=memory&cache=shared", name, time.Now().UnixNano())
+}
 
 // dispatchFixture holds the objects returned by setupDispatchTest.
 type dispatchFixture struct {
@@ -32,7 +39,7 @@ type dispatchFixture struct {
 func setupDispatchTest(t *testing.T) *dispatchFixture {
 	t.Helper()
 
-	dsn := fmt.Sprintf("file:dispatch_%p?mode=memory&cache=shared", t)
+	dsn := dispatchTestDSN(t)
 	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
 	if err != nil {
 		t.Fatalf("failed to open test db: %v", err)
@@ -51,13 +58,13 @@ func setupDispatchTest(t *testing.T) *dispatchFixture {
 
 	// Add columns that exist in the full ITSM model but not in the lightweight engine structs.
 	// The engine code references these via string-based GORM updates.
-	db.Exec("ALTER TABLE itsm_tickets ADD COLUMN assignee_id INTEGER")
-	db.Exec("ALTER TABLE itsm_ticket_assignments ADD COLUMN finished_at DATETIME")
+	if err := db.Exec("ALTER TABLE itsm_tickets ADD COLUMN assignee_id INTEGER").Error; err != nil {
+		t.Fatalf("failed to add assignee_id column: %v", err)
+	}
 
 	workflowJSON := `{"nodes":[{"id":"s","type":"start","data":{}},{"id":"a1","type":"process","data":{"label":"处理","participants":[{"type":"user","value":"100"}]}},{"id":"e","type":"end","data":{}}],"edges":[{"id":"e1","source":"s","target":"a1","data":{}},{"id":"e2","source":"a1","target":"e","data":{"outcome":"completed"}}]}`
 
 	ticket := ticketModel{
-		ID:           1,
 		Status:       "in_progress",
 		WorkflowJSON: workflowJSON,
 		RequesterID:  50,
@@ -65,9 +72,10 @@ func setupDispatchTest(t *testing.T) *dispatchFixture {
 	if err := db.Create(&ticket).Error; err != nil {
 		t.Fatalf("failed to create ticket: %v", err)
 	}
+	ticketID := ticket.ID
 
 	token := executionTokenModel{
-		TicketID:  1,
+		TicketID:  ticketID,
 		NodeID:    "a1",
 		Status:    TokenActive,
 		TokenType: TokenMain,
@@ -78,7 +86,7 @@ func setupDispatchTest(t *testing.T) *dispatchFixture {
 	}
 
 	activity := activityModel{
-		TicketID:      1,
+		TicketID:      ticketID,
 		TokenID:       &token.ID,
 		Name:          "处理",
 		ActivityType:  NodeProcess,
@@ -91,11 +99,13 @@ func setupDispatchTest(t *testing.T) *dispatchFixture {
 	}
 
 	// Point ticket.current_activity_id at the activity
-	db.Model(&ticketModel{}).Where("id = ?", ticket.ID).Update("current_activity_id", activity.ID)
+	if err := db.Model(&ticketModel{}).Where("id = ?", ticketID).Update("current_activity_id", activity.ID).Error; err != nil {
+		t.Fatalf("failed to update current activity: %v", err)
+	}
 
 	assigneeID := uint(100)
 	assignment := assignmentModel{
-		TicketID:        1,
+		TicketID:        ticketID,
 		ActivityID:      activity.ID,
 		ParticipantType: "user",
 		UserID:          &assigneeID,
@@ -276,24 +286,24 @@ func TestDispatch(t *testing.T) {
 			t.Fatalf("failed to create delegated assignment: %v", err)
 		}
 
-	// Call engine.Progress with OperatorID=200 and Outcome="completed"
-	err := f.engine.Progress(context.Background(), db, ProgressParams{
-		TicketID:   f.ticket.ID,
-		ActivityID: f.activity.ID,
-		Outcome:    "completed",
+		// Call engine.Progress with OperatorID=200 and Outcome="completed"
+		err := f.engine.Progress(context.Background(), db, ProgressParams{
+			TicketID:   f.ticket.ID,
+			ActivityID: f.activity.ID,
+			Outcome:    "completed",
 			OperatorID: 200,
 		})
 		if err != nil {
 			t.Fatalf("engine.Progress failed: %v", err)
 		}
 
-		// Assert: user 200's assignment is "completed"
+		// Assert: user 200's assignment records the approved outcome directly.
 		var reloadedDelegated assignmentModel
 		if err := db.First(&reloadedDelegated, delegated.ID).Error; err != nil {
 			t.Fatalf("failed to reload delegated assignment: %v", err)
 		}
-		if reloadedDelegated.Status != "completed" {
-			t.Errorf("delegated assignment status: got %q, want %q", reloadedDelegated.Status, "completed")
+		if reloadedDelegated.Status != ActivityApproved {
+			t.Errorf("delegated assignment status: got %q, want %q", reloadedDelegated.Status, ActivityApproved)
 		}
 
 		// Assert: original assignment (user 100) is restored to "pending" with is_current=true

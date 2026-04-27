@@ -1,5 +1,5 @@
 import { useEffect } from "react"
-import { useForm } from "react-hook-form"
+import { useForm, useWatch } from "react-hook-form"
 import { useTranslation } from "react-i18next"
 import { z } from "zod"
 import { zodResolver } from "@hookform/resolvers/zod"
@@ -91,7 +91,7 @@ export function ProviderSheet({ open, onOpenChange, provider }: ProviderSheetPro
     },
   })
 
-  const watchedType = form.watch("type")
+  const watchedType = useWatch({ control: form.control, name: "type" })
 
   useEffect(() => {
     if (open) {

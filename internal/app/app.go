@@ -183,7 +183,8 @@ type AIDecisionRequest struct {
 	UserMessage  string
 	Tools        []AIToolDef
 	ToolHandler  func(name string, args json.RawMessage) (json.RawMessage, error)
-	MaxTurns     int // 0 = use default
+	MaxTurns     int            // 0 = use default
+	Metadata     map[string]any // optional caller context (e.g. ticketID) forwarded to logs
 }
 
 // AIDecisionResponse contains the result of an AI decision cycle.

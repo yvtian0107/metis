@@ -4,8 +4,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useParams, useNavigate } from "react-router"
 import { useTranslation } from "react-i18next"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
-import { ArrowDown, Loader2, Square, Trash2, Brain, PanelLeft, PanelLeftClose, Paperclip, AlertTriangle, RotateCw, X } from "lucide-react"
-import { isDataUIPart, isReasoningUIPart, type UIMessage } from "ai"
+import type { UIMessage } from "ai"
+import { Brain, PanelLeft, PanelLeftClose, Trash2 } from "lucide-react"
 import { sessionApi } from "@/lib/api"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
@@ -14,12 +14,16 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
 } from "@/components/ui/alert-dialog"
-import { useAiChat } from "./hooks/use-ai-chat"
-import { QAPair } from "./components/message-item"
-import { ThinkingBlock } from "./components/thinking-block"
-import { PlanProgress } from "./components/plan-progress"
+import {
+  ChatWorkspace,
+  createOptimisticUserMessage,
+  hasUnmatchedPendingUserMessages,
+  mergeTimelineMessages,
+  SessionSidebar,
+  sessionMessagesToUIMessages,
+  useAiChat,
+} from "@/components/chat-workspace"
 import { WelcomeScreen } from "./components/welcome-screen"
-import { SessionSidebar } from "./components/session-sidebar"
 import { MemoryPanel } from "./components/memory-panel"
 
 const SIDEBAR_COLLAPSED_KEY = "ai-chat-sidebar-collapsed"
@@ -28,96 +32,6 @@ interface PendingImage {
   file: File
   preview: string
   uploading?: boolean
-}
-
-function groupUIMessagesIntoPairs(messages: UIMessage[]): Array<{ userMessage: UIMessage; aiMessages: UIMessage[] }> {
-  const pairs: Array<{ userMessage: UIMessage; aiMessages: UIMessage[] }> = []
-  for (const msg of messages) {
-    if (msg.role === "user") {
-      pairs.push({ userMessage: msg, aiMessages: [] })
-    } else if (pairs.length > 0) {
-      pairs[pairs.length - 1].aiMessages.push(msg)
-    }
-  }
-  return pairs
-}
-
-function getStreamingExtras(
-  pair: { aiMessages: UIMessage[] },
-  isStreaming: boolean,
-  agentName?: string,
-): React.ReactNode {
-  const mainAiMessage = pair.aiMessages
-    .filter((m) => {
-      const meta = m.metadata as { originalRole?: string } | undefined
-      return !["tool_call", "tool_result"].includes(meta?.originalRole || "")
-    })
-    .pop()
-
-  const reasoningParts = mainAiMessage?.parts?.filter(isReasoningUIPart) || []
-  const thinkingText = reasoningParts.map((p) => p.text).join("")
-
-  const dataParts = mainAiMessage?.parts?.filter(isDataUIPart) || []
-
-  let planSteps: { description: string; durationMs?: number }[] = []
-  let planStepIndex = -1
-  for (const part of dataParts) {
-    const d = part.data as Record<string, unknown> | undefined
-    if (!d) continue
-    if (part.type === "data-plan" && Array.isArray(d.steps)) {
-      planSteps = (d.steps as Array<{ description?: string }>).map((s) => ({
-        description: s.description || "",
-        durationMs: undefined,
-      }))
-      planStepIndex = 0
-    } else if (part.type === "data-step" && typeof d.index === "number") {
-      if (d.state === "start") {
-        planStepIndex = d.index as number
-      } else if (d.state === "done") {
-        const idx = d.index as number
-        if (planSteps[idx]) {
-          planSteps[idx].durationMs = typeof d.durationMs === "number" ? d.durationMs : undefined
-        }
-        planStepIndex = idx + 1
-      }
-    }
-  }
-
-  const textParts =
-    mainAiMessage?.parts?.filter(
-      (p): p is { type: "text"; text: string } => p.type === "text",
-    ) || []
-  const hasText = textParts.some((p) => p.text)
-  const hasTools = mainAiMessage?.parts?.some((p) => p.type === "dynamic-tool" || p.type.startsWith("tool-"))
-  const hasContent = hasText || thinkingText || planSteps.length > 0 || hasTools
-
-  const extras: React.ReactNode[] = []
-  if (thinkingText) {
-    extras.push(<ThinkingBlock key="thinking" content={thinkingText} isStreaming={isStreaming} />)
-  }
-  if (planSteps.length > 0) {
-    extras.push(
-      <PlanProgress
-        key="plan"
-        steps={planSteps}
-        currentStepIndex={planStepIndex}
-        isStreaming={isStreaming}
-      />,
-    )
-  }
-  if (isStreaming && !hasContent) {
-    extras.push(
-      <div key="loading" className="flex items-center gap-2 text-sm text-muted-foreground mb-4">
-        {agentName && <span className="text-xs font-medium">{agentName}</span>}
-        <span className="flex gap-1">
-          <span className="h-1.5 w-1.5 rounded-full bg-foreground/40 animate-bounce [animation-delay:0ms]" />
-          <span className="h-1.5 w-1.5 rounded-full bg-foreground/40 animate-bounce [animation-delay:150ms]" />
-          <span className="h-1.5 w-1.5 rounded-full bg-foreground/40 animate-bounce [animation-delay:300ms]" />
-        </span>
-      </div>,
-    )
-  }
-  return extras.length > 0 ? <>{extras}</> : null
 }
 
 export function Component() {
@@ -133,9 +47,9 @@ export function Component() {
     return saved ? saved === "true" : false
   })
   const [pendingImages, setPendingImages] = useState<PendingImage[]>([])
+  const [pendingUserMessages, setPendingUserMessages] = useState<UIMessage[]>([])
   const [isAtBottom, setIsAtBottom] = useState(true)
   const scrollRef = useRef<HTMLDivElement>(null)
-  const textareaRef = useRef<HTMLTextAreaElement>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
   const { data: sessionData, isLoading } = useQuery({
@@ -158,10 +72,23 @@ export function Component() {
     onError: handleChatError,
   })
 
-  const qaPairs = useMemo(() => {
-    return groupUIMessagesIntoPairs(chat.messages)
-  }, [chat.messages])
-
+  const chatBusy = chat.status === "streaming" || chat.status === "submitted"
+  const serverMessages = useMemo(
+    () => sessionMessagesToUIMessages(sessionData?.messages ?? []),
+    [sessionData?.messages],
+  )
+  const baseVisibleMessages = useMemo(
+    () => mergeTimelineMessages(serverMessages, chat.messages),
+    [chat.messages, serverMessages],
+  )
+  const hasPendingUserMessage = useMemo(
+    () => hasUnmatchedPendingUserMessages(baseVisibleMessages, pendingUserMessages),
+    [baseVisibleMessages, pendingUserMessages],
+  )
+  const visibleMessages = useMemo(
+    () => mergeTimelineMessages(serverMessages, chat.messages, pendingUserMessages),
+    [chat.messages, pendingUserMessages, serverMessages],
+  )
   const scrollToBottom = useCallback((instant?: boolean) => {
     messagesEndRef.current?.scrollIntoView({ behavior: instant ? "instant" : "smooth" })
   }, [])
@@ -174,7 +101,10 @@ export function Component() {
 
   const uploadImageMutation = useMutation({
     mutationFn: (file: File) => sessionApi.uploadMessageImage(sessionId, file),
-    onError: (err) => toast.error(err.message),
+    onError: (err) => {
+      setPendingUserMessages([])
+      toast.error(err.message)
+    },
   })
 
   const sendMutation = useMutation({
@@ -195,7 +125,6 @@ export function Component() {
       setPendingImages([])
       setIsAtBottom(true)
       scrollToBottom()
-      requestAnimationFrame(() => textareaRef.current?.focus())
     },
     onError: (err) => toast.error(err.message),
   })
@@ -207,7 +136,6 @@ export function Component() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["ai-session", sessionId] })
-      requestAnimationFrame(() => textareaRef.current?.focus())
     },
     onError: (err) => toast.error(err.message),
   })
@@ -269,68 +197,35 @@ export function Component() {
     [editMessageMutation],
   )
 
-  // Auto-resize textarea
-  useEffect(() => {
-    const textarea = textareaRef.current
-    if (!textarea) return
-    textarea.style.height = "auto"
-    const newHeight = Math.min(textarea.scrollHeight, 200)
-    textarea.style.height = `${newHeight}px`
-  }, [input])
-
   // Follow new output only while the reader is already near the bottom.
   useEffect(() => {
     if (!isAtBottom && chat.status !== "submitted") return
     const instant = chat.status === "streaming" || chat.status === "submitted"
     scrollToBottom(instant)
-  }, [chat.messages, chat.status, isAtBottom, scrollToBottom])
+  }, [chat.messages, chat.status, isAtBottom, scrollToBottom, visibleMessages])
 
-  const isBusy = chat.status === "streaming" || chat.status === "submitted"
-
-  useEffect(() => {
-    if (isBusy || sendMutation.isPending) return
-    const timer = window.setTimeout(() => textareaRef.current?.focus(), 0)
-    return () => window.clearTimeout(timer)
-  }, [isBusy, sendMutation.isPending])
+  const isBusy = chatBusy || sendMutation.isPending || hasPendingUserMessage
 
   function handleSend(content?: string) {
     const text = (content ?? input).trim()
     if ((!text && pendingImages.length === 0) || isBusy || sendMutation.isPending) return
+    setPendingUserMessages([
+      createOptimisticUserMessage({
+        text,
+        images: pendingImages.map((image) => image.preview),
+      }),
+    ])
     sendMutation.mutate(text)
   }
 
-  function handleKeyDown(e: React.KeyboardEvent) {
-    if (e.nativeEvent.isComposing) return
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault()
-      handleSend()
-    }
-  }
-
-  function handlePaste(e: React.ClipboardEvent) {
-    const items = e.clipboardData.items
-    const imageFiles: File[] = []
-
-    for (let i = 0; i < items.length; i++) {
-      const item = items[i]
-      if (item.type.startsWith("image/")) {
-        const file = item.getAsFile()
-        if (file) {
-          imageFiles.push(file)
-        }
+  function addPendingImages(files: File[]) {
+    for (const file of files) {
+      const reader = new FileReader()
+      reader.onload = (event) => {
+        const preview = event.target?.result as string
+        setPendingImages((prev) => [...prev, { file, preview }])
       }
-    }
-
-    if (imageFiles.length > 0) {
-      e.preventDefault()
-      for (const file of imageFiles) {
-        const reader = new FileReader()
-        reader.onload = (event) => {
-          const preview = event.target?.result as string
-          setPendingImages((prev) => [...prev, { file, preview }])
-        }
-        reader.readAsDataURL(file)
-      }
+      reader.readAsDataURL(file)
     }
   }
 
@@ -362,32 +257,34 @@ export function Component() {
   const session = sessionData?.session
   const agentId = session?.agentId
   const agentName = (session as unknown as Record<string, unknown>)?.agentName as string | undefined
-  const hasMessages = chat.messages.length > 0
+  const hasMessages = visibleMessages.length > 0
   const showWelcome = !hasMessages && !isBusy
-  const lastPairIndex = qaPairs.length - 1
   const showJumpToBottom = !showWelcome && !isAtBottom
 
   return (
-    <div className="flex h-full overflow-hidden">
-      {/* Sidebar */}
-      <SessionSidebar agentId={agentId} currentSessionId={sessionId} collapsed={sidebarCollapsed} />
-
-      {/* Main chat area */}
-      <div className="flex-1 flex flex-col min-w-0 bg-background h-full">
-        {/* Header */}
-        <div className="flex items-center justify-between border-b px-4 py-2 shrink-0 h-12">
-          <div className="flex items-center gap-2">
-            <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={toggleSidebar}>
-              {sidebarCollapsed ? <PanelLeft className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}
-            </Button>
-            <h3 className="font-medium truncate">{session?.title || t("ai:chat.newChat")}</h3>
-            {session?.status && (
-              <Badge variant="outline" className="text-xs">
-                {t(`ai:chat.sessionStatus.${session.status}`)}
-              </Badge>
-            )}
-          </div>
-          <div className="flex items-center gap-1">
+    <>
+      <ChatWorkspace
+        density="comfortable"
+        messageWidth="standard"
+        composerPlacement="docked"
+        emptyStateTone="ai"
+        sidebar={<SessionSidebar agentId={agentId} currentSessionId={sessionId} collapsed={sidebarCollapsed} />}
+        leading={
+          <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={toggleSidebar}>
+            {sidebarCollapsed ? <PanelLeft className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}
+          </Button>
+        }
+        identity={{
+          title: session?.title || t("ai:chat.newChat"),
+          subtitle: agentName ? `当前智能体：${agentName}` : undefined,
+          status: session?.status ? (
+            <Badge variant="outline" className="text-xs">
+              {t(`ai:chat.sessionStatus.${session.status}`)}
+            </Badge>
+          ) : undefined,
+        }}
+        actions={
+          <>
             {agentId && (
               <Button variant="ghost" size="sm" onClick={() => setMemoryOpen(!memoryOpen)}>
                 <Brain className="h-4 w-4" />
@@ -412,197 +309,64 @@ export function Component() {
                 </AlertDialogFooter>
               </AlertDialogContent>
             </AlertDialog>
-          </div>
-        </div>
-
-        {/* Messages area */}
-        <div
-          ref={scrollRef}
-          className="relative flex-1 overflow-y-auto overflow-x-hidden min-h-0"
-          onScroll={updateAtBottom}
-        >
-          {showWelcome ? (
+          </>
+        }
+        loading={isLoading}
+        emptyState={
+          showWelcome ? (
             <WelcomeScreen
               agentName={agentName ?? session?.title}
               agentType={(session as unknown as Record<string, unknown>)?.agentType as string | undefined}
               onPromptClick={(prompt) => handleSend(prompt)}
             />
-          ) : (
-            <div className="max-w-3xl mx-auto px-4 pb-4">
-              {qaPairs.map((pair, index) => {
-                const isLastPair = index === lastPairIndex
-                const isStreamingThisPair = isLastPair && isBusy
-
-                return (
-                  <QAPair
-                    key={pair.userMessage.id}
-                    userMessage={pair.userMessage}
-                    aiMessages={pair.aiMessages}
-                    agentName={agentName}
-                    isStreaming={isStreamingThisPair}
-                    onRegenerate={isLastPair ? () => chat.regenerate() : undefined}
-                    onEditMessage={handleEditMessage}
-                    doneMetrics={
-                      isLastPair && chat.status === "ready"
-                        ? {
-                            inputTokens: chat.lastUsage.promptTokens,
-                            outputTokens: chat.lastUsage.completionTokens,
-                          }
-                        : undefined
-                    }
-                    streamingExtras={
-                      isStreamingThisPair ? getStreamingExtras(pair, true, agentName) : undefined
-                    }
-                  />
-                )
-              })}
-
-              {/* Inline error */}
-              {chat.error && chat.status !== "streaming" && chat.status !== "submitted" && (
-                <div className="py-6">
-                  <div className="flex items-center gap-3 p-3 rounded-lg border-l-4 border-destructive bg-destructive/5">
-                    <AlertTriangle className="h-4 w-4 text-destructive shrink-0" />
-                    <div className="flex-1">
-                      <div className="text-sm font-medium text-destructive">{t("ai:chat.generationError")}</div>
-                      <div className="text-xs text-muted-foreground mt-0.5">{chat.error.message}</div>
-                    </div>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => continueMutation.mutate()}
-                      disabled={continueMutation.isPending}
-                    >
-                      {continueMutation.isPending ? (
-                        <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
-                      ) : (
-                        <RotateCw className="h-3.5 w-3.5 mr-1" />
-                      )}
-                      {t("ai:chat.continueGenerating")}
-                    </Button>
-                    <Button variant="ghost" size="sm" onClick={handleRetry}>
-                      <RotateCw className="h-3.5 w-3.5 mr-1" />
-                      {t("ai:chat.retry")}
-                    </Button>
-                  </div>
-                </div>
-              )}
-
-              <div ref={messagesEndRef} />
-            </div>
-          )}
-          {showJumpToBottom && (
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="sticky bottom-3 left-1/2 z-10 h-8 -translate-x-1/2 rounded-full bg-background/95 px-3 shadow-sm"
-              onClick={() => {
-                setIsAtBottom(true)
-                scrollToBottom()
-              }}
-            >
-              <ArrowDown className="mr-1.5 h-3.5 w-3.5" />
-              {t("ai:chat.jumpToBottom")}
-            </Button>
-          )}
-        </div>
-
-        {/* Centered stop button during streaming */}
-        {isBusy && (
-          <div className="flex justify-center pb-2 shrink-0">
-            <Button
-              variant="outline"
-              size="sm"
-              className="rounded-full px-4"
-              onClick={() => cancelMutation.mutate()}
-              disabled={cancelMutation.isPending}
-            >
-              {cancelMutation.isPending ? (
-                <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
-              ) : (
-                <Square className="h-3.5 w-3.5 mr-1.5" />
-              )}
-              {t("ai:chat.cancel")}
-            </Button>
-          </div>
-        )}
-
-        {/* Input area — floating card */}
-        <div className="px-4 pb-3 pt-1 shrink-0">
-          <div className="max-w-3xl mx-auto">
-            <div className="rounded-2xl bg-background shadow-lg border transition-colors focus-within:border-primary/30">
-              <textarea
-                ref={textareaRef}
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyDown={handleKeyDown}
-                onPaste={handlePaste}
-                placeholder={t("ai:chat.inputPlaceholder")}
-                rows={1}
-                className="w-full min-h-[44px] max-h-[200px] resize-none bg-transparent px-4 pt-3 pb-1 text-base leading-relaxed placeholder:text-muted-foreground focus:outline-none read-only:cursor-text"
-                readOnly={isBusy || sendMutation.isPending}
-              />
-              {/* Pending images preview */}
-              {pendingImages.length > 0 && (
-                <div className="flex gap-2 px-4 pb-2 overflow-x-auto">
-                  {pendingImages.map((img, idx) => (
-                    <div key={idx} className="relative group shrink-0">
-                      <img
-                        src={img.preview}
-                        alt={`Pending ${idx}`}
-                        className="h-16 w-16 object-cover rounded-md border"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => removePendingImage(idx)}
-                        className="absolute -top-1.5 -right-1.5 h-5 w-5 rounded-full bg-destructive text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
-                      >
-                        <X className="h-3 w-3" />
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
-              {/* Toolbar */}
-              <div className="flex items-center justify-between px-3 pb-2">
-                <div className="flex items-center gap-1">
-                  <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground/40" disabled>
-                    <Paperclip className="h-4 w-4" />
-                  </Button>
-                </div>
-                <div className="flex items-center gap-2">
-                  {!isBusy && (
-                    <Button
-                      size="icon"
-                      className="h-8 w-8 rounded-full"
-                      onClick={() => handleSend()}
-                      disabled={(!input.trim() && pendingImages.length === 0) || sendMutation.isPending}
-                    >
-                      <svg
-                        xmlns="http://www.w3.org/2000/svg"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        className="h-4 w-4"
-                      >
-                        <path d="m22 2-7 20-4-9-9-4Z" />
-                        <path d="M22 2 11 13" />
-                      </svg>
-                    </Button>
-                  )}
-                </div>
-              </div>
-            </div>
-            <p className="text-[10px] text-muted-foreground/50 text-center mt-1">{t("ai:chat.inputHint")}</p>
-          </div>
-        </div>
-      </div>
-
-      {/* Memory panel */}
+          ) : null
+        }
+        messages={visibleMessages}
+        agentName={agentName}
+        isBusy={isBusy}
+        status={chat.status}
+        error={chat.error}
+        workspaceActions={{
+          regenerate: () => chat.regenerate(),
+          retry: handleRetry,
+          continueGeneration: () => continueMutation.mutate(),
+          cancel: () => cancelMutation.mutate(),
+        }}
+        onEditMessage={handleEditMessage}
+        composer={{
+          value: input,
+          onChange: setInput,
+          onSend: handleSend,
+          onStop: () => cancelMutation.mutate(),
+          onPasteImages: addPendingImages,
+          onPickImages: addPendingImages,
+          onRemoveImage: removePendingImage,
+          images: pendingImages,
+          placeholder: t("ai:chat.inputPlaceholder"),
+          hint: t("ai:chat.inputHint"),
+          disabled: isBusy,
+          pending: sendMutation.isPending,
+          isBusy,
+          allowImages: true,
+          variant: "compact",
+          maxWidth: "standard",
+          showToolbarHint: true,
+          attachmentTone: "chat",
+        }}
+        messagesEndRef={messagesEndRef}
+        scrollRef={scrollRef}
+        onScroll={updateAtBottom}
+        showJumpToBottom={showJumpToBottom}
+        onJumpToBottom={() => {
+          setIsAtBottom(true)
+          scrollToBottom()
+        }}
+        getDoneMetrics={() => ({
+          inputTokens: chat.lastUsage.promptTokens,
+          outputTokens: chat.lastUsage.completionTokens,
+        })}
+      />
       {memoryOpen && agentId && <MemoryPanel agentId={agentId} onClose={() => setMemoryOpen(false)} />}
-    </div>
+    </>
   )
 }

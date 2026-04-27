@@ -1,5 +1,5 @@
 import { useEffect, useMemo } from "react"
-import { useForm } from "react-hook-form"
+import { useForm, useWatch } from "react-hook-form"
 import { z } from "zod"
 import { zodResolver } from "@/lib/form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
@@ -83,8 +83,8 @@ export function KbFormSheet({ open, onOpenChange, knowledgeBase }: KbFormSheetPr
     },
   })
 
-  const selectedEmbeddingProviderId = form.watch("embeddingProviderId") ?? ""
-  const selectedType = form.watch("type")
+  const selectedEmbeddingProviderId = useWatch({ control: form.control, name: "embeddingProviderId" }) ?? ""
+  const selectedType = useWatch({ control: form.control, name: "type" })
 
   const { data: embModelsData } = useQuery({
     queryKey: ["ai-models-embedding", selectedEmbeddingProviderId],

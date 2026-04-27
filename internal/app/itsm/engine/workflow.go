@@ -18,42 +18,42 @@ type WFNode struct {
 
 // WFEdge represents a ReactFlow edge. Backend reads id, source, target, data.
 type WFEdge struct {
-	ID     string       `json:"id"`
-	Source string       `json:"source"`
-	Target string       `json:"target"`
-	Data   WFEdgeData   `json:"data"`
+	ID     string     `json:"id"`
+	Source string     `json:"source"`
+	Target string     `json:"target"`
+	Data   WFEdgeData `json:"data"`
 }
 
 // WFEdgeData holds edge configuration relevant to the engine.
 type WFEdgeData struct {
-	Outcome   string          `json:"outcome"`
-	Default   bool            `json:"default"`
+	Outcome   string            `json:"outcome"`
+	Default   bool              `json:"default"`
 	Condition *GatewayCondition `json:"condition,omitempty"`
 }
 
 // NodeData holds parsed node configuration (varies by type).
 type NodeData struct {
-	Label        string            `json:"label"`
-	FormSchema   json.RawMessage    `json:"formSchema,omitempty"`
-		Participants []Participant     `json:"participants,omitempty"`
-	ActionID     uint              `json:"action_id,omitempty"`
-	Conditions   []GatewayCondition `json:"conditions,omitempty"`
-	ChannelID    uint              `json:"channel_id,omitempty"`
-	Template     string            `json:"template,omitempty"`
-	Recipients   []Participant     `json:"recipients,omitempty"`
-	WaitMode         string            `json:"wait_mode,omitempty"`         // signal | timer
-	Duration         string            `json:"duration,omitempty"`         // e.g. "2h", "30m"
-	GatewayDirection string            `json:"gateway_direction,omitempty"` // fork | join (parallel/inclusive only)
-	Assignments      []Assignment      `json:"assignments,omitempty"`      // script node variable assignments
-	AttachedTo       string            `json:"attached_to,omitempty"`      // boundary event: host node ID
-	Interrupting     bool              `json:"interrupting,omitempty"`     // boundary timer: interrupting mode
-	SubProcessDef    json.RawMessage   `json:"subprocess_def,omitempty"`   // embedded subprocess workflow definition
+	Label            string             `json:"label"`
+	FormSchema       json.RawMessage    `json:"formSchema,omitempty"`
+	Participants     []Participant      `json:"participants,omitempty"`
+	ActionID         uint               `json:"action_id,omitempty"`
+	Conditions       []GatewayCondition `json:"conditions,omitempty"`
+	ChannelID        uint               `json:"channel_id,omitempty"`
+	Template         string             `json:"template,omitempty"`
+	Recipients       []Participant      `json:"recipients,omitempty"`
+	WaitMode         string             `json:"wait_mode,omitempty"`         // signal | timer
+	Duration         string             `json:"duration,omitempty"`          // e.g. "2h", "30m"
+	GatewayDirection string             `json:"gateway_direction,omitempty"` // fork | join (parallel/inclusive only)
+	Assignments      []Assignment       `json:"assignments,omitempty"`       // script node variable assignments
+	AttachedTo       string             `json:"attached_to,omitempty"`       // boundary event: host node ID
+	Interrupting     bool               `json:"interrupting,omitempty"`      // boundary timer: interrupting mode
+	SubProcessDef    json.RawMessage    `json:"subprocess_def,omitempty"`    // embedded subprocess workflow definition
 }
 
 // Participant defines who should handle a node.
 type Participant struct {
-	Type           string `json:"type"`            // user | position | department | position_department | requester_manager
-	Value          string `json:"value,omitempty"`  // user ID, position ID, or department ID (string for flexibility)
+	Type           string `json:"type"`                      // requester | user | position | department | position_department | requester_manager
+	Value          string `json:"value,omitempty"`           // user ID, position ID, or department ID (string for flexibility)
 	PositionCode   string `json:"position_code,omitempty"`   // position_department: position code
 	DepartmentCode string `json:"department_code,omitempty"` // position_department: department code
 }
@@ -66,12 +66,12 @@ type Assignment struct {
 
 // GatewayCondition defines a single or compound condition for gateway evaluation.
 type GatewayCondition struct {
-	Field      string             `json:"field"`                 // e.g. "ticket.priority", "form.urgency"
-	Operator   string             `json:"operator"`              // equals | not_equals | contains_any | gt | lt | gte | lte | in | not_in | is_empty | is_not_empty | between | matches
-	Value      any                `json:"value"`                 // comparison value
-	EdgeID     string             `json:"edge_id"`               // the edge this condition maps to
-	Logic      string             `json:"logic,omitempty"`       // "and" | "or" for compound conditions
-	Conditions []GatewayCondition `json:"conditions,omitempty"`  // sub-conditions for compound evaluation
+	Field      string             `json:"field"`                // e.g. "ticket.priority", "form.urgency"
+	Operator   string             `json:"operator"`             // equals | not_equals | contains_any | gt | lt | gte | lte | in | not_in | is_empty | is_not_empty | between | matches
+	Value      any                `json:"value"`                // comparison value
+	EdgeID     string             `json:"edge_id"`              // the edge this condition maps to
+	Logic      string             `json:"logic,omitempty"`      // "and" | "or" for compound conditions
+	Conditions []GatewayCondition `json:"conditions,omitempty"` // sub-conditions for compound evaluation
 }
 
 // ParseWorkflowDef parses workflow JSON into a WorkflowDef.

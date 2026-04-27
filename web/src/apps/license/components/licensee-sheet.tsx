@@ -1,5 +1,5 @@
 import { useEffect } from "react"
-import { useForm } from "react-hook-form"
+import { useForm, type Resolver } from "react-hook-form"
 import { useTranslation } from "react-i18next"
 import { z } from "zod"
 import { zodResolver } from "@hookform/resolvers/zod"
@@ -59,7 +59,7 @@ export function LicenseeSheet({ open, onOpenChange, licensee }: LicenseeSheetPro
   const schema = useLicenseeSchema()
 
   const form = useForm<FormValues>({
-    resolver: zodResolver(schema),
+    resolver: zodResolver(schema) as Resolver<FormValues>,
     defaultValues: {
       name: "",
       notes: "",
@@ -126,9 +126,9 @@ export function LicenseeSheet({ open, onOpenChange, licensee }: LicenseeSheetPro
           </SheetDescription>
         </SheetHeader>
         <Form {...form}>
-          <form onSubmit={form.handleSubmit(onSubmit as any)} className="flex flex-1 flex-col gap-5 px-4">
+          <form onSubmit={form.handleSubmit(onSubmit)} className="flex flex-1 flex-col gap-5 px-4">
             <FormField
-              control={form.control as any}
+              control={form.control}
               name="name"
               render={({ field }) => (
                 <FormItem>
@@ -141,7 +141,7 @@ export function LicenseeSheet({ open, onOpenChange, licensee }: LicenseeSheetPro
               )}
             />
             <FormField
-              control={form.control as any}
+              control={form.control}
               name="notes"
               render={({ field }) => (
                 <FormItem>

@@ -3,11 +3,14 @@ package engine
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
+
+	"metis/internal/app/itsm/form"
 )
 
 // processVariableModel is the engine-local alias for itsm_process_variables.
@@ -26,22 +29,16 @@ type processVariableModel struct {
 func (processVariableModel) TableName() string { return "itsm_process_variables" }
 
 // writeFormBindings parses the form schema for fields with binding, extracts
-// values from formData, and upserts them as process variables.
-func writeFormBindings(tx *gorm.DB, ticketID uint, scopeID string, formSchemaJSON string, formDataJSON string, source string) error {
+// values from formData, validates them, and upserts them as process variables.
+// currentNodeID is used for field-level permission checks (empty = skip checks).
+func writeFormBindings(tx *gorm.DB, ticketID uint, scopeID string, formSchemaJSON string, formDataJSON string, source string, currentNodeID string) error {
 	if formSchemaJSON == "" || formDataJSON == "" {
 		return nil
 	}
 
-	// Parse form schema
-	var schema struct {
-		Fields []struct {
-			Key     string `json:"key"`
-			Type    string `json:"type"`
-			Binding string `json:"binding,omitempty"`
-			Options []any  `json:"options,omitempty"`
-		} `json:"fields"`
-	}
-	if err := json.Unmarshal([]byte(formSchemaJSON), &schema); err != nil {
+	// Parse full form schema for validation
+	var fullSchema form.FormSchema
+	if err := json.Unmarshal([]byte(formSchemaJSON), &fullSchema); err != nil {
 		return nil // non-fatal: schema is malformed, skip binding
 	}
 
@@ -53,12 +50,32 @@ func writeFormBindings(tx *gorm.DB, ticketID uint, scopeID string, formSchemaJSO
 		return nil // non-fatal
 	}
 
-	for _, field := range schema.Fields {
+	// Validate form data against schema
+	if validationErrors := form.ValidateFormData(fullSchema, formData); len(validationErrors) > 0 {
+		slog.Warn("form validation failed, skipping variable write",
+			"ticketID", ticketID, "source", source, "errors", validationErrors)
+		return &FormValidationError{Errors: validationErrors}
+	}
+
+	for _, field := range fullSchema.Fields {
 		if field.Binding == "" {
 			continue
 		}
+
+		// Check field-level permission: skip readonly/hidden fields
+		if currentNodeID != "" && field.Permissions != nil {
+			if perm, ok := field.Permissions[currentNodeID]; ok && (perm == "readonly" || perm == "hidden") {
+				slog.Warn("field write skipped due to permission",
+					"ticketID", ticketID, "field", field.Key, "nodeID", currentNodeID, "permission", perm)
+				continue
+			}
+		}
+
 		val, exists := formData[field.Key]
 		if !exists {
+			continue
+		}
+		if isEmptyFormValue(val) {
 			continue
 		}
 
@@ -83,6 +100,31 @@ func writeFormBindings(tx *gorm.DB, ticketID uint, scopeID string, formSchemaJSO
 	return nil
 }
 
+// FormValidationError wraps form field validation errors.
+type FormValidationError struct {
+	Errors []form.FieldValidationError
+}
+
+func (e *FormValidationError) Error() string {
+	return fmt.Sprintf("form validation failed: %d field(s) invalid", len(e.Errors))
+}
+
+func isEmptyFormValue(val any) bool {
+	if val == nil {
+		return true
+	}
+	switch v := val.(type) {
+	case string:
+		return v == ""
+	case []any:
+		return len(v) == 0
+	case map[string]any:
+		return len(v) == 0
+	default:
+		return false
+	}
+}
+
 // fieldTypeToValueType maps a form field type to a variable value_type.
 func fieldTypeToValueType(fieldType string, hasOptions bool) string {
 	switch fieldType {
@@ -100,7 +142,7 @@ func fieldTypeToValueType(fieldType string, hasOptions bool) string {
 		return "boolean"
 	case "date", "datetime":
 		return "date"
-	case "multi_select", "date_range":
+	case "multi_select", "date_range", "table":
 		return "json"
 	default:
 		return "string"

@@ -1,12 +1,17 @@
 import { useState } from "react"
 import { useTranslation } from "react-i18next"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
-import { Wrench, BookOpen, Globe, Code, CheckCircle2, CircleOff, Clock3, ShieldAlert } from "lucide-react"
+import { Wrench, BookOpen, Globe, Code, Save } from "lucide-react"
 import { usePermission } from "@/hooks/use-permission"
 import { api } from "@/lib/api"
 import { toast } from "sonner"
 import { Switch } from "@/components/ui/switch"
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Slider } from "@/components/ui/slider"
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
@@ -14,9 +19,16 @@ import {
 import {
   Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription,
 } from "@/components/ui/sheet"
-import { cn } from "@/lib/utils"
+import { WorkspaceStatus, type WorkspaceStatusTone } from "@/components/workspace/primitives"
 
-type AvailabilityStatus = "available" | "inactive" | "unimplemented" | "risk_disabled"
+type AvailabilityStatus = "available" | "inactive" | "needs_config" | "unimplemented" | "risk_disabled"
+
+interface ToolRuntimeConfig {
+  modelId?: number
+  temperature?: number
+  maxTokens?: number
+  timeoutSeconds?: number
+}
 
 interface ToolItem {
   id: number
@@ -25,6 +37,8 @@ interface ToolItem {
   displayName: string
   description: string
   parametersSchema: Record<string, unknown>
+  runtimeConfigSchema?: Record<string, unknown>
+  runtimeConfig?: ToolRuntimeConfig
   isActive: boolean
   isExecutable: boolean
   availabilityStatus: AvailabilityStatus
@@ -43,15 +57,16 @@ const TOOLKIT_ICONS: Record<string, React.ElementType> = {
   code: Code,
 }
 
-const STATUS_ICONS: Record<AvailabilityStatus, React.ElementType> = {
-  available: CheckCircle2,
-  inactive: CircleOff,
-  unimplemented: Clock3,
-  risk_disabled: ShieldAlert,
+const STATUS_TONES: Record<AvailabilityStatus, WorkspaceStatusTone> = {
+  available: "success",
+  inactive: "neutral",
+  needs_config: "warning",
+  unimplemented: "neutral",
+  risk_disabled: "danger",
 }
 
 function canToggleTool(tool: ToolItem) {
-  return tool.availabilityStatus === "available" || tool.availabilityStatus === "inactive"
+  return tool.availabilityStatus === "available" || tool.availabilityStatus === "inactive" || tool.availabilityStatus === "needs_config"
 }
 
 export function BuiltinToolsTab() {
@@ -106,7 +121,7 @@ export function BuiltinToolsTab() {
 
   return (
     <>
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {groups.map((group) => {
           const Icon = TOOLKIT_ICONS[group.toolkit] ?? Wrench
           const activeCount = group.tools.filter((tool) => tool.isActive).length
@@ -117,12 +132,12 @@ export function BuiltinToolsTab() {
             <button
               key={group.toolkit}
               type="button"
-              className="flex flex-col gap-3 rounded-lg border bg-card p-4 text-left transition-colors hover:border-primary/50 hover:bg-accent/30 cursor-pointer"
+              className="workspace-surface flex min-h-[128px] flex-col gap-3 rounded-lg p-4 text-left transition-colors hover:border-primary/35 hover:bg-accent/20 cursor-pointer"
               onClick={() => setOpenToolkit(group)}
             >
               <div className="flex items-center gap-3">
-                <div className="flex h-9 w-9 items-center justify-center rounded-md bg-primary/10">
-                  <Icon className="h-5 w-5 text-primary" />
+                <div className="flex h-9 w-9 items-center justify-center rounded-md border bg-muted/45">
+                  <Icon className="h-4.5 w-4.5 text-foreground" />
                 </div>
                 <div className="flex-1 min-w-0">
                   <h3 className="text-sm font-semibold">
@@ -132,7 +147,7 @@ export function BuiltinToolsTab() {
                     {executableCount}/{totalCount} {t("ai:tools.builtin.toolsAvailable")}
                   </p>
                 </div>
-                <Badge variant={executableCount > 0 ? "default" : "secondary"} className="shrink-0">
+                <Badge variant="outline" className="shrink-0 font-normal">
                   {activeCount}/{totalCount} {t("ai:tools.builtin.toolsEnabled")}
                 </Badge>
               </div>
@@ -146,7 +161,7 @@ export function BuiltinToolsTab() {
 
       {/* Toolkit detail drawer */}
       <Sheet open={activeDrawerGroup !== null} onOpenChange={(v) => { if (!v) setOpenToolkit(null) }}>
-        <SheetContent className="sm:max-w-lg overflow-y-auto">
+        <SheetContent className="overflow-y-auto sm:max-w-3xl">
           {activeDrawerGroup && (
             <ToolkitDetail
               group={activeDrawerGroup}
@@ -245,6 +260,9 @@ function ToolkitDetail({
                     {JSON.stringify(tool.parametersSchema ?? {}, null, 2)}
                   </pre>
                 </details>
+                {tool.runtimeConfigSchema && (
+                  <ToolRuntimeConfigForm tool={tool} canUpdate={canUpdate} />
+                )}
               </div>
               <Switch
                 checked={tool.isActive}
@@ -267,18 +285,131 @@ function ToolkitDetail({
 
 function ToolStatusBadge({ tool }: { tool: ToolItem }) {
   const { t } = useTranslation("ai")
-  const Icon = STATUS_ICONS[tool.availabilityStatus] ?? CircleOff
+  return <WorkspaceStatus tone={STATUS_TONES[tool.availabilityStatus]} label={t(`tools.builtin.availability.${tool.availabilityStatus}`)} className="mt-0.5 shrink-0" />
+}
+
+interface ProviderItem {
+  id: number
+  name: string
+  type: string
+  status: string
+}
+
+interface ModelItem {
+  id: number
+  displayName: string
+  providerId: number
+  status: string
+}
+
+function ToolRuntimeConfigForm({ tool, canUpdate }: { tool: ToolItem; canUpdate: boolean }) {
+  const { t } = useTranslation(["ai", "common"])
+  const queryClient = useQueryClient()
+  const current = tool.runtimeConfig ?? {}
+  const [providerId, setProviderId] = useState(0)
+  const [modelId, setModelId] = useState(current.modelId ?? 0)
+  const [temperature, setTemperature] = useState(current.temperature ?? 0.2)
+  const [maxTokens, setMaxTokens] = useState(current.maxTokens ?? 1024)
+  const [timeoutSeconds, setTimeoutSeconds] = useState(current.timeoutSeconds ?? 30)
+
+  const { data: providers = [] } = useQuery({
+    queryKey: ["ai-providers-for-tool-runtime"],
+    queryFn: () => api.get<{ items: ProviderItem[] }>("/api/v1/ai/providers?pageSize=100").then((r) => r.items ?? []),
+  })
+
+  const { data: models = [] } = useQuery({
+    queryKey: ["ai-llm-models-for-tool-runtime"],
+    queryFn: () => api.get<{ items: ModelItem[] }>("/api/v1/ai/models?type=llm&pageSize=100").then((r) => r.items ?? []),
+  })
+
+  const selectedModel = models.find((m) => m.id === modelId)
+  const effectiveProviderId = providerId || selectedModel?.providerId || 0
+  const providerModels = models.filter((m) => m.providerId === effectiveProviderId)
+
+  const runtimeMutation = useMutation({
+    mutationFn: () => api.patch(`/api/v1/ai/tools/${tool.id}/runtime`, {
+      runtimeConfig: { modelId, temperature, maxTokens, timeoutSeconds },
+    }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["ai-tools"] })
+      toast.success(t("ai:tools.builtin.runtimeSaveSuccess"))
+    },
+    onError: (err) => toast.error(err.message),
+  })
+
   return (
-    <Badge
-      variant={tool.availabilityStatus === "available" ? "default" : "outline"}
-      className={cn(
-        "mt-0.5 shrink-0 gap-1.5",
-        tool.availabilityStatus === "risk_disabled" && "border-amber-500/45 text-amber-700 dark:text-amber-300",
-        tool.availabilityStatus === "unimplemented" && "border-muted-foreground/35 text-muted-foreground"
-      )}
-    >
-      <Icon className="size-3" />
-      {t(`tools.builtin.availability.${tool.availabilityStatus}`)}
-    </Badge>
+    <div className="mt-4 overflow-hidden border-t border-border/45 pt-4">
+      <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-medium">{t("ai:tools.builtin.runtimeTitle")}</p>
+          <p className="mt-1 text-xs leading-5 text-muted-foreground">{t("ai:tools.builtin.runtimeDesc")}</p>
+        </div>
+        <Button
+          size="sm"
+          className="shrink-0"
+          disabled={!canUpdate || runtimeMutation.isPending || modelId === 0}
+          onClick={() => runtimeMutation.mutate()}
+        >
+          <Save className="mr-1.5 h-3.5 w-3.5" />
+          {runtimeMutation.isPending ? t("common:saving") : t("common:save")}
+        </Button>
+      </div>
+      <div className="grid min-w-0 gap-4 md:grid-cols-2">
+        <div className="space-y-1.5">
+          <Label>{t("ai:tools.builtin.provider")}</Label>
+          <Select
+            value={effectiveProviderId ? String(effectiveProviderId) : ""}
+            onValueChange={(v) => {
+              setProviderId(Number(v))
+              setModelId(0)
+            }}
+          >
+            <SelectTrigger className="w-full">
+              <SelectValue placeholder={t("ai:tools.builtin.providerPlaceholder")} />
+            </SelectTrigger>
+            <SelectContent>
+              {providers.map((provider) => (
+                <SelectItem key={provider.id} value={String(provider.id)}>
+                  {provider.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-1.5">
+          <Label>{t("ai:tools.builtin.model")}</Label>
+          <Select value={modelId ? String(modelId) : ""} onValueChange={(v) => setModelId(Number(v))} disabled={!effectiveProviderId}>
+            <SelectTrigger className="w-full">
+              <SelectValue placeholder={t("ai:tools.builtin.modelPlaceholder")} />
+            </SelectTrigger>
+            <SelectContent>
+              {providerModels.map((model) => (
+                <SelectItem key={model.id} value={String(model.id)}>
+                  {model.displayName}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-2 md:col-span-2">
+          <div className="flex items-center justify-between gap-3">
+            <Label>{t("ai:tools.builtin.temperature")}</Label>
+            <span className="rounded-full border border-border/55 bg-background/35 px-2 py-0.5 font-mono text-[11px] text-muted-foreground">{temperature.toFixed(2)}</span>
+          </div>
+          <Slider min={0} max={1} step={0.05} value={[temperature]} onValueChange={([v]) => setTemperature(v)} />
+        </div>
+        <div className="space-y-1.5">
+          <Label>{t("ai:tools.builtin.maxTokens")}</Label>
+          <Input type="number" min={256} max={8192} value={maxTokens} onChange={(e) => setMaxTokens(Number(e.target.value))} />
+        </div>
+        <div className="space-y-1.5">
+          <Label>{t("ai:tools.builtin.timeoutSeconds")}</Label>
+          <div className="flex items-center gap-2">
+            <Input type="number" min={5} max={300} value={timeoutSeconds} onChange={(e) => setTimeoutSeconds(Number(e.target.value))} />
+            <span className="text-xs text-muted-foreground">{t("ai:tools.builtin.seconds")}</span>
+          </div>
+        </div>
+      </div>
+    </div>
   )
 }

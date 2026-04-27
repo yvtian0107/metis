@@ -3,6 +3,12 @@ package license
 import (
 	"context"
 	"encoding/json"
+	"metis/internal/app/license/bootstrap"
+	"metis/internal/app/license/certificate"
+	"metis/internal/app/license/domain"
+	"metis/internal/app/license/licensee"
+	"metis/internal/app/license/product"
+	"metis/internal/app/license/registration"
 
 	"github.com/casbin/casbin/v2"
 	"github.com/gin-gonic/gin"
@@ -24,36 +30,39 @@ type LicenseApp struct {
 func (a *LicenseApp) Name() string { return "license" }
 
 func (a *LicenseApp) Models() []any {
-	return []any{&Product{}, &Plan{}, &ProductKey{}, &Licensee{}, &License{}, &LicenseRegistration{}}
+	return []any{&domain.Product{}, &domain.Plan{}, &domain.ProductKey{}, &domain.Licensee{}, &domain.License{}, &domain.LicenseRegistration{}}
 }
 
 func (a *LicenseApp) Seed(db *gorm.DB, enforcer *casbin.Enforcer, _ bool) error {
-	return seedLicense(db, enforcer)
+	return bootstrap.SeedLicense(db, enforcer)
 }
 
 func (a *LicenseApp) Providers(i do.Injector) {
 	a.injector = i
-	do.Provide(i, NewProductRepo)
-	do.Provide(i, NewPlanRepo)
-	do.Provide(i, NewProductKeyRepo)
-	do.Provide(i, NewLicenseeRepo)
-	do.Provide(i, NewLicenseRepo)
-	do.Provide(i, NewLicenseRegistrationRepo)
-	do.Provide(i, NewProductService)
-	do.Provide(i, NewPlanService)
-	do.Provide(i, NewLicenseeService)
-	do.Provide(i, NewLicenseService)
-	do.Provide(i, NewProductHandler)
-	do.Provide(i, NewPlanHandler)
-	do.Provide(i, NewLicenseeHandler)
-	do.Provide(i, NewLicenseHandler)
+	do.Provide(i, product.NewProductRepo)
+	do.Provide(i, product.NewPlanRepo)
+	do.Provide(i, product.NewProductKeyRepo)
+	do.Provide(i, licensee.NewLicenseeRepo)
+	do.Provide(i, certificate.NewLicenseRepo)
+	do.Provide(i, registration.NewLicenseRegistrationRepo)
+	do.Provide(i, product.NewProductService)
+	do.Provide(i, product.NewPlanService)
+	do.Provide(i, licensee.NewLicenseeService)
+	do.Provide(i, certificate.NewLicenseService)
+	do.Provide(i, func(i do.Injector) (product.LicenseOperations, error) {
+		return do.MustInvoke[*certificate.LicenseService](i), nil
+	})
+	do.Provide(i, product.NewProductHandler)
+	do.Provide(i, product.NewPlanHandler)
+	do.Provide(i, licensee.NewLicenseeHandler)
+	do.Provide(i, certificate.NewLicenseHandler)
 }
 
 func (a *LicenseApp) Routes(api *gin.RouterGroup) {
-	productH := do.MustInvoke[*ProductHandler](a.injector)
-	planH := do.MustInvoke[*PlanHandler](a.injector)
-	licenseeH := do.MustInvoke[*LicenseeHandler](a.injector)
-	licenseH := do.MustInvoke[*LicenseHandler](a.injector)
+	productH := do.MustInvoke[*product.ProductHandler](a.injector)
+	planH := do.MustInvoke[*product.PlanHandler](a.injector)
+	licenseeH := do.MustInvoke[*licensee.LicenseeHandler](a.injector)
+	licenseH := do.MustInvoke[*certificate.LicenseHandler](a.injector)
 
 	products := api.Group("/license/products")
 	{
@@ -108,7 +117,7 @@ func (a *LicenseApp) Routes(api *gin.RouterGroup) {
 }
 
 func (a *LicenseApp) Tasks() []scheduler.TaskDef {
-	licenseSvc := do.MustInvoke[*LicenseService](a.injector)
+	licenseSvc := do.MustInvoke[*certificate.LicenseService](a.injector)
 	return []scheduler.TaskDef{
 		{
 			Name:        "license-expired-check",

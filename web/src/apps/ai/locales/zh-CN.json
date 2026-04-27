@@ -147,18 +147,31 @@
     },
     "builtin": {
       "empty": "暂无内建工具",
+      "pageDesc": "管理 Agent 可调用的内置工具、启停状态和工具自有运行时。",
       "enableSuccess": "工具已启用",
       "disableSuccess": "工具已禁用",
+      "runtimeSaveSuccess": "工具运行时已保存",
       "toolsEnabled": "个已启用",
       "toolsAvailable": "个可执行",
       "drawerHint": "只有可执行工具会进入 Agent 的模型工具列表；未实现和风险禁用能力仅作为规划展示。",
       "parameters": "参数 schema",
+      "runtimeTitle": "服务匹配运行时",
+      "runtimeDesc": "配置该工具内部用于结构化判定的模型参数，不影响绑定它的 Agent 运行参数。",
+      "provider": "Provider",
+      "providerPlaceholder": "选择 Provider",
+      "model": "模型",
+      "modelPlaceholder": "选择模型",
+      "temperature": "温度",
+      "maxTokens": "最大 Token",
+      "timeoutSeconds": "超时时间",
+      "seconds": "秒",
       "boundAgentCount": "影响 {{count}} 个 Agent",
       "disableConfirmTitle": "确认停用内建工具",
       "disableConfirmDesc": "“{{name}}”当前被 {{count}} 个 Agent 绑定。停用后，这些 Agent 运行时将不再获得该工具能力。",
       "availability": {
         "available": "可用",
         "inactive": "已停用",
+        "needs_config": "需配置",
         "unimplemented": "未实现",
         "risk_disabled": "风险禁用"
       }
@@ -187,6 +200,10 @@
       "decision": {
         "name": "智能决策",
         "description": "工单上下文查询、知识搜索、参与者解析等流程决策能力。"
+      },
+      "sla": {
+        "name": "SLA 保障",
+        "description": "读取 SLA 风险、升级规则并写入保障审计的服务保障能力。"
       },
       "organization": {
         "name": "组织架构",

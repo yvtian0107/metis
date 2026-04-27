@@ -35,10 +35,12 @@ func New(i do.Injector) (*DB, error) {
 // Used by both normal startup and install wizard (for connection testing).
 func Open(driver, dsn string) (*DB, error) {
 	var dialector gorm.Dialector
+	isSQLite := false
 	switch driver {
 	case "postgres":
 		dialector = postgres.Open(dsn)
 	case "sqlite", "":
+		isSQLite = true
 		if dsn == "" {
 			dsn = "metis.db?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)"
 		}
@@ -51,6 +53,14 @@ func Open(driver, dsn string) (*DB, error) {
 	db, err := gorm.Open(dialector, &gorm.Config{})
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)
+	}
+	if isSQLite {
+		sqlDB, err := db.DB()
+		if err != nil {
+			return nil, fmt.Errorf("failed to configure sqlite connection pool: %w", err)
+		}
+		sqlDB.SetMaxOpenConns(1)
+		sqlDB.SetMaxIdleConns(1)
 	}
 
 	// OpenTelemetry: auto-trace all DB queries (noop when OTel is disabled)

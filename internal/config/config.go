@@ -16,13 +16,13 @@ var ErrConfigNotFound = errors.New("config file not found")
 // MetisConfig holds infrastructure-level configuration (equivalent to WordPress's wp-config.php).
 // Application-level settings are stored in the DB SystemConfig table.
 type MetisConfig struct {
-	DBDriver         string          `yaml:"db_driver"`
-	DBDSN            string          `yaml:"db_dsn"`
-	SecretKey        string          `yaml:"secret_key"`
-	JWTSecret        string          `yaml:"jwt_secret"`
-	LicenseKeySecret string          `yaml:"license_key_secret"`
-	FalkorDB         *FalkorDBConfig    `yaml:"falkordb,omitempty"`
-	ClickHouse       *ClickHouseConfig  `yaml:"clickhouse,omitempty"`
+	DBDriver         string            `yaml:"db_driver"`
+	DBDSN            string            `yaml:"db_dsn"`
+	SecretKey        string            `yaml:"secret_key"`
+	JWTSecret        string            `yaml:"jwt_secret"`
+	LicenseKeySecret string            `yaml:"license_key_secret"`
+	FalkorDB         *FalkorDBConfig   `yaml:"falkordb,omitempty"`
+	ClickHouse       *ClickHouseConfig `yaml:"clickhouse,omitempty"`
 }
 
 // ClickHouseConfig holds ClickHouse connection settings (required for APM features).
@@ -69,6 +69,22 @@ func DefaultSQLiteConfig() *MetisConfig {
 	return &MetisConfig{
 		DBDriver: "sqlite",
 		DBDSN:    "metis.db?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)",
+	}
+}
+
+// DefaultDevConfig returns a MetisConfig targeting the local docker-compose
+// stack (support-files/dev/docker-compose.yml): PostgreSQL, ClickHouse, FalkorDB.
+// Secret fields are empty — call GenerateSecrets() to fill them.
+func DefaultDevConfig() *MetisConfig {
+	return &MetisConfig{
+		DBDriver: "postgres",
+		DBDSN:    "host=localhost port=5432 user=postgres password=password dbname=postgres sslmode=disable",
+		ClickHouse: &ClickHouseConfig{
+			DSN: "clickhouse://default:@localhost:9000/otel",
+		},
+		FalkorDB: &FalkorDBConfig{
+			Addr: "localhost:6379",
+		},
 	}
 }
 

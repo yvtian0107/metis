@@ -5,12 +5,13 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 
-	"metis/internal/app/ai"
+	ai "metis/internal/app/ai/runtime"
 	"metis/internal/config"
 	"metis/internal/database"
 	"metis/internal/model"
@@ -157,8 +158,8 @@ METIS_DEV_AI_API_KEY=sk-new
 		"itsm.smart_ticket.service_matcher.max_tokens":      "1024",
 		"itsm.smart_ticket.service_matcher.timeout_seconds": "30",
 		"itsm.smart_ticket.path.temperature":                "0.3",
-		"itsm.smart_ticket.path.max_retries":                "3",
-		"itsm.smart_ticket.path.timeout_seconds":            "120",
+		"itsm.smart_ticket.path.max_retries":                "1",
+		"itsm.smart_ticket.path.timeout_seconds":            "60",
 		"itsm.smart_ticket.decision.mode":                   "direct_first",
 	}
 	for key, want := range expectedConfig {
@@ -224,6 +225,13 @@ METIS_DEV_AI_API_KEY=sk-dev
 	if adminCount != 1 {
 		t.Fatalf("admin count = %d, want 1", adminCount)
 	}
+	var fallbackCfg model.SystemConfig
+	if err := db.Where("\"key\" = ?", "itsm.smart_ticket.guard.fallback_assignee").First(&fallbackCfg).Error; err != nil {
+		t.Fatalf("load ITSM fallback assignee config: %v", err)
+	}
+	if fallbackCfg.Value != strconv.FormatUint(uint64(admin.ID), 10) {
+		t.Fatalf("fallback assignee = %q, want admin id %d", fallbackCfg.Value, admin.ID)
+	}
 
 	for _, key := range []string{
 		"itsm.smart_ticket.intake.agent_id",
@@ -255,6 +263,41 @@ METIS_DEV_AI_API_KEY=sk-dev
 	}
 	if positionCount < 1 {
 		t.Fatal("expected admin org identities to be assigned")
+	}
+}
+
+func TestRunSeedDevUsesExplicitEnvPath(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	envPath := filepath.Join(dir, "custom.dev.env")
+	if err := os.WriteFile(envPath, []byte(`
+METIS_DEV_AI_PROVIDER_NAME=Custom Dev Provider
+METIS_DEV_AI_BASE_URL=https://api.example.com/v1
+METIS_DEV_AI_API_KEY=sk-custom-dev
+`), 0600); err != nil {
+		t.Fatalf("write custom env: %v", err)
+	}
+
+	if err := runSeedDev("config.yml", envPath); err != nil {
+		t.Fatalf("seed-dev with explicit env: %v", err)
+	}
+
+	cfg, err := config.Load("config.yml")
+	if err != nil {
+		t.Fatalf("load generated config: %v", err)
+	}
+	db, err := database.Open(cfg.DBDriver, cfg.DBDSN)
+	if err != nil {
+		t.Fatalf("open generated db: %v", err)
+	}
+	defer db.Shutdown()
+
+	var providerCount int64
+	if err := db.Model(&ai.Provider{}).Where("name = ?", "Custom Dev Provider").Count(&providerCount).Error; err != nil {
+		t.Fatalf("count custom dev providers: %v", err)
+	}
+	if providerCount != 1 {
+		t.Fatalf("provider count = %d, want 1", providerCount)
 	}
 }
 

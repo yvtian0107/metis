@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect } from "react"
+import { useState, useCallback, useRef, useEffect, useMemo, type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 import {
   ReactFlow,
@@ -18,6 +18,7 @@ import {
 } from "@xyflow/react"
 import "@xyflow/react/dist/style.css"
 import { Button } from "@/components/ui/button"
+import { Badge } from "@/components/ui/badge"
 import {
   ContextMenu,
   ContextMenuContent,
@@ -36,6 +37,14 @@ import { type WFNodeData, type WFEdgeData, type NodeType } from "./types"
 import { getNodeAccent } from "./visual-data"
 import { applyDagreLayout } from "./auto-layout"
 import { useUndoRedo } from "./use-undo-redo"
+import {
+  collectDraftIssues,
+  defaultNodeData,
+  defaultWorkflowData,
+  getWorkflowNodeId,
+  normalizeWorkflowData,
+  prepareWorkflowForSave,
+} from "./workflow-contract"
 import "./style.css"
 
 const DEFAULT_VIEWPORT = { x: 96, y: 72, zoom: 0.86 }
@@ -46,32 +55,32 @@ interface WorkflowEditorProps {
   onSave: (data: { nodes: Node[]; edges: Edge[] }) => void
   saving?: boolean
   serviceId?: number
+  intakeFormSchema?: unknown
+  onIntakeFormSchemaChange?: (schema: unknown) => void
+  inspectorFallback?: ReactNode
   validationErrors?: Array<{ nodeId?: string; edgeId?: string; message: string }>
 }
 
-let nodeId = 0
-function getNodeId() { return `node_${Date.now()}_${++nodeId}` }
-
-function InnerEditor({ initialData, onSave, saving, serviceId, validationErrors }: WorkflowEditorProps) {
+function InnerEditor({
+  initialData,
+  onSave,
+  saving,
+  serviceId,
+  intakeFormSchema,
+  onIntakeFormSchemaChange,
+  inspectorFallback,
+  validationErrors,
+}: WorkflowEditorProps) {
   const { t } = useTranslation("itsm")
   const reactFlowWrapper = useRef<HTMLDivElement>(null)
   const rfInstance = useReactFlow()
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null)
 
-  // Migrate legacy "workflow" type to specific nodeType
-  const migratedNodes = (initialData?.nodes ?? []).map((n) => ({
-    ...n,
-    type: (n.data as unknown as WFNodeData).nodeType ?? n.type,
-  }))
-  const migratedEdges = (initialData?.edges ?? []).map((e) => ({
-    ...e,
-    type: "workflow",
-    markerEnd: { type: MarkerType.ArrowClosed },
-  }))
+  const startingData = normalizeWorkflowData(initialData) ?? defaultWorkflowData(t)
 
-  const [nodes, setNodes, onNodesChange] = useNodesState(migratedNodes)
-  const [edges, setEdges, onEdgesChange] = useEdgesState(migratedEdges)
+  const [nodes, setNodes, onNodesChange] = useNodesState(startingData.nodes)
+  const [edges, setEdges, onEdgesChange] = useEdgesState(startingData.edges)
 
   const { undo, redo, push, canUndo, canRedo } = useUndoRedo()
   const clipboardRef = useRef<{ nodes: Node[]; edges: Edge[] } | null>(null)
@@ -102,7 +111,7 @@ function InnerEditor({ initialData, onSave, saving, serviceId, validationErrors 
       ...params,
       type: "workflow",
       markerEnd: { type: MarkerType.ArrowClosed },
-      data: { outcome: "", isDefault: false } as Record<string, unknown>,
+        data: { outcome: "", default: false } as Record<string, unknown>,
     }, eds))
   }, [setEdges])
 
@@ -123,13 +132,11 @@ function InnerEditor({ initialData, onSave, saving, serviceId, validationErrors 
     })
 
     const newNode: Node = {
-      id: getNodeId(),
+      id: getWorkflowNodeId(),
       type: nodeType,
       position,
       data: {
-        label: t(`workflow.node.${nodeType}`),
-        nodeType,
-        ...(nodeType === "wait" || nodeType === "timer" ? { waitMode: nodeType === "timer" ? "timer" : "signal" } : {}),
+        ...defaultNodeData(nodeType, t(`workflow.node.${nodeType}`)),
       } satisfies WFNodeData,
     }
     setNodes((nds) => [...nds, newNode] as typeof nds)
@@ -151,15 +158,7 @@ function InnerEditor({ initialData, onSave, saving, serviceId, validationErrors 
   }, [])
 
   function handleSave() {
-    const cleanNodes = nodes.map((node) => ({
-      ...node,
-      data: { ...(node.data as Record<string, unknown>), _workflowState: undefined },
-    }))
-    const cleanEdges = edges.map((edge) => ({
-      ...edge,
-      data: { ...(edge.data as Record<string, unknown>), readonly: undefined, visited: undefined, failed: undefined },
-    }))
-    onSave({ nodes: cleanNodes, edges: cleanEdges })
+    onSave(prepareWorkflowForSave(nodes as Node[], edges as Edge[]))
   }
 
   function handleAutoLayout() {
@@ -197,7 +196,7 @@ function InnerEditor({ initialData, onSave, saving, serviceId, validationErrors 
     if (!clip || clip.nodes.length === 0) return
     const idMap = new Map<string, string>()
     const newNodes = clip.nodes.map((n) => {
-      const newId = getNodeId()
+      const newId = getWorkflowNodeId()
       idMap.set(n.id, newId)
       return { ...n, id: newId, position: { x: n.position.x + 40, y: n.position.y + 40 }, selected: false }
     })
@@ -284,10 +283,11 @@ function InnerEditor({ initialData, onSave, saving, serviceId, validationErrors 
   const edgeSourceNodeType = selectedEdge
     ? (nodes.find((n) => n.id === selectedEdge.source)?.data as unknown as WFNodeData | undefined)?.nodeType
     : undefined
+  const draftIssues = useMemo(() => collectDraftIssues(nodes as Node[], edges as Edge[]), [nodes, edges])
 
   return (
     <div className="flex h-full overflow-hidden bg-background" ref={reactFlowWrapper}>
-      <NodePalette />
+      <NodePalette serviceId={serviceId} nodes={nodes as Node[]} intakeFormSchema={intakeFormSchema} />
       <div className="min-w-0 flex-1">
         <ContextMenu>
           <ContextMenuTrigger asChild>
@@ -352,6 +352,9 @@ function InnerEditor({ initialData, onSave, saving, serviceId, validationErrors 
                     </TooltipTrigger>
                     <TooltipContent>{t("workflow.autoLayout")}</TooltipContent>
                   </Tooltip>
+                  <Badge variant={draftIssues.length > 0 ? "outline" : "secondary"} className="h-8 rounded-lg px-2.5">
+                    {draftIssues.length > 0 ? `${draftIssues.length} 个问题` : "已就绪"}
+                  </Badge>
                   <Button size="sm" onClick={handleSave} disabled={saving}>
                     <Save className="mr-1.5 h-3.5 w-3.5" />
                     {saving ? t("workflow.saving") : t("workflow.save")}
@@ -381,11 +384,18 @@ function InnerEditor({ initialData, onSave, saving, serviceId, validationErrors 
         </ContextMenu>
       </div>
       {selectedNode && (
-        <NodePropertyPanel node={selectedNode} serviceId={serviceId} onClose={() => setSelectedNodeId(null)} />
+        <NodePropertyPanel
+          node={selectedNode}
+          serviceId={serviceId}
+          intakeFormSchema={intakeFormSchema}
+          onIntakeFormSchemaChange={onIntakeFormSchemaChange}
+          onClose={() => setSelectedNodeId(null)}
+        />
       )}
       {selectedEdge && (
         <EdgePropertyPanel edge={selectedEdge} sourceNodeType={edgeSourceNodeType} onClose={() => setSelectedEdgeId(null)} />
       )}
+      {!selectedNode && !selectedEdge ? inspectorFallback : null}
     </div>
   )
 }

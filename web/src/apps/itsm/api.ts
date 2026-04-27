@@ -256,6 +256,16 @@ export interface EscalationRuleItem {
   updatedAt: string
 }
 
+export interface NotificationChannelOption {
+  id: number
+  name: string
+  type: string
+}
+
+export function fetchNotificationChannels() {
+  return api.get<NotificationChannelOption[]>("/api/v1/itsm/sla/notification-channels").then((r) => r ?? [])
+}
+
 export function fetchEscalationRules(slaId: number) {
   return api.get<EscalationRuleItem[]>(`/api/v1/itsm/sla/${slaId}/escalations`).then((r) => r ?? [])
 }
@@ -302,6 +312,11 @@ export interface TicketItem {
   serviceName: string
   engineType: string
   status: string
+  outcome: string
+  statusLabel: string
+  statusTone: "success" | "destructive" | "secondary" | "progress" | "warning" | string
+  lastHumanOutcome: string
+  decisioningReason: string
   priorityId: number
   priorityName: string
   priorityColor: string
@@ -329,6 +344,37 @@ export interface TicketItem {
   updatedAt: string
 }
 
+export interface TicketMonitorSummary {
+  activeTotal: number
+  stuckTotal: number
+  slaRiskTotal: number
+  aiIncidentTotal: number
+  completedTodayTotal: number
+  smartActiveTotal: number
+  classicActiveTotal: number
+}
+
+export interface TicketMonitorItem extends TicketItem {
+  riskLevel: "blocked" | "risk" | "normal" | string
+  stuck: boolean
+  stuckReasons: string[]
+  waitingMinutes: number
+  currentActivityName: string
+  currentActivityType: string
+  currentActivityStartedAt: string | null
+}
+
+export interface TicketMonitorParams extends TicketListParams {
+  engineType?: string
+  riskLevel?: string
+}
+
+export interface TicketMonitorResponse {
+  summary: TicketMonitorSummary
+  items: TicketMonitorItem[]
+  total: number
+}
+
 export interface TicketListParams {
   keyword?: string
   status?: string
@@ -353,6 +399,19 @@ export function fetchTickets(params: TicketListParams) {
   return api.get<{ items: TicketItem[]; total: number }>(
     `/api/v1/itsm/tickets?${p}`,
   )
+}
+
+export function fetchTicketMonitor(params: TicketMonitorParams) {
+  const p = new URLSearchParams()
+  if (params.keyword) p.set("keyword", params.keyword)
+  if (params.status) p.set("status", params.status)
+  if (params.priorityId) p.set("priorityId", String(params.priorityId))
+  if (params.serviceId) p.set("serviceId", String(params.serviceId))
+  if (params.engineType) p.set("engineType", params.engineType)
+  if (params.riskLevel) p.set("riskLevel", params.riskLevel)
+  p.set("page", String(params.page ?? 1))
+  p.set("pageSize", String(params.pageSize ?? 20))
+  return api.get<TicketMonitorResponse>(`/api/v1/itsm/tickets/monitor?${p}`)
 }
 
 export function fetchTicket(id: number) {
@@ -631,11 +690,6 @@ export interface StaffingPathBuilderConfig extends EngineAgentConfig {
   timeoutSeconds: number
 }
 
-export interface StaffingServiceMatcherConfig extends EngineAgentConfig {
-  maxTokens: number
-  timeoutSeconds: number
-}
-
 export interface EngineHealthItem {
   key: string
   label: string
@@ -656,7 +710,6 @@ export interface SmartStaffingConfig {
 
 export interface EngineSettingsConfig {
   runtime: {
-    serviceMatcher: StaffingServiceMatcherConfig
     pathBuilder: StaffingPathBuilderConfig
     guard: {
       auditLevel: string
@@ -678,7 +731,6 @@ export interface SmartStaffingConfigUpdate {
 
 export interface EngineSettingsConfigUpdate {
   runtime: {
-    serviceMatcher: { modelId: number; temperature: number; maxTokens: number; timeoutSeconds: number }
     pathBuilder: { modelId: number; temperature: number; maxRetries: number; timeoutSeconds: number }
     guard: { auditLevel: string; fallbackAssignee: number }
   }
@@ -731,7 +783,8 @@ export function fetchModels(providerId: number) {
 export interface WorkflowGenerateResponse {
   workflowJson: unknown
   retries: number
-  errors?: { nodeId?: string; edgeId?: string; message: string }[]
+  errors?: { nodeId?: string; edgeId?: string; level?: "blocking" | "warning"; message: string }[]
+  saved: boolean
   service?: ServiceDefItem
   healthCheck?: ServiceHealthCheck
 }

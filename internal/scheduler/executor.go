@@ -73,12 +73,28 @@ func (e *executor) run(exec *model.TaskExecution) {
 
 	slog.Debug("scheduler: executing task", "task", exec.TaskName, "trigger", exec.Trigger, "execId", exec.ID)
 
-	err := taskDef.Handler(ctx, json.RawMessage(exec.Payload))
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- taskDef.Handler(ctx, json.RawMessage(exec.Payload))
+	}()
+
+	var err error
+	timedOut := false
+	select {
+	case err = <-errCh:
+	case <-ctx.Done():
+		timedOut = true
+		err = ctx.Err()
+	}
 
 	now := time.Now()
 	exec.FinishedAt = &now
 
-	if err != nil {
+	if timedOut {
+		exec.Status = ExecTimeout
+		exec.Error = "execution timed out"
+		slog.Error("scheduler: task timed out", "task", exec.TaskName, "execId", exec.ID, "timeout", timeout)
+	} else if err != nil {
 		if errors.Is(err, ErrNotReady) {
 			// Task is not ready yet — re-enqueue as pending for the next poll cycle.
 			// Do not count as a failure or increment retry count.

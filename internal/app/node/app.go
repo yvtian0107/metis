@@ -7,6 +7,14 @@ import (
 	"gorm.io/gorm"
 
 	"metis/internal/app"
+	"metis/internal/app/node/bootstrap"
+	"metis/internal/app/node/command"
+	"metis/internal/app/node/domain"
+	nodelog "metis/internal/app/node/log"
+	nodenode "metis/internal/app/node/node"
+	nodeprocess "metis/internal/app/node/process"
+	"metis/internal/app/node/processdef"
+	"metis/internal/app/node/sidecar"
 	"metis/internal/scheduler"
 )
 
@@ -21,40 +29,48 @@ type NodeApp struct {
 func (a *NodeApp) Name() string { return "node" }
 
 func (a *NodeApp) Models() []any {
-	return []any{&Node{}, &ProcessDef{}, &NodeProcess{}, &NodeCommand{}, &NodeProcessLog{}}
+	return []any{&domain.Node{}, &domain.ProcessDef{}, &domain.NodeProcess{}, &domain.NodeCommand{}, &domain.NodeProcessLog{}}
 }
 
 func (a *NodeApp) Seed(db *gorm.DB, enforcer *casbin.Enforcer, _ bool) error {
-	return seedNode(db, enforcer)
+	return bootstrap.SeedNode(db, enforcer)
 }
 
 func (a *NodeApp) Providers(i do.Injector) {
 	a.injector = i
-	do.Provide(i, NewNodeRepo)
-	do.Provide(i, NewProcessDefRepo)
-	do.Provide(i, NewNodeProcessRepo)
-	do.Provide(i, NewNodeCommandRepo)
-	do.Provide(i, NewNodeProcessLogRepo)
-	do.Provide(i, func(i do.Injector) (*NodeHub, error) {
-		nodeRepo := do.MustInvoke[*NodeRepo](i)
-		return NewNodeHub(nodeRepo), nil
+	do.Provide(i, nodenode.NewNodeRepo)
+	do.Provide(i, processdef.NewProcessDefRepo)
+	do.Provide(i, nodeprocess.NewNodeProcessRepo)
+	do.Provide(i, command.NewNodeCommandRepo)
+	do.Provide(i, nodelog.NewNodeProcessLogRepo)
+	do.Provide(i, func(i do.Injector) (*nodenode.NodeHub, error) {
+		nodeRepo := do.MustInvoke[*nodenode.NodeRepo](i)
+		return nodenode.NewNodeHub(nodeRepo), nil
 	})
-	do.Provide(i, NewNodeService)
-	do.Provide(i, NewProcessDefService)
-	do.Provide(i, NewNodeProcessService)
-	do.Provide(i, NewSidecarService)
-	do.Provide(i, NewNodeProcessLogService)
-	do.Provide(i, NewNodeHandler)
-	do.Provide(i, NewProcessDefHandler)
-	do.Provide(i, NewNodeProcessHandler)
-	do.Provide(i, NewSidecarHandler)
+	do.ProvideValue[nodeprocess.NodeReader](i, do.MustInvoke[*nodenode.NodeRepo](i))
+	do.ProvideValue[nodeprocess.ProcessDefReader](i, do.MustInvoke[*processdef.ProcessDefRepo](i))
+	do.ProvideValue[nodeprocess.CommandCreator](i, do.MustInvoke[*command.NodeCommandRepo](i))
+	do.ProvideValue[nodeprocess.CommandPusher](i, do.MustInvoke[*nodenode.NodeHub](i))
+	do.ProvideValue[processdef.NodeProcessLister](i, do.MustInvoke[*nodeprocess.NodeProcessRepo](i))
+	do.ProvideValue[processdef.CommandCreator](i, do.MustInvoke[*command.NodeCommandRepo](i))
+	do.ProvideValue[processdef.CommandPusher](i, do.MustInvoke[*nodenode.NodeHub](i))
+	do.ProvideValue[nodelog.ProcessDefFinder](i, do.MustInvoke[*processdef.ProcessDefRepo](i))
+	do.Provide(i, nodenode.NewNodeService)
+	do.Provide(i, processdef.NewProcessDefService)
+	do.Provide(i, nodeprocess.NewNodeProcessService)
+	do.Provide(i, sidecar.NewSidecarService)
+	do.Provide(i, nodelog.NewNodeProcessLogService)
+	do.Provide(i, nodenode.NewNodeHandler)
+	do.Provide(i, processdef.NewProcessDefHandler)
+	do.Provide(i, nodeprocess.NewNodeProcessHandler)
+	do.Provide(i, sidecar.NewSidecarHandler)
 }
 
 func (a *NodeApp) Routes(api *gin.RouterGroup) {
-	nodeH := do.MustInvoke[*NodeHandler](a.injector)
-	processDefH := do.MustInvoke[*ProcessDefHandler](a.injector)
-	nodeProcessH := do.MustInvoke[*NodeProcessHandler](a.injector)
-	sidecarH := do.MustInvoke[*SidecarHandler](a.injector)
+	nodeH := do.MustInvoke[*nodenode.NodeHandler](a.injector)
+	processDefH := do.MustInvoke[*processdef.ProcessDefHandler](a.injector)
+	nodeProcessH := do.MustInvoke[*nodeprocess.NodeProcessHandler](a.injector)
+	sidecarH := do.MustInvoke[*sidecar.SidecarHandler](a.injector)
 
 	// Admin routes (JWT + Casbin protected)
 	nodes := api.Group("/nodes")
@@ -90,7 +106,7 @@ func (a *NodeApp) Routes(api *gin.RouterGroup) {
 		nodeProcesses.GET("/:processId/logs", nodeProcessH.Logs)
 	}
 
-	// Sidecar routes (Node Token auth, bypass JWT+Casbin)
+	// Sidecar routes (domain.Node Token auth, bypass JWT+Casbin)
 	// Access gin.Engine from IOC to register outside authed group
 	r := do.MustInvoke[*gin.Engine](a.injector)
 	sidecar := r.Group("/api/v1/nodes/sidecar", sidecarH.TokenAuth())
@@ -106,8 +122,8 @@ func (a *NodeApp) Routes(api *gin.RouterGroup) {
 }
 
 func (a *NodeApp) Tasks() []scheduler.TaskDef {
-	sidecarSvc := do.MustInvoke[*SidecarService](a.injector)
-	logSvc := do.MustInvoke[*NodeProcessLogService](a.injector)
+	sidecarSvc := do.MustInvoke[*sidecar.SidecarService](a.injector)
+	logSvc := do.MustInvoke[*nodelog.NodeProcessLogService](a.injector)
 	return []scheduler.TaskDef{
 		{
 			Name:        "node-offline-detection",

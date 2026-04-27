@@ -184,17 +184,17 @@ export default function WorkflowPreview({ workflowJson }: WorkflowPreviewProps) 
               </div>
             )}
 
-            {selectedNode.data.actionId && (
+            {selectedNode.data.action_id && (
               <div className="flex items-center gap-2">
                 <span className="text-muted-foreground">Action ID:</span>
-                <span>{selectedNode.data.actionId}</span>
+                <span>{selectedNode.data.action_id}</span>
               </div>
             )}
 
-            {selectedNode.data.waitMode && (
+            {selectedNode.data.wait_mode && (
               <div className="flex items-center gap-2">
                 <span className="text-muted-foreground">{t("workflow.prop.waitMode")}:</span>
-                <span>{t(`workflow.prop.wait${selectedNode.data.waitMode.charAt(0).toUpperCase()}${selectedNode.data.waitMode.slice(1)}` as const)}</span>
+                <span>{t(`workflow.prop.wait${selectedNode.data.wait_mode.charAt(0).toUpperCase()}${selectedNode.data.wait_mode.slice(1)}` as const)}</span>
                 {selectedNode.data.duration && <span className="text-muted-foreground">({selectedNode.data.duration})</span>}
               </div>
             )}

@@ -29,7 +29,7 @@ func (m *mockStore) UpdateExecution(_ context.Context, exec *model.TaskExecution
 
 // Unused interface methods.
 func (m *mockStore) Dequeue(context.Context, int) ([]*model.TaskExecution, error) { return nil, nil }
-func (m *mockStore) SaveTaskState(context.Context, *model.TaskState) error       { return nil }
+func (m *mockStore) SaveTaskState(context.Context, *model.TaskState) error        { return nil }
 func (m *mockStore) GetTaskState(context.Context, string) (*model.TaskState, error) {
 	return nil, nil
 }
@@ -208,10 +208,58 @@ func TestRun_GenericError_NoRetryWhenMaxRetriesExhausted(t *testing.T) {
 	}
 }
 
-func TestRun_WrappedErrNotReady_StillReenqueues(t *testing.T) {
+func TestRun_HandlerIgnoringContextTimesOut(t *testing.T) {
 	store := &mockStore{}
 	exec := &model.TaskExecution{
 		ID:       5,
+		TaskName: "test-task",
+		Trigger:  TriggerAPI,
+		Status:   ExecRunning,
+		Payload:  `{}`,
+	}
+
+	unblock := make(chan struct{})
+	e := setupExecutor(store, "test-task", func(_ context.Context, _ json.RawMessage) error {
+		<-unblock
+		return nil
+	})
+	e.registry["test-task"].Timeout = 20 * time.Millisecond
+
+	done := make(chan struct{})
+	go func() {
+		e.run(exec)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(500 * time.Millisecond):
+		close(unblock)
+		t.Fatal("expected run to return when task timeout expires")
+	}
+	close(unblock)
+
+	if store.updated == nil {
+		t.Fatal("expected UpdateExecution to be called")
+	}
+	if store.updated.Status != ExecTimeout {
+		t.Errorf("status: got %q, want %q", store.updated.Status, ExecTimeout)
+	}
+	if store.updated.Error != "execution timed out" {
+		t.Errorf("Error field: got %q, want execution timed out", store.updated.Error)
+	}
+	if store.updated.FinishedAt == nil {
+		t.Error("FinishedAt: got nil, want non-nil")
+	}
+	if len(store.enqueued) != 0 {
+		t.Errorf("retry enqueued: got %d, want 0", len(store.enqueued))
+	}
+}
+
+func TestRun_WrappedErrNotReady_StillReenqueues(t *testing.T) {
+	store := &mockStore{}
+	exec := &model.TaskExecution{
+		ID:       6,
 		TaskName: "test-task",
 		Trigger:  TriggerCron,
 		Status:   ExecRunning,

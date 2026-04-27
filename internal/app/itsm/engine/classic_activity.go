@@ -52,7 +52,7 @@ func (e *ClassicEngine) assignParticipants(tx *gorm.DB, ticketID, activityID, _ 
 				Sequence:        i,
 				IsCurrent:       i == 0,
 			}
-			if p.Type == "user" {
+			if p.Type == "user" || p.Type == "requester" {
 				assignment.UserID = &uid
 			}
 			if err := tx.Create(assignment).Error; err != nil {

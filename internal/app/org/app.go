@@ -7,6 +7,13 @@ import (
 	"gorm.io/gorm"
 
 	"metis/internal/app"
+	"metis/internal/app/org/assignment"
+	"metis/internal/app/org/bootstrap"
+	"metis/internal/app/org/department"
+	"metis/internal/app/org/domain"
+	"metis/internal/app/org/position"
+	"metis/internal/app/org/resolver"
+	"metis/internal/app/org/tools"
 	"metis/internal/database"
 	"metis/internal/scheduler"
 )
@@ -24,46 +31,46 @@ func (a *OrgApp) Name() string { return "org" }
 // GetToolRegistry implements app.ToolRegistryProvider.
 func (a *OrgApp) GetToolRegistry() any {
 	resolver := do.MustInvoke[app.OrgResolver](a.injector)
-	return NewOrgToolRegistry(resolver)
+	return tools.NewOrgToolRegistry(resolver)
 }
 
 // Ensure OrgApp implements app.ToolRegistryProvider at compile time.
 var _ app.ToolRegistryProvider = (*OrgApp)(nil)
 
 func (a *OrgApp) Models() []any {
-	return []any{&Department{}, &Position{}, &UserPosition{}, &DepartmentPosition{}}
+	return []any{&domain.Department{}, &domain.Position{}, &domain.UserPosition{}, &domain.DepartmentPosition{}}
 }
 
 func (a *OrgApp) Seed(db *gorm.DB, enforcer *casbin.Enforcer, install bool) error {
-	return seedOrg(db, enforcer, install)
+	return bootstrap.SeedOrg(db, enforcer, install)
 }
 
 func (a *OrgApp) Providers(i do.Injector) {
 	a.injector = i
 	// Repositories
-	do.Provide(i, NewDepartmentRepo)
-	do.Provide(i, NewPositionRepo)
-	do.Provide(i, NewAssignmentRepo)
+	do.Provide(i, department.NewDepartmentRepo)
+	do.Provide(i, position.NewPositionRepo)
+	do.Provide(i, assignment.NewAssignmentRepo)
 	// Services
-	do.Provide(i, NewDepartmentService)
-	do.Provide(i, NewPositionService)
-	do.Provide(i, NewAssignmentService)
+	do.Provide(i, department.NewDepartmentService)
+	do.Provide(i, position.NewPositionService)
+	do.Provide(i, assignment.NewAssignmentService)
 	// Handlers
-	do.Provide(i, NewDepartmentHandler)
-	do.Provide(i, NewPositionHandler)
-	do.Provide(i, NewAssignmentHandler)
+	do.Provide(i, department.NewDepartmentHandler)
+	do.Provide(i, position.NewPositionHandler)
+	do.Provide(i, assignment.NewAssignmentHandler)
 	// OrgResolver — unified interface for DataScope, ITSM, and AI tools
-	do.ProvideValue[app.OrgResolver](i, &OrgResolverImpl{
-		svc:  do.MustInvoke[*AssignmentService](i),
-		repo: do.MustInvoke[*AssignmentRepo](i),
-		db:   do.MustInvoke[*database.DB](i).DB,
-	})
+	do.ProvideValue[app.OrgResolver](i, resolver.NewOrgResolver(
+		do.MustInvoke[*assignment.AssignmentService](i),
+		do.MustInvoke[*assignment.AssignmentRepo](i),
+		do.MustInvoke[*database.DB](i).DB,
+	))
 }
 
 func (a *OrgApp) Routes(api *gin.RouterGroup) {
-	deptH := do.MustInvoke[*DepartmentHandler](a.injector)
-	posH := do.MustInvoke[*PositionHandler](a.injector)
-	assignH := do.MustInvoke[*AssignmentHandler](a.injector)
+	deptH := do.MustInvoke[*department.DepartmentHandler](a.injector)
+	posH := do.MustInvoke[*position.PositionHandler](a.injector)
+	assignH := do.MustInvoke[*assignment.AssignmentHandler](a.injector)
 
 	org := api.Group("/org")
 	{

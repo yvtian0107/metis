@@ -135,7 +135,7 @@ function buildHeaders(init?: RequestInit): Record<string, string> {
   return headers;
 }
 
-async function authorizedFetch(
+export async function authorizedFetch(
   url: string,
   init?: RequestInit,
 ): Promise<Response> {
@@ -203,6 +203,8 @@ async function download(url: string): Promise<Blob> {
 }
 
 export const api = {
+  fetch: authorizedFetch,
+
   get: <T>(url: string) => request<T>(url),
 
   put: <T>(url: string, data: unknown) =>
@@ -512,6 +514,8 @@ export const sessionApi = {
     api.post<null>(`/api/v1/ai/sessions/${sid}/continue`),
 
   streamUrl: (sid: number) => `/api/v1/ai/sessions/${sid}/stream`,
+
+  chatUrl: (sid: number) => `/api/v1/ai/sessions/${sid}/chat`,
 };
 
 export const memoryApi = {

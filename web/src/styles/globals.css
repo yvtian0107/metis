@@ -154,6 +154,25 @@
     background: transparent;
   }
 
+  .workspace-picker-scrollbar {
+    scrollbar-width: thin;
+    scrollbar-color: oklch(0.82 0.012 252 / 0.72) transparent;
+  }
+
+  .workspace-picker-scrollbar::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  .workspace-picker-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .workspace-picker-scrollbar::-webkit-scrollbar-thumb {
+    border-radius: 999px;
+    background: oklch(0.82 0.012 252 / 0.72);
+  }
+
   .install-step-shell {
     @apply space-y-5;
   }

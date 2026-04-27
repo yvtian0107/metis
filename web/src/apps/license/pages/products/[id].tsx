@@ -40,7 +40,7 @@ import { formatDateTime } from "@/lib/utils"
 import { ProductSheet, type ProductItem } from "../../components/product-sheet"
 import { ConstraintEditor } from "../../components/constraint-editor"
 import { PlanTab } from "../../components/plan-tab"
-import { STATUS_STYLES, STATUS_ACTION_CONFIG } from "../../constants"
+import { STATUS_STYLES, STATUS_ACTION_CONFIG, type StatusActionConfig } from "../../constants"
 
 interface ConstraintFeature {
   key: string
@@ -233,7 +233,7 @@ export function Component() {
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-2">
-          {canUpdate && actions.map((action: any) => {
+          {canUpdate && actions.map((action: StatusActionConfig) => {
             const ActionIcon = action.icon
             const actionLabel = t(`license:${action.labelKey}`)
             return (

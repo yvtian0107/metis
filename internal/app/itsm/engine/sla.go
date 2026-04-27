@@ -3,9 +3,11 @@ package engine
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strconv"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
@@ -18,6 +20,11 @@ const (
 	slaOnTrack          = "on_track"
 	slaBreachedResponse = "breached_response"
 	slaBreachedResolve  = "breached_resolution"
+)
+
+var (
+	ErrNotificationNoRecipients = errors.New("SLA notification has no resolved recipients")
+	ErrNotificationNoEmail      = errors.New("SLA notification recipients have no email")
 )
 
 // escalationRuleModel is the engine-internal projection of itsm_escalation_rules.
@@ -42,7 +49,7 @@ type SLAAssuranceConfigProvider interface {
 // HandleSLACheck is the cron task handler for itsm-sla-check.
 // It scans active tickets with SLA deadlines, detects breaches,
 // updates sla_status, and executes escalation rules.
-func HandleSLACheck(db *gorm.DB, configProvider SLAAssuranceConfigProvider, executor app.AIDecisionExecutor) func(ctx context.Context, payload json.RawMessage) error {
+func HandleSLACheck(db *gorm.DB, configProvider SLAAssuranceConfigProvider, executor app.AIDecisionExecutor, resolver *ParticipantResolver, notifier NotificationSender) func(ctx context.Context, payload json.RawMessage) error {
 	return func(ctx context.Context, _ json.RawMessage) error {
 		now := time.Now()
 
@@ -51,7 +58,14 @@ func HandleSLACheck(db *gorm.DB, configProvider SLAAssuranceConfigProvider, exec
 		var tickets []ticketModel
 		err := db.Where("status IN ? AND sla_paused_at IS NULL AND "+
 			"(sla_response_deadline IS NOT NULL OR sla_resolution_deadline IS NOT NULL)",
-			[]string{"pending", "in_progress", "waiting_action"},
+			[]string{
+				TicketStatusSubmitted,
+				TicketStatusWaitingHuman,
+				TicketStatusApprovedDecisioning,
+				TicketStatusRejectedDecisioning,
+				TicketStatusDecisioning,
+				TicketStatusExecutingAction,
+			},
 		).Find(&tickets).Error
 		if err != nil {
 			slog.Error("sla-check: failed to query tickets", "error", err)
@@ -66,7 +80,7 @@ func HandleSLACheck(db *gorm.DB, configProvider SLAAssuranceConfigProvider, exec
 
 		for i := range tickets {
 			t := &tickets[i]
-			checkTicketSLA(ctx, db, t, now, configProvider, executor)
+			checkTicketSLA(ctx, db, t, now, configProvider, executor, resolver, notifier)
 		}
 
 		return nil
@@ -74,14 +88,14 @@ func HandleSLACheck(db *gorm.DB, configProvider SLAAssuranceConfigProvider, exec
 }
 
 // checkTicketSLA checks a single ticket for SLA breaches and executes escalation.
-func checkTicketSLA(ctx context.Context, db *gorm.DB, t *ticketModel, now time.Time, configProvider SLAAssuranceConfigProvider, executor app.AIDecisionExecutor) {
+func checkTicketSLA(ctx context.Context, db *gorm.DB, t *ticketModel, now time.Time, configProvider SLAAssuranceConfigProvider, executor app.AIDecisionExecutor, resolver *ParticipantResolver, notifier NotificationSender) {
 	if t.SLAResponseDeadline != nil && now.After(*t.SLAResponseDeadline) {
 		if t.SLAStatus != slaBreachedResponse && t.SLAStatus != slaBreachedResolve {
 			db.Model(&ticketModel{}).Where("id = ?", t.ID).Update("sla_status", slaBreachedResponse)
 			t.SLAStatus = slaBreachedResponse
 			slog.Warn("sla-check: response SLA breached", "ticketID", t.ID, "code", t.Code,
 				"deadline", t.SLAResponseDeadline.Format(time.RFC3339))
-			executeEscalation(ctx, db, t, "response_timeout", now, configProvider, executor)
+			executeEscalation(ctx, db, t, "response_timeout", now, configProvider, executor, resolver, notifier)
 		}
 	}
 
@@ -91,13 +105,13 @@ func checkTicketSLA(ctx context.Context, db *gorm.DB, t *ticketModel, now time.T
 			t.SLAStatus = slaBreachedResolve
 			slog.Warn("sla-check: resolution SLA breached", "ticketID", t.ID, "code", t.Code,
 				"deadline", t.SLAResolutionDeadline.Format(time.RFC3339))
-			executeEscalation(ctx, db, t, "resolution_timeout", now, configProvider, executor)
+			executeEscalation(ctx, db, t, "resolution_timeout", now, configProvider, executor, resolver, notifier)
 		}
 	}
 }
 
 // executeEscalation loads and executes matching escalation rules for a ticket's SLA breach.
-func executeEscalation(ctx context.Context, db *gorm.DB, t *ticketModel, triggerType string, now time.Time, configProvider SLAAssuranceConfigProvider, executor app.AIDecisionExecutor) {
+func executeEscalation(ctx context.Context, db *gorm.DB, t *ticketModel, triggerType string, now time.Time, configProvider SLAAssuranceConfigProvider, executor app.AIDecisionExecutor, resolver *ParticipantResolver, notifier NotificationSender) {
 	slaID, ok := loadTicketSLAID(db, t.ID)
 	if !ok {
 		slog.Warn("sla-check: ticket has no SLA template, skipping escalation", "ticketID", t.ID)
@@ -132,6 +146,14 @@ func executeEscalation(ctx context.Context, db *gorm.DB, t *ticketModel, trigger
 		if escalationAlreadyRecorded(db, t.ID, rule.ID) {
 			continue
 		}
+		if t.EngineType == "classic" {
+			reasoning := "系统计时器已判定 SLA 超时，经典引擎按已配置升级规则直接执行动作。"
+			if err := executeEscalationAction(ctx, db, t, &rule, triggerType, 0, "系统计时器", reasoning, resolver, notifier); err != nil {
+				slog.Warn("sla-check: classic escalation failed", "ticketID", t.ID, "ruleID", rule.ID, "error", err)
+				recordEscalationPending(db, t, &rule, triggerType, 0, "系统计时器", fmt.Sprintf("经典引擎 SLA 升级动作执行失败：%v", err))
+			}
+			continue
+		}
 
 		agentID := uint(0)
 		if configProvider != nil {
@@ -146,7 +168,7 @@ func executeEscalation(ctx context.Context, db *gorm.DB, t *ticketModel, trigger
 			continue
 		}
 		agentName := loadAgentName(db, agentID)
-		if err := runSLAAssuranceAgent(ctx, db, t, &rule, triggerType, agentID, agentName, executor); err != nil {
+		if err := runSLAAssuranceAgent(ctx, db, t, &rule, triggerType, agentID, agentName, executor, resolver, notifier); err != nil {
 			slog.Warn("sla-check: SLA assurance agent failed", "ticketID", t.ID, "ruleID", rule.ID, "error", err)
 			recordEscalationPending(db, t, &rule, triggerType, agentID, agentName, fmt.Sprintf("SLA 保障岗运行失败，升级动作待人工处理：%v", err))
 		}
@@ -187,11 +209,15 @@ func escalationAlreadyRecorded(db *gorm.DB, ticketID, ruleID uint) bool {
 
 // escalationTargetConfig holds parsed target_config JSON for escalation rules.
 type escalationTargetConfig struct {
-	UserIDs    []uint `json:"user_ids,omitempty"`
-	PriorityID *uint  `json:"priority_id,omitempty"`
+	Recipients         []Participant `json:"recipients,omitempty"`
+	AssigneeCandidates []Participant `json:"assigneeCandidates,omitempty"`
+	ChannelID          uint          `json:"channelId,omitempty"`
+	SubjectTemplate    string        `json:"subjectTemplate,omitempty"`
+	BodyTemplate       string        `json:"bodyTemplate,omitempty"`
+	PriorityID         uint          `json:"priorityId,omitempty"`
 }
 
-func runSLAAssuranceAgent(ctx context.Context, db *gorm.DB, t *ticketModel, rule *escalationRuleModel, triggerType string, agentID uint, agentName string, executor app.AIDecisionExecutor) error {
+func runSLAAssuranceAgent(ctx context.Context, db *gorm.DB, t *ticketModel, rule *escalationRuleModel, triggerType string, agentID uint, agentName string, executor app.AIDecisionExecutor, resolver *ParticipantResolver, notifier NotificationSender) error {
 	triggered := false
 	toolHandler := func(name string, args json.RawMessage) (json.RawMessage, error) {
 		switch name {
@@ -223,7 +249,7 @@ func runSLAAssuranceAgent(ctx context.Context, db *gorm.DB, t *ticketModel, rule
 			if reasoning == "" {
 				reasoning = "SLA 保障岗确认规则已命中，按已配置升级动作执行。"
 			}
-			if err := executeEscalationAction(db, t, rule, triggerType, agentID, agentName, reasoning); err != nil {
+			if err := executeEscalationAction(ctx, db, t, rule, triggerType, agentID, agentName, reasoning, resolver, notifier); err != nil {
 				return nil, err
 			}
 			triggered = true
@@ -262,7 +288,7 @@ func runSLAAssuranceAgent(ctx context.Context, db *gorm.DB, t *ticketModel, rule
 		UserMessage:  buildSLAAssuranceUserMessage(t, rule, triggerType),
 		Tools:        slaAssuranceToolDefs(),
 		ToolHandler:  toolHandler,
-		MaxTurns:     4,
+		MaxTurns:     8,
 	})
 	if err != nil {
 		return err
@@ -278,59 +304,65 @@ func runSLAAssuranceAgent(ctx context.Context, db *gorm.DB, t *ticketModel, rule
 }
 
 // executeEscalationAction executes a single escalation rule action.
-func executeEscalationAction(db *gorm.DB, t *ticketModel, rule *escalationRuleModel, triggerType string, agentID uint, agentName string, reasoning string) error {
+func executeEscalationAction(ctx context.Context, db *gorm.DB, t *ticketModel, rule *escalationRuleModel, triggerType string, agentID uint, agentName string, reasoning string, resolver *ParticipantResolver, notifier NotificationSender) error {
 	var config escalationTargetConfig
 	if rule.TargetConfig != "" {
-		json.Unmarshal([]byte(rule.TargetConfig), &config)
+		if err := json.Unmarshal([]byte(rule.TargetConfig), &config); err != nil {
+			return fmt.Errorf("invalid SLA escalation target config: %w", err)
+		}
 	}
-	details := escalationTimelineDetails(rule, triggerType, agentID, agentName)
 
 	switch rule.ActionType {
 	case "notify":
-		// Record timeline event for notification
-		slog.Info("sla-check: escalation notify", "ticketID", t.ID, "level", rule.Level, "targetUsers", config.UserIDs)
-		db.Create(&timelineModel{
-			TicketID:   t.ID,
-			OperatorID: 0,
-			EventType:  "sla_escalation",
-			Message:    "SLA 升级通知已触发",
-			Details:    details,
-			Reasoning:  reasoning,
+		return executeNotifyEscalation(ctx, db, t, rule, triggerType, agentID, agentName, reasoning, config, resolver, notifier)
+
+	case "reassign":
+		candidateIDs, warnings := resolveConfiguredParticipants(db, resolver, t.ID, config.AssigneeCandidates)
+		if len(candidateIDs) == 0 {
+			recordEscalationResult(db, t, rule, triggerType, agentID, agentName, "SLA 升级：转派目标解析为空", reasoning, map[string]any{
+				"warnings": warnings,
+			})
+			return nil
+		}
+		newAssignee := candidateIDs[0]
+		if err := db.Model(&ticketModel{}).Where("id = ?", t.ID).Update("assignee_id", newAssignee).Error; err != nil {
+			return err
+		}
+		slog.Info("sla-check: escalation reassign", "ticketID", t.ID, "level", rule.Level, "newAssignee", newAssignee)
+		recordEscalationResult(db, t, rule, triggerType, agentID, agentName, "SLA 升级：工单已转派", reasoning, map[string]any{
+			"candidate_user_ids": candidateIDs,
+			"selected_user_id":   newAssignee,
+			"warnings":           warnings,
 		})
 		return nil
 
-	case "reassign":
-		if len(config.UserIDs) > 0 {
-			newAssignee := config.UserIDs[0]
-			db.Model(&ticketModel{}).Where("id = ?", t.ID).Update("assignee_id", newAssignee)
-			slog.Info("sla-check: escalation reassign", "ticketID", t.ID, "level", rule.Level, "newAssignee", newAssignee)
-			db.Create(&timelineModel{
-				TicketID:   t.ID,
-				OperatorID: 0,
-				EventType:  "sla_escalation",
-				Message:    "SLA 升级：工单已转派",
-				Details:    details,
-				Reasoning:  reasoning,
-			})
-			return nil
-		}
-		return fmt.Errorf("SLA 升级规则缺少转派目标")
-
 	case "escalate_priority":
-		if config.PriorityID != nil {
-			db.Model(&ticketModel{}).Where("id = ?", t.ID).Update("priority_id", *config.PriorityID)
-			slog.Info("sla-check: escalation priority", "ticketID", t.ID, "level", rule.Level, "newPriority", *config.PriorityID)
-			db.Create(&timelineModel{
-				TicketID:   t.ID,
-				OperatorID: 0,
-				EventType:  "sla_escalation",
-				Message:    "SLA 升级：工单优先级已提升",
-				Details:    details,
-				Reasoning:  reasoning,
-			})
+		if config.PriorityID == 0 {
+			recordEscalationResult(db, t, rule, triggerType, agentID, agentName, "SLA 升级：目标优先级未配置", reasoning, nil)
 			return nil
 		}
-		return fmt.Errorf("SLA 升级规则缺少目标优先级")
+		var priority struct {
+			ID   uint
+			Name string
+			Code string
+		}
+		if err := db.Table("itsm_priorities").
+			Where("id = ? AND is_active = ?", config.PriorityID, true).
+			Select("id, name, code").
+			First(&priority).Error; err != nil {
+			recordEscalationResult(db, t, rule, triggerType, agentID, agentName, "SLA 升级：目标优先级不存在或已停用", reasoning, map[string]any{"priority_id": config.PriorityID})
+			return nil
+		}
+		if err := db.Model(&ticketModel{}).Where("id = ?", t.ID).Update("priority_id", config.PriorityID).Error; err != nil {
+			return err
+		}
+		slog.Info("sla-check: escalation priority", "ticketID", t.ID, "level", rule.Level, "newPriority", config.PriorityID)
+		recordEscalationResult(db, t, rule, triggerType, agentID, agentName, "SLA 升级：工单优先级已提升", reasoning, map[string]any{
+			"priority_id":   priority.ID,
+			"priority_name": priority.Name,
+			"priority_code": priority.Code,
+		})
+		return nil
 
 	default:
 		slog.Warn("sla-check: unknown escalation action", "actionType", rule.ActionType, "ticketID", t.ID)
@@ -349,7 +381,107 @@ func recordEscalationPending(db *gorm.DB, t *ticketModel, rule *escalationRuleMo
 	})
 }
 
-func escalationTimelineDetails(rule *escalationRuleModel, triggerType string, agentID uint, agentName string) string {
+func executeNotifyEscalation(ctx context.Context, db *gorm.DB, t *ticketModel, rule *escalationRuleModel, triggerType string, agentID uint, agentName string, reasoning string, config escalationTargetConfig, resolver *ParticipantResolver, notifier NotificationSender) error {
+	recipientIDs, warnings := resolveConfiguredParticipants(db, resolver, t.ID, config.Recipients)
+	if len(recipientIDs) == 0 {
+		recordEscalationResult(db, t, rule, triggerType, agentID, agentName, "SLA 升级通知未发送：未解析到接收人", reasoning, map[string]any{
+			"warnings": warnings,
+		})
+		return nil
+	}
+	if notifier == nil {
+		recordEscalationResult(db, t, rule, triggerType, agentID, agentName, "SLA 升级通知未发送：消息通道不可用", reasoning, map[string]any{
+			"recipient_user_ids": recipientIDs,
+			"channel_id":         config.ChannelID,
+			"warnings":           warnings,
+		})
+		return nil
+	}
+
+	subject := renderSLANotificationTemplate(config.SubjectTemplate, t)
+	if strings.TrimSpace(subject) == "" {
+		subject = renderSLANotificationTemplate("SLA 升级通知：{{ticket.code}}", t)
+	}
+	body := renderSLANotificationTemplate(config.BodyTemplate, t)
+	if strings.TrimSpace(body) == "" {
+		body = renderSLANotificationTemplate("工单 {{ticket.code}} 已触发 SLA 升级规则，请及时处理。", t)
+	}
+
+	err := notifier.Send(ctx, config.ChannelID, subject, body, recipientIDs)
+	extra := map[string]any{
+		"recipient_user_ids": recipientIDs,
+		"channel_id":         config.ChannelID,
+		"warnings":           warnings,
+	}
+	if err != nil {
+		extra["send_error"] = err.Error()
+		recordEscalationResult(db, t, rule, triggerType, agentID, agentName, "SLA 升级通知发送失败", reasoning, extra)
+		return nil
+	}
+	slog.Info("sla-check: escalation notify sent", "ticketID", t.ID, "level", rule.Level, "channelID", config.ChannelID, "recipientUsers", recipientIDs)
+	recordEscalationResult(db, t, rule, triggerType, agentID, agentName, "SLA 升级通知已发送", reasoning, extra)
+	return nil
+}
+
+func resolveConfiguredParticipants(db *gorm.DB, resolver *ParticipantResolver, ticketID uint, participants []Participant) ([]uint, []string) {
+	if len(participants) == 0 {
+		return nil, []string{"未配置参与者表达式"}
+	}
+	if resolver == nil {
+		return nil, []string{"参与者解析器不可用"}
+	}
+	userIDs := make([]uint, 0)
+	seen := map[uint]struct{}{}
+	warnings := make([]string, 0)
+	for _, participant := range participants {
+		ids, err := resolver.Resolve(db, ticketID, participant)
+		if err != nil {
+			warnings = append(warnings, err.Error())
+			continue
+		}
+		if len(ids) == 0 {
+			warnings = append(warnings, fmt.Sprintf("参与者解析结果为空: type=%s value=%s", participant.Type, participant.Value))
+			continue
+		}
+		for _, id := range ids {
+			if _, ok := seen[id]; ok {
+				continue
+			}
+			seen[id] = struct{}{}
+			userIDs = append(userIDs, id)
+		}
+	}
+	return userIDs, warnings
+}
+
+func renderSLANotificationTemplate(template string, t *ticketModel) string {
+	result := template
+	replacements := map[string]string{
+		"{{ticket.id}}":          strconv.FormatUint(uint64(t.ID), 10),
+		"{{ticket.code}}":        t.Code,
+		"{{ticket.title}}":       t.Title,
+		"{{ticket.status}}":      t.Status,
+		"{{ticket.priority_id}}": strconv.FormatUint(uint64(t.PriorityID), 10),
+		"{{ticket.sla_status}}":  t.SLAStatus,
+	}
+	for key, value := range replacements {
+		result = strings.ReplaceAll(result, key, value)
+	}
+	return result
+}
+
+func recordEscalationResult(db *gorm.DB, t *ticketModel, rule *escalationRuleModel, triggerType string, agentID uint, agentName string, message string, reasoning string, extra map[string]any) {
+	db.Create(&timelineModel{
+		TicketID:   t.ID,
+		OperatorID: 0,
+		EventType:  "sla_escalation",
+		Message:    message,
+		Details:    escalationTimelineDetails(rule, triggerType, agentID, agentName, extra),
+		Reasoning:  reasoning,
+	})
+}
+
+func escalationTimelineDetails(rule *escalationRuleModel, triggerType string, agentID uint, agentName string, extras ...map[string]any) string {
 	payload := map[string]any{
 		"rule_id":      rule.ID,
 		"sla_id":       rule.SLAID,
@@ -358,6 +490,11 @@ func escalationTimelineDetails(rule *escalationRuleModel, triggerType string, ag
 		"action_type":  rule.ActionType,
 		"agent_id":     agentID,
 		"agent_name":   agentName,
+	}
+	for _, extra := range extras {
+		for k, v := range extra {
+			payload[k] = v
+		}
 	}
 	raw, _ := json.Marshal(payload)
 	return string(raw)
@@ -408,7 +545,7 @@ func buildSLAAssuranceUserMessage(t *ticketModel, rule *escalationRuleModel, tri
 		"title":        t.Title,
 		"trigger_type": triggerType,
 		"matched_rule": slaRulePayload(rule),
-		"instruction":  "请读取当前工单上下文和已命中规则；如规则允许，调用 sla.trigger_escalation 触发升级动作。",
+		"instruction":  "请严格按顺序处理：先调用 sla.risk_queue 确认候选队列，再调用 sla.ticket_context 读取当前工单上下文，然后调用 sla.escalation_rules 读取已命中规则；规则允许时必须调用 sla.trigger_escalation 触发升级动作。",
 	}
 	raw, _ := json.Marshal(payload)
 	return string(raw)

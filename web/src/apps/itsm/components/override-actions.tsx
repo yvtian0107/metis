@@ -36,9 +36,10 @@ interface OverrideActionsProps {
   currentActivityId: number | null
   aiFailureCount?: number
   triggerClassName?: string
+  onSuccess?: () => void
 }
 
-export function OverrideActions({ ticketId, currentActivityId, aiFailureCount, triggerClassName }: OverrideActionsProps) {
+export function OverrideActions({ ticketId, currentActivityId, aiFailureCount, triggerClassName, onSuccess }: OverrideActionsProps) {
   const { t } = useTranslation("itsm")
   const queryClient = useQueryClient()
   const [jumpOpen, setJumpOpen] = useState(false)
@@ -58,6 +59,11 @@ export function OverrideActions({ ticketId, currentActivityId, aiFailureCount, t
     queryClient.invalidateQueries({ queryKey: ["itsm-ticket-timeline", ticketId] })
   }
 
+  const handleMutationSuccess = () => {
+    invalidateAll()
+    onSuccess?.()
+  }
+
   // Jump
   const jumpSchema = z.object({
     activityType: z.string().min(1),
@@ -71,7 +77,7 @@ export function OverrideActions({ ticketId, currentActivityId, aiFailureCount, t
 
   const jumpMut = useMutation({
     mutationFn: (v: z.infer<typeof jumpSchema>) => overrideJump(ticketId, v),
-    onSuccess: () => { invalidateAll(); setJumpOpen(false); toast.success(t("smart.jumpSuccess")) },
+    onSuccess: () => { handleMutationSuccess(); setJumpOpen(false); toast.success(t("smart.jumpSuccess")) },
     onError: (err) => toast.error(err.message),
   })
 
@@ -88,14 +94,14 @@ export function OverrideActions({ ticketId, currentActivityId, aiFailureCount, t
 
   const reassignMut = useMutation({
     mutationFn: (v: z.infer<typeof reassignSchema>) => overrideReassign(ticketId, v),
-    onSuccess: () => { invalidateAll(); setReassignOpen(false); toast.success(t("smart.reassignSuccess")) },
+    onSuccess: () => { handleMutationSuccess(); setReassignOpen(false); toast.success(t("smart.reassignSuccess")) },
     onError: (err) => toast.error(err.message),
   })
 
   // Retry AI
   const retryMut = useMutation({
     mutationFn: () => retryAI(ticketId, retryReason.trim()),
-    onSuccess: () => { invalidateAll(); setRetryDialogOpen(false); setRetryReason(""); toast.success(t("smart.retrySuccess")) },
+    onSuccess: () => { handleMutationSuccess(); setRetryDialogOpen(false); setRetryReason(""); toast.success(t("smart.retrySuccess")) },
     onError: (err) => toast.error(err.message),
   })
 

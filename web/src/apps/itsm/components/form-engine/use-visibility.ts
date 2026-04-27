@@ -9,30 +9,35 @@ export function useFieldVisibility(
   schema: FormSchema,
   watchValues: Record<string, unknown>,
 ): Set<string> {
-  return useMemo(() => {
-    const visible = new Set<string>()
+  return useMemo(() => getVisibleFields(schema, watchValues), [schema, watchValues])
+}
 
-    for (const field of schema.fields) {
-      if (!field.visibility || field.visibility.conditions.length === 0) {
-        visible.add(field.key)
-        continue
-      }
+export function getVisibleFields(
+  schema: FormSchema,
+  values: Record<string, unknown>,
+): Set<string> {
+  const visible = new Set<string>()
 
-      const { conditions, logic = "and" } = field.visibility
-      const results = conditions.map((c) => evaluateCondition(c, watchValues))
-
-      const isVisible =
-        logic === "or"
-          ? results.some(Boolean)
-          : results.every(Boolean)
-
-      if (isVisible) {
-        visible.add(field.key)
-      }
+  for (const field of schema.fields) {
+    if (!field.visibility || field.visibility.conditions.length === 0) {
+      visible.add(field.key)
+      continue
     }
 
-    return visible
-  }, [schema, watchValues])
+    const { conditions, logic = "and" } = field.visibility
+    const results = conditions.map((c) => evaluateCondition(c, values))
+
+    const isVisible =
+      logic === "or"
+        ? results.some(Boolean)
+        : results.every(Boolean)
+
+    if (isVisible) {
+      visible.add(field.key)
+    }
+  }
+
+  return visible
 }
 
 function evaluateCondition(

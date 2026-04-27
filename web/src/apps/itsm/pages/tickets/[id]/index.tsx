@@ -84,8 +84,8 @@ import { SmartFlowVisualization } from "../../../components/smart-flow-visualiza
 import { VariablesPanel } from "../../../components/variables-panel"
 import { WorkflowViewer } from "../../../components/workflow"
 
-const ACTIVE_STATUSES = new Set(["pending", "in_progress", "waiting_action"])
-const TERMINAL_STATUSES = new Set(["completed", "cancelled", "failed"])
+const ACTIVE_STATUSES = new Set(["submitted", "waiting_human", "approved_decisioning", "rejected_decisioning", "decisioning", "executing_action"])
+const TERMINAL_STATUSES = new Set(["completed", "rejected", "withdrawn", "cancelled", "failed"])
 const HUMAN_ACTIVITY_TYPES = new Set(["approve", "form", "process"])
 const DEFAULT_DECISIONING_MESSAGE = "流程决策岗正在生成下一步，页面会自动刷新。"
 type ApprovalOutcome = "approved" | "rejected"
@@ -503,6 +503,7 @@ export function Component() {
     setDecisioningMessage(message)
     queryClient.setQueryData<TicketItem>(["itsm-ticket", ticketId], (current) => {
       if (!current || current.engineType !== "smart") return current
+      const rejected = message.includes("驳回")
       return {
         ...current,
         assigneeId: null,
@@ -513,6 +514,9 @@ export function Component() {
         currentOwnerType: "ai",
         nextStepSummary: "后台决策中",
         smartState: "ai_reasoning",
+        status: rejected ? "rejected_decisioning" : "approved_decisioning",
+        statusLabel: rejected ? "驳回后决策中" : "通过后决策中",
+        statusTone: "progress",
       }
     })
   }
@@ -549,12 +553,14 @@ export function Component() {
 
   const progressMut = useMutation({
     mutationFn: (data: { activityId: number; outcome: ApprovalOutcome; opinion: string }) => progressTicket(ticketId, data),
-    onMutate: (data) => markSmartDecisioning(decisioningMessageForOutcome(data.outcome)),
-    onSuccess: () => {
-      invalidateTicket()
+    onMutate: (data) => {
+      markSmartDecisioning(decisioningMessageForOutcome(data.outcome))
       setApprovalOpen(false)
       setApprovalActivityId(null)
       approvalForm.reset({ opinion: "" })
+    },
+    onSuccess: () => {
+      invalidateTicket()
       toast.success(t("itsm:tickets.progressSuccess"))
     },
     onError: (err) => {
@@ -577,9 +583,21 @@ export function Component() {
       queryClient.invalidateQueries({ queryKey: ["itsm-ticket", ticketId] })
       queryClient.invalidateQueries({ queryKey: ["itsm-ticket-timeline", ticketId] })
       queryClient.invalidateQueries({ queryKey: ["itsm-ticket-activities", ticketId] })
-    }, 3000)
+    }, 60000)
     return () => window.clearInterval(interval)
   }, [queryClient, ticket?.engineType, ticket?.smartState, ticketId])
+
+  // When timeline reports a terminal event but ticket status hasn't caught up yet,
+  // force an immediate refetch of the ticket query to close the sync gap.
+  useEffect(() => {
+    if (!ticket || TERMINAL_STATUSES.has(ticket.status)) return
+    const hasTerminalEvent = timeline.some(
+      (e) => e.eventType === "workflow_completed" || e.eventType === "ticket_cancelled",
+    )
+    if (hasTerminalEvent) {
+      queryClient.invalidateQueries({ queryKey: ["itsm-ticket", ticketId] })
+    }
+  }, [queryClient, ticket, ticketId, timeline])
 
   const currentActivity = ticket ? activities.find((a) => a.id === ticket.currentActivityId) : undefined
   const activeHumanActivity = activities.find(
@@ -592,7 +610,7 @@ export function Component() {
   const isActive = ticket ? ACTIVE_STATUSES.has(ticket.status) : false
   const isTerminal = ticket ? TERMINAL_STATUSES.has(ticket.status) : false
   const isDecisioning = ticket?.engineType === "smart" && ticket.smartState === "ai_reasoning"
-  const canWithdraw = Boolean(ticket && isActive && !isDecisioning && ticket.status === "pending" && ticket.requesterId === currentUserId)
+  const canWithdraw = Boolean(ticket && isActive && !isDecisioning && ticket.status === "submitted" && ticket.requesterId === currentUserId)
   const actionableActivity = activeHumanActivity
   const isCurrentUserResponsible = Boolean(
     ticket?.canAct || actionableActivity?.canAct || (ticket?.assigneeId && ticket.assigneeId === currentUserId),
@@ -785,6 +803,7 @@ export function Component() {
 
                 {isActive && !isDecisioning && activeHumanActivity && isCurrentUserResponsible && getNodeOutcomes(activeHumanActivity.activityType).map((outcome) => (
                   <Button
+                    data-testid={outcome === "approved" ? "itsm-ticket-approve-button" : "itsm-ticket-reject-button"}
                     key={`${activeHumanActivity.id}-${outcome}`}
                     size="sm"
                     className={outcome === "rejected" ? "w-full text-destructive" : "w-full"}
@@ -903,6 +922,7 @@ export function Component() {
               )} />
               <SheetFooter>
                 <Button
+                  data-testid={approvalOutcome === "approved" ? "itsm-ticket-confirm-approve-button" : "itsm-ticket-confirm-reject-button"}
                   type="submit"
                   size="sm"
                   variant={approvalOutcome === "approved" ? "default" : "destructive"}

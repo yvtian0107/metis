@@ -1,5 +1,5 @@
 import { useEffect } from "react"
-import { useForm } from "react-hook-form"
+import { useForm, useWatch } from "react-hook-form"
 import { z } from "zod"
 import { zodResolver } from "@/lib/form"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
@@ -62,6 +62,7 @@ export function SourceUrlSheet({ open, onOpenChange }: SourceUrlSheetProps) {
       crawlSchedule: "",
     },
   })
+  const crawlEnabled = useWatch({ control: form.control, name: "crawlEnabled" })
 
   useEffect(() => {
     if (open) {
@@ -179,7 +180,7 @@ export function SourceUrlSheet({ open, onOpenChange }: SourceUrlSheetProps) {
                 </FormItem>
               )}
             />
-            {form.watch("crawlEnabled") && (
+            {crawlEnabled && (
               <FormField
                 control={form.control}
                 name="crawlSchedule"

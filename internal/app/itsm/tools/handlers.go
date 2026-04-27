@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"metis/internal/app"
+	"metis/internal/app/itsm/form"
 )
 
 // ToolHandler handles execution of a single tool call.
@@ -21,7 +22,7 @@ type ToolHandler func(ctx context.Context, userID uint, args json.RawMessage) (j
 
 // ServiceDeskState represents the multi-turn conversation state for the service desk flow.
 type ServiceDeskState struct {
-	Stage                 string         `json:"stage"` // idle|candidates_ready|service_selected|service_loaded|awaiting_confirmation|confirmed
+	Stage                 string         `json:"stage"` // idle|candidates_ready|service_selected|service_loaded|awaiting_confirmation|confirmed|submitted
 	CandidateServiceIDs   []uint         `json:"candidate_service_ids,omitempty"`
 	TopMatchServiceID     uint           `json:"top_match_service_id,omitempty"`
 	ConfirmedServiceID    uint           `json:"confirmed_service_id,omitempty"`
@@ -43,8 +44,9 @@ var validTransitions = map[string][]string{
 	"candidates_ready":      {"candidates_ready", "service_selected", "service_loaded"},
 	"service_selected":      {"candidates_ready", "service_loaded"},
 	"service_loaded":        {"candidates_ready", "awaiting_confirmation"},
-	"awaiting_confirmation": {"candidates_ready", "confirmed", "awaiting_confirmation"},
-	"confirmed":             {"candidates_ready"},
+	"awaiting_confirmation": {"candidates_ready", "confirmed", "submitted", "awaiting_confirmation"},
+	"confirmed":             {"candidates_ready", "submitted"},
+	"submitted":             {"candidates_ready"},
 }
 
 // TransitionTo validates and performs a stage transition.
@@ -86,11 +88,14 @@ type TicketCreator interface {
 
 // AgentTicketRequest holds the parameters for creating a ticket from an AI agent session.
 type AgentTicketRequest struct {
-	UserID    uint
-	ServiceID uint
-	Summary   string
-	FormData  map[string]any
-	SessionID uint
+	UserID       uint
+	ServiceID    uint
+	Summary      string
+	FormData     map[string]any
+	SessionID    uint
+	DraftVersion int
+	FieldsHash   string
+	RequestHash  string
 }
 
 // AgentTicketResult holds the outcome of an agent-created ticket.
@@ -109,6 +114,7 @@ type ServiceDeskOperator interface {
 	MatchServices(ctx context.Context, query string) ([]ServiceMatch, MatchDecision, error)
 	LoadService(serviceID uint) (*ServiceDetail, error)
 	CreateTicket(userID uint, serviceID uint, summary string, formData map[string]any, sessionID uint) (*TicketResult, error)
+	SubmitConfirmedDraft(userID uint, serviceID uint, summary string, formData map[string]any, sessionID uint, draftVersion int, fieldsHash string, requestHash string) (*TicketResult, error)
 	ListMyTickets(userID uint, status string) ([]TicketSummary, error)
 	WithdrawTicket(userID uint, ticketCode string, reason string) error
 	ValidateParticipants(serviceID uint, formData map[string]any) (*ParticipantValidation, error)
@@ -161,13 +167,16 @@ type ServiceDetail struct {
 
 // FormField describes one field on a service request form.
 type FormField struct {
-	Key         string       `json:"key"`
-	Label       string       `json:"label"`
-	Type        string       `json:"type"` // text, select, radio, checkbox, date, textarea, table
-	Description string       `json:"description,omitempty"`
-	Placeholder string       `json:"placeholder,omitempty"`
-	Required    bool         `json:"required"`
-	Options     []FormOption `json:"options,omitempty"`
+	Key          string                `json:"key"`
+	Label        string                `json:"label"`
+	Type         string                `json:"type"`
+	Description  string                `json:"description,omitempty"`
+	Placeholder  string                `json:"placeholder,omitempty"`
+	DefaultValue any                   `json:"defaultValue,omitempty"`
+	Required     bool                  `json:"required"`
+	Validation   []form.ValidationRule `json:"validation,omitempty"`
+	Options      []FormOption          `json:"options,omitempty"`
+	Props        map[string]any        `json:"props,omitempty"`
 }
 
 // FormOption describes one selectable option on a service request form.
@@ -335,14 +344,8 @@ func SubmitDraft(op ServiceDeskOperator, store StateStore, sessionID uint, userI
 	state.DraftSummary = summary
 	state.DraftFormData = formData
 	state.ConfirmedDraftVersion = state.DraftVersion
-	if err := state.TransitionTo("confirmed"); err != nil {
-		return nil, err
-	}
-	if err := store.SaveState(sessionID, state); err != nil {
-		return nil, fmt.Errorf("save confirmed state: %w", err)
-	}
 
-	ticket, err := op.CreateTicket(userID, state.LoadedServiceID, summary, formData, sessionID)
+	ticket, err := op.SubmitConfirmedDraft(userID, state.LoadedServiceID, summary, formData, sessionID, state.DraftVersion, state.FieldsHash, requestHash(formData))
 	if err != nil {
 		return nil, fmt.Errorf("create ticket: %w", err)
 	}
@@ -468,6 +471,12 @@ func defaultState() *ServiceDeskState {
 	return &ServiceDeskState{Stage: "idle"}
 }
 
+func requestHash(data map[string]any) string {
+	b, _ := json.Marshal(data)
+	sum := sha256.Sum256(b)
+	return fmt.Sprintf("%x", sum[:])
+}
+
 // NextExpectedAction returns the next service desk tool/action implied by state.
 func NextExpectedAction(state *ServiceDeskState) string {
 	if state == nil {
@@ -590,18 +599,21 @@ func validateDraftData(detail *ServiceDetail, formData map[string]any) ([]DraftW
 	var warnings []DraftWarning
 	var missingRequired []FieldCollectionItem
 	blocking := false
+	missingKeys := map[string]struct{}{}
+	warnedFields := map[string]struct{}{}
 
 	for _, f := range detail.FormFields {
 		raw, ok := formData[f.Key]
-		value := strings.TrimSpace(fmt.Sprintf("%v", raw))
-		if f.Required && (!ok || raw == nil || value == "") {
+		item := FieldCollectionItem{
+			Key:      f.Key,
+			Label:    f.Label,
+			Type:     f.Type,
+			Required: f.Required,
+		}
+		if f.Required && (!ok || isDraftEmptyValue(raw)) {
 			blocking = true
-			missingRequired = append(missingRequired, FieldCollectionItem{
-				Key:      f.Key,
-				Label:    f.Label,
-				Type:     f.Type,
-				Required: f.Required,
-			})
+			missingKeys[f.Key] = struct{}{}
+			missingRequired = append(missingRequired, item)
 			warnings = append(warnings, DraftWarning{
 				Type:    "missing_required",
 				Field:   f.Key,
@@ -609,7 +621,24 @@ func validateDraftData(detail *ServiceDetail, formData map[string]any) ([]DraftW
 			})
 			continue
 		}
-		if value == "" || (f.Type != "select" && f.Type != "radio") {
+		value := ""
+		if s, ok := raw.(string); ok {
+			value = strings.TrimSpace(s)
+		} else if raw != nil {
+			value = strings.TrimSpace(fmt.Sprintf("%v", raw))
+		}
+		if value != "" && isEmailSemanticField(f) && !isEmailValue(value) {
+			blocking = true
+			missingKeys[f.Key] = struct{}{}
+			missingRequired = append(missingRequired, item)
+			warnings = append(warnings, DraftWarning{
+				Type:    "invalid_email",
+				Field:   f.Key,
+				Message: fmt.Sprintf("%s 需要完整邮箱地址，不能用用户名代替邮箱", f.Label),
+			})
+			continue
+		}
+		if value == "" || (f.Type != form.FieldSelect && f.Type != form.FieldRadio) {
 			continue
 		}
 
@@ -618,10 +647,11 @@ func validateDraftData(detail *ServiceDetail, formData map[string]any) ([]DraftW
 			optionRoutes = detail.RoutingFieldHint.OptionRouteMap
 		}
 
-		allowed := make(map[string]struct{}, len(f.Options)*2)
+		allowed := make(map[string]struct{}, len(f.Options))
 		for _, opt := range f.Options {
 			if opt.Value != "" {
 				allowed[opt.Value] = struct{}{}
+				continue
 			}
 			if opt.Label != "" {
 				allowed[opt.Label] = struct{}{}
@@ -649,6 +679,8 @@ func validateDraftData(detail *ServiceDetail, formData map[string]any) ([]DraftW
 				Message:        fmt.Sprintf("%s 是单选字段，但草稿中包含多个值，请确认最终选择。", f.Label),
 				ResolvedValues: resolvedValues,
 			})
+			blocking = true
+			warnedFields[f.Key] = struct{}{}
 		}
 
 		for _, item := range values {
@@ -658,6 +690,7 @@ func validateDraftData(detail *ServiceDetail, formData map[string]any) ([]DraftW
 			}
 			if _, ok := allowed[item]; !ok {
 				blocking = true
+				warnedFields[f.Key] = struct{}{}
 				warnings = append(warnings, DraftWarning{
 					Type:    "invalid_option",
 					Field:   f.Key,
@@ -666,7 +699,97 @@ func validateDraftData(detail *ServiceDetail, formData map[string]any) ([]DraftW
 			}
 		}
 	}
+
+	schema := schemaFromToolFields(detail.FormFields)
+	for _, err := range form.ValidateFormData(schema, formData) {
+		if _, alreadyMissing := missingKeys[err.Field]; alreadyMissing {
+			continue
+		}
+		if _, alreadyWarned := warnedFields[err.Field]; alreadyWarned {
+			continue
+		}
+		blocking = true
+		warningType := "invalid_field_value"
+		if fieldByKey(detail.FormFields, err.Field).Key != "" && strings.Contains(err.Message, "不在可选项中") {
+			warningType = "invalid_option"
+		}
+		warnings = append(warnings, DraftWarning{
+			Type:    warningType,
+			Field:   err.Field,
+			Message: err.Message,
+		})
+	}
 	return warnings, missingRequired, blocking
+}
+
+func isDraftEmptyValue(val any) bool {
+	if val == nil {
+		return true
+	}
+	switch v := val.(type) {
+	case string:
+		return strings.TrimSpace(v) == ""
+	case []string:
+		return len(v) == 0
+	case []any:
+		return len(v) == 0
+	case map[string]any:
+		if len(v) == 0 {
+			return true
+		}
+		for _, item := range v {
+			if !isDraftEmptyValue(item) {
+				return false
+			}
+		}
+		return true
+	default:
+		return false
+	}
+}
+
+func schemaFromToolFields(fields []FormField) form.FormSchema {
+	schema := form.FormSchema{Version: 1, Fields: make([]form.FormField, 0, len(fields))}
+	for _, f := range fields {
+		options := make([]form.FieldOption, 0, len(f.Options))
+		for _, opt := range f.Options {
+			options = append(options, form.FieldOption{Label: opt.Label, Value: opt.Value})
+		}
+		schema.Fields = append(schema.Fields, form.FormField{
+			Key:          f.Key,
+			Type:         f.Type,
+			Label:        f.Label,
+			Placeholder:  f.Placeholder,
+			Description:  f.Description,
+			DefaultValue: f.DefaultValue,
+			Required:     f.Required,
+			Validation:   f.Validation,
+			Options:      options,
+			Props:        f.Props,
+		})
+	}
+	return schema
+}
+
+func fieldByKey(fields []FormField, key string) FormField {
+	for _, f := range fields {
+		if f.Key == key {
+			return f
+		}
+	}
+	return FormField{}
+}
+
+func isEmailSemanticField(field FormField) bool {
+	if strings.EqualFold(field.Type, "email") {
+		return true
+	}
+	semantic := strings.ToLower(field.Key + " " + field.Label + " " + field.Description + " " + field.Placeholder)
+	return strings.Contains(semantic, "email") || strings.Contains(semantic, "邮箱")
+}
+
+func isEmailValue(value string) bool {
+	return emailPattern.FindString(value) == value
 }
 
 func buildPrefillSuggestions(requestText string, fields []FormField) map[string]any {
@@ -677,11 +800,18 @@ func buildPrefillSuggestions(requestText string, fields []FormField) map[string]
 
 	email := emailPattern.FindString(requestText)
 	purpose := extractPurposeText(requestText)
+	requestKind := extractRequestKindValue(requestText)
 	prefill := make(map[string]any)
 	for _, field := range fields {
 		semantic := strings.ToLower(field.Key + " " + field.Label + " " + field.Description + " " + field.Placeholder)
 		if email != "" && isAccountField(semantic) {
 			prefill[field.Key] = email
+			continue
+		}
+		if isRequestKindField(semantic) && isChoiceField(field) {
+			if requestKind != "" {
+				prefill[field.Key] = requestKind
+			}
 			continue
 		}
 		if purpose != "" && isPurposeField(semantic) {
@@ -742,16 +872,28 @@ func isPurposeField(semantic string) bool {
 	return strings.Contains(semantic, "usage") ||
 		strings.Contains(semantic, "purpose") ||
 		strings.Contains(semantic, "reason") ||
-		strings.Contains(semantic, "request_kind") ||
 		strings.Contains(semantic, "用途") ||
 		strings.Contains(semantic, "原因") ||
 		strings.Contains(semantic, "说明")
 }
 
+func isRequestKindField(semantic string) bool {
+	return strings.Contains(semantic, "request_kind") ||
+		strings.Contains(semantic, "访问原因") ||
+		strings.Contains(semantic, "申请原因") ||
+		strings.Contains(semantic, "业务原因")
+}
+
+func isChoiceField(field FormField) bool {
+	return field.Type == "select" || field.Type == "radio"
+}
+
 func extractPurposeText(requestText string) string {
 	cleaned := emailPattern.ReplaceAllString(requestText, "")
 	cleaned = strings.NewReplacer(
+		"我想申请VPN", "", "我想申请 vpn", "", "我想申请", "",
 		"我要申请VPN", "", "我要申请 vpn", "", "申请VPN", "", "申请 vpn", "",
+		"想申请VPN", "", "想申请 vpn", "", "想申请", "", "申请", "",
 		"开通VPN", "", "开VPN", "", "VPN", "", "vpn", "",
 		"我的", "", "账号", "", "是", "",
 	).Replace(cleaned)
@@ -771,6 +913,49 @@ func extractPurposeText(requestText string) string {
 		}
 	}
 	return ""
+}
+
+type vpnRequestKindOption struct {
+	Value string
+	Route string
+	Terms []string
+}
+
+var vpnRequestKindOptions = []vpnRequestKindOption{
+	{Value: "online_support", Route: "network", Terms: []string{"online_support", "线上支持"}},
+	{Value: "troubleshooting", Route: "network", Terms: []string{"troubleshooting", "故障排查", "排障", "网络调试", "网络诊断"}},
+	{Value: "production_emergency", Route: "network", Terms: []string{"production_emergency", "生产应急", "应急"}},
+	{Value: "network_access_issue", Route: "network", Terms: []string{"network_access_issue", "网络接入问题", "网络接入", "接入问题"}},
+	{Value: "external_collaboration", Route: "security", Terms: []string{"external_collaboration", "外部协作"}},
+	{Value: "long_term_remote_work", Route: "security", Terms: []string{"long_term_remote_work", "长期远程办公", "远程办公"}},
+	{Value: "cross_border_access", Route: "security", Terms: []string{"cross_border_access", "跨境访问"}},
+	{Value: "security_compliance", Route: "security", Terms: []string{"security_compliance", "安全合规事项", "安全合规", "合规事项", "安全审计", "合规检查"}},
+}
+
+func extractRequestKindValue(requestText string) string {
+	requestText = strings.TrimSpace(requestText)
+	if requestText == "" {
+		return ""
+	}
+	seenValues := map[string]struct{}{}
+	seenRoutes := map[string]struct{}{}
+	values := make([]string, 0, 1)
+	for _, option := range vpnRequestKindOptions {
+		for _, term := range option.Terms {
+			if strings.Contains(requestText, term) {
+				if _, ok := seenValues[option.Value]; !ok {
+					seenValues[option.Value] = struct{}{}
+					seenRoutes[option.Route] = struct{}{}
+					values = append(values, option.Value)
+				}
+				break
+			}
+		}
+	}
+	if len(values) == 0 || len(seenRoutes) > 1 {
+		return ""
+	}
+	return values[0]
 }
 
 // ---------------------------------------------------------------------------
@@ -1026,6 +1211,10 @@ func serviceLoadHandler(op ServiceDeskOperator, store StateStore) ToolHandler {
 
 		if state.LoadedServiceID == resolvedServiceID &&
 			(state.Stage == "service_loaded" || state.Stage == "awaiting_confirmation" || state.Stage == "confirmed") {
+			if state.FieldsHash != detail.FieldsHash {
+				state.FieldsHash = detail.FieldsHash
+				state.ConfirmedDraftVersion = 0
+			}
 			state.PrefillFormData = detail.PrefillSuggestions
 			if err := store.SaveState(sid, state); err != nil {
 				return nil, fmt.Errorf("save state: %w", err)
@@ -1177,6 +1366,13 @@ func draftConfirmHandler(op ServiceDeskOperator, store StateStore) ToolHandler {
 			}
 			if detail.FieldsHash != state.FieldsHash {
 				return nil, fmt.Errorf("服务表单字段已变更，请重新调用 service_load")
+			}
+			warnings, _, blocking := validateDraftData(detail, state.DraftFormData)
+			if blocking {
+				if len(warnings) > 0 {
+					return nil, fmt.Errorf("草稿表单校验失败：%s", warnings[0].Message)
+				}
+				return nil, fmt.Errorf("草稿表单校验失败，请重新调用 draft_prepare")
 			}
 		}
 

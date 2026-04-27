@@ -15,6 +15,7 @@ type DecisionTicketData struct {
 	Title                 string
 	Description           string
 	Status                string
+	Outcome               string
 	Source                string
 	FormData              string
 	SLAResponseDeadline   *time.Time
@@ -171,7 +172,7 @@ func NewDecisionDataStore(db *gorm.DB) DecisionDataProvider {
 func (s *decisionDataStore) GetTicketContext(ticketID uint) (*DecisionTicketData, error) {
 	var row DecisionTicketData
 	err := s.db.Table("itsm_tickets").Where("id = ?", ticketID).
-		Select("code, title, description, status, source, form_data, sla_response_deadline, sla_resolution_deadline").
+		Select("code, title, description, status, outcome, source, form_data, sla_response_deadline, sla_resolution_deadline").
 		First(&row).Error
 	if err != nil {
 		return nil, err
@@ -181,7 +182,7 @@ func (s *decisionDataStore) GetTicketContext(ticketID uint) (*DecisionTicketData
 
 func (s *decisionDataStore) GetDecisionHistory(ticketID uint) ([]activityModel, error) {
 	var activities []activityModel
-	err := s.db.Where("ticket_id = ? AND status IN ?", ticketID, []string{ActivityCompleted, ActivityCancelled}).
+	err := s.db.Where("ticket_id = ? AND status IN ?", ticketID, CompletedActivityStatuses()).
 		Order("id ASC").Find(&activities).Error
 	return activities, err
 }
@@ -269,7 +270,7 @@ func (s *decisionDataStore) GetCurrentAssignment(ticketID uint) (*CurrentAssignm
 func (s *decisionDataStore) GetParallelGroups(ticketID uint) ([]ParallelGroupInfo, error) {
 	var groups []ParallelGroupInfo
 	err := s.db.Table("itsm_ticket_activities").
-		Select("activity_group_id, COUNT(*) as total, SUM(CASE WHEN status IN ('completed','cancelled') THEN 1 ELSE 0 END) as completed").
+		Select("activity_group_id, COUNT(*) as total, SUM(CASE WHEN status IN ('completed','approved','rejected','cancelled') THEN 1 ELSE 0 END) as completed").
 		Where("ticket_id = ? AND activity_group_id != ''", ticketID).
 		Group("activity_group_id").
 		Find(&groups).Error
@@ -279,8 +280,8 @@ func (s *decisionDataStore) GetParallelGroups(ticketID uint) ([]ParallelGroupInf
 func (s *decisionDataStore) GetPendingActivityNames(ticketID uint, groupID string) ([]string, error) {
 	var names []string
 	err := s.db.Table("itsm_ticket_activities").
-		Where("ticket_id = ? AND activity_group_id = ? AND status NOT IN ('completed','cancelled')",
-			ticketID, groupID).
+		Where("ticket_id = ? AND activity_group_id = ? AND status NOT IN ?",
+			ticketID, groupID, CompletedActivityStatuses()).
 		Pluck("name", &names).Error
 	return names, err
 }

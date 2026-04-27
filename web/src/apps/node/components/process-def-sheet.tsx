@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react"
-import { useForm } from "react-hook-form"
+import { useForm, useWatch } from "react-hook-form"
 import { useTranslation } from "react-i18next"
 import { z } from "zod"
 import { zodResolver } from "@/lib/form"
@@ -202,7 +202,7 @@ export function ProcessDefSheet({ open, onOpenChange, processDef }: ProcessDefSh
   }
 
   const isPending = createMutation.isPending || updateMutation.isPending
-  const probeType = form.watch("probeType")
+  const probeType = useWatch({ control: form.control, name: "probeType" })
 
   function handleOpenChange(nextOpen: boolean) {
     if (!nextOpen) setShowAdvanced(false)

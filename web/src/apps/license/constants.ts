@@ -23,10 +23,14 @@ export const STATUS_STYLES: Record<
   },
 }
 
-export const STATUS_ACTION_CONFIG: Record<
-  string,
-  Array<{ status: string; labelKey: string; variant: "default" | "secondary" | "outline" | "destructive"; icon: React.ElementType }>
-> = {
+export type StatusActionConfig = {
+  status: string
+  labelKey: string
+  variant: "default" | "secondary" | "outline" | "destructive"
+  icon: React.ElementType
+}
+
+export const STATUS_ACTION_CONFIG: Record<string, StatusActionConfig[]> = {
   unpublished: [
     { status: "published", labelKey: "status.publish", variant: "default", icon: Rocket },
     { status: "archived", labelKey: "status.archiveAction", variant: "outline", icon: Archive },

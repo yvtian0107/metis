@@ -49,3 +49,7 @@ sidecar
 .cursor/
 .github/
 
+!internal/**
+*.db
+*.db-shm
+*.db-wal

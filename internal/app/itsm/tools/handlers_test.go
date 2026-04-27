@@ -3,9 +3,11 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"metis/internal/app"
+	"metis/internal/app/itsm/form"
 )
 
 // memStateStore is an in-memory StateStore for testing.
@@ -33,17 +35,20 @@ func (m *memStateStore) SaveState(sessionID uint, state *ServiceDeskState) error
 // stubOperator implements ServiceDeskOperator for unit tests.
 // Only LoadService is needed for draft_prepare tests.
 type stubOperator struct {
-	detail             *ServiceDetail
-	details            map[uint]*ServiceDetail
-	matchResponse      []ServiceMatch
-	matchDecision      MatchDecision
-	matchQueries       []string
-	createdServiceID   uint
-	createdSummary     string
-	createdFormData    map[string]any
-	validatedServiceID uint
-	validatedFormData  map[string]any
-	participantResult  *ParticipantValidation
+	detail              *ServiceDetail
+	details             map[uint]*ServiceDetail
+	matchResponse       []ServiceMatch
+	matchDecision       MatchDecision
+	matchQueries        []string
+	createdServiceID    uint
+	createdSummary      string
+	createdFormData     map[string]any
+	createdDraftVersion int
+	createdFieldsHash   string
+	createdRequestHash  string
+	validatedServiceID  uint
+	validatedFormData   map[string]any
+	participantResult   *ParticipantValidation
 }
 
 func (s *stubOperator) MatchServices(ctx context.Context, query string) ([]ServiceMatch, MatchDecision, error) {
@@ -64,6 +69,15 @@ func (s *stubOperator) CreateTicket(userID uint, serviceID uint, summary string,
 	s.createdFormData = formData
 	return &TicketResult{TicketID: 123, TicketCode: "TICK-000123", Status: "in_progress"}, nil
 }
+func (s *stubOperator) SubmitConfirmedDraft(userID uint, serviceID uint, summary string, formData map[string]any, sessionID uint, draftVersion int, fieldsHash string, requestHash string) (*TicketResult, error) {
+	s.createdServiceID = serviceID
+	s.createdSummary = summary
+	s.createdFormData = formData
+	s.createdDraftVersion = draftVersion
+	s.createdFieldsHash = fieldsHash
+	s.createdRequestHash = requestHash
+	return &TicketResult{TicketID: 123, TicketCode: "TICK-000123", Status: "in_progress"}, nil
+}
 func (s *stubOperator) ListMyTickets(userID uint, status string) ([]TicketSummary, error) {
 	return nil, nil
 }
@@ -80,13 +94,36 @@ func (s *stubOperator) ValidateParticipants(serviceID uint, formData map[string]
 }
 
 func vpnServiceDetail(serviceID uint) *ServiceDetail {
+	requestKindOptions := []FormOption{
+		{Label: "线上支持", Value: "online_support"},
+		{Label: "故障排查", Value: "troubleshooting"},
+		{Label: "生产应急", Value: "production_emergency"},
+		{Label: "网络接入问题", Value: "network_access_issue"},
+		{Label: "外部协作", Value: "external_collaboration"},
+		{Label: "长期远程办公", Value: "long_term_remote_work"},
+		{Label: "跨境访问", Value: "cross_border_access"},
+		{Label: "安全合规事项", Value: "security_compliance"},
+	}
 	return &ServiceDetail{
 		ServiceID: serviceID,
 		Name:      "VPN 开通申请",
 		FormFields: []FormField{
 			{Key: "vpn_account", Label: "VPN账号", Type: "text", Required: true, Description: "用于登录 VPN 的账号，用户给出的邮箱可直接作为账号"},
 			{Key: "device_usage", Label: "设备与用途说明", Type: "textarea", Required: true, Description: "说明访问 VPN 的设备或用途；用户已给出用途时不需要额外追问设备型号"},
-			{Key: "request_kind", Label: "访问原因", Type: "textarea", Required: true, Description: "申请 VPN 的业务原因"},
+			{Key: "request_kind", Label: "访问原因", Type: "select", Required: true, Description: "选择 VPN 访问原因", Options: requestKindOptions},
+		},
+		RoutingFieldHint: &RoutingFieldHint{
+			FieldKey: "request_kind",
+			OptionRouteMap: map[string]string{
+				"online_support":         "网络管理员处理",
+				"troubleshooting":        "网络管理员处理",
+				"production_emergency":   "网络管理员处理",
+				"network_access_issue":   "网络管理员处理",
+				"external_collaboration": "信息安全管理员处理",
+				"long_term_remote_work":  "信息安全管理员处理",
+				"cross_border_access":    "信息安全管理员处理",
+				"security_compliance":    "信息安全管理员处理",
+			},
 		},
 		FieldsHash: "vpn123",
 	}
@@ -100,7 +137,7 @@ func smartVPNServiceDetail(serviceID uint) *ServiceDetail {
 		"fields": []map[string]any{
 			{"key": "vpn_account", "type": "text", "label": "VPN账号", "required": true},
 			{"key": "device_usage", "type": "textarea", "label": "设备与用途说明", "required": true},
-			{"key": "request_kind", "type": "textarea", "label": "访问原因", "required": true},
+			{"key": "request_kind", "type": "select", "label": "访问原因", "required": true},
 		},
 	}
 	return detail
@@ -131,7 +168,7 @@ func TestServiceLoad_ReturnsPrefillSuggestionsFromRequestText(t *testing.T) {
 	}
 	if resp.PrefillSuggestions["vpn_account"] != "wenhaowu@dev.com" ||
 		resp.PrefillSuggestions["device_usage"] != "线上支持用" ||
-		resp.PrefillSuggestions["request_kind"] != "线上支持用" {
+		resp.PrefillSuggestions["request_kind"] != "online_support" {
 		t.Fatalf("unexpected prefill suggestions: %+v", resp.PrefillSuggestions)
 	}
 	state := store.states[1]
@@ -184,7 +221,7 @@ func TestServiceLoad_UsesOriginalUserMessageWhenMatchQueryIsAbbreviated(t *testi
 	}
 	if resp.PrefillSuggestions["vpn_account"] != "wenhaowu@dev.com" ||
 		resp.PrefillSuggestions["device_usage"] != "线上支持用" ||
-		resp.PrefillSuggestions["request_kind"] != "线上支持用" {
+		resp.PrefillSuggestions["request_kind"] != "online_support" {
 		t.Fatalf("expected prefill from original user message, got %+v", resp.PrefillSuggestions)
 	}
 	if state := store.states[1]; state.RequestText != "我要申请VPN，线上支持用的，wenhaowu@dev.com" {
@@ -276,7 +313,7 @@ func TestServiceMatch_ShortConfirmationReusesLoadedServiceWithoutClearingPrefill
 	}
 	if state.PrefillFormData["vpn_account"] != "wenhaowu@dev.com" ||
 		state.PrefillFormData["device_usage"] != "线上支持用" ||
-		state.PrefillFormData["request_kind"] != "线上支持用" {
+		state.PrefillFormData["request_kind"] != "online_support" {
 		t.Fatalf("prefill was cleared or changed: %+v", state.PrefillFormData)
 	}
 }
@@ -290,7 +327,7 @@ func TestCurrentRequestContext_ReturnsStateAndNextExpectedAction(t *testing.T) {
 		PrefillFormData: map[string]any{
 			"vpn_account":  "wenhaowu@dev.com",
 			"device_usage": "线上支持用",
-			"request_kind": "线上支持用",
+			"request_kind": "online_support",
 		},
 	}
 	ctx := context.WithValue(context.Background(), app.SessionIDKey, uint(1))
@@ -328,12 +365,12 @@ func TestDraftPrepare_UsesPrefillSuggestionsBeforeRequiredValidation(t *testing.
 		PrefillFormData: map[string]any{
 			"vpn_account":  "wenhaowu@dev.com",
 			"device_usage": "线上支持用",
-			"request_kind": "线上支持用",
+			"request_kind": "online_support",
 		},
 	}
 	ctx := context.WithValue(context.Background(), app.SessionIDKey, uint(1))
 
-	result, err := draftPrepareHandler(op, store)(ctx, 1, []byte(`{"summary":"VPN 开通申请 - 线上支持用","form_data":{"request_kind":"线上支持用"}}`))
+	result, err := draftPrepareHandler(op, store)(ctx, 1, []byte(`{"summary":"VPN 开通申请 - 线上支持用","form_data":{"request_kind":"online_support"}}`))
 	if err != nil {
 		t.Fatalf("prepare draft: %v", err)
 	}
@@ -359,8 +396,206 @@ func TestDraftPrepare_UsesPrefillSuggestionsBeforeRequiredValidation(t *testing.
 	}
 	if resp.FormData["vpn_account"] != "wenhaowu@dev.com" ||
 		resp.FormData["device_usage"] != "线上支持用" ||
-		resp.FormData["request_kind"] != "线上支持用" {
+		resp.FormData["request_kind"] != "online_support" {
 		t.Fatalf("expected complete form data from prefill, got %+v", resp.FormData)
+	}
+}
+
+func TestDraftPrepare_BlocksUsernameForEmailSemanticAccountField(t *testing.T) {
+	store := newMemStateStore()
+	op := &stubOperator{detail: vpnServiceDetail(5)}
+	store.states[1] = &ServiceDeskState{
+		Stage:           "service_loaded",
+		LoadedServiceID: 5,
+		FieldsHash:      "vpn123",
+	}
+	ctx := context.WithValue(context.Background(), app.SessionIDKey, uint(1))
+
+	result, err := draftPrepareHandler(op, store)(ctx, 1, []byte(`{
+		"summary":"VPN 开通申请 - 线上支持用",
+		"form_data":{
+			"vpn_account":"admin",
+			"device_usage":"线上支持用",
+			"request_kind":"online_support"
+		}
+	}`))
+	if err != nil {
+		t.Fatalf("prepare draft: %v", err)
+	}
+
+	var resp struct {
+		OK                    bool `json:"ok"`
+		ReadyForConfirmation  bool `json:"ready_for_confirmation"`
+		MissingRequiredFields []struct {
+			Key string `json:"key"`
+		} `json:"missing_required_fields"`
+		Warnings []struct {
+			Type    string `json:"type"`
+			Field   string `json:"field"`
+			Message string `json:"message"`
+		} `json:"warnings"`
+	}
+	if err := json.Unmarshal(result, &resp); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if resp.OK || resp.ReadyForConfirmation {
+		t.Fatalf("expected username-as-email to block draft, got %s", string(result))
+	}
+	if len(resp.MissingRequiredFields) != 1 || resp.MissingRequiredFields[0].Key != "vpn_account" {
+		t.Fatalf("expected vpn_account to be returned as missing, got %+v", resp.MissingRequiredFields)
+	}
+	if len(resp.Warnings) != 1 || resp.Warnings[0].Type != "invalid_email" || resp.Warnings[0].Field != "vpn_account" {
+		t.Fatalf("expected invalid_email warning for vpn_account, got %+v", resp.Warnings)
+	}
+	if !strings.Contains(resp.Warnings[0].Message, "不能用用户名代替邮箱") {
+		t.Fatalf("expected username substitution warning message, got %q", resp.Warnings[0].Message)
+	}
+}
+
+func TestDraftPrepare_AllowsEmailForEmailSemanticAccountField(t *testing.T) {
+	store := newMemStateStore()
+	op := &stubOperator{detail: vpnServiceDetail(5)}
+	store.states[1] = &ServiceDeskState{
+		Stage:           "service_loaded",
+		LoadedServiceID: 5,
+		FieldsHash:      "vpn123",
+	}
+	ctx := context.WithValue(context.Background(), app.SessionIDKey, uint(1))
+
+	result, err := draftPrepareHandler(op, store)(ctx, 1, []byte(`{
+		"summary":"VPN 开通申请 - 线上支持用",
+		"form_data":{
+			"vpn_account":"admin@local.dev",
+			"device_usage":"线上支持用",
+			"request_kind":"online_support"
+		}
+	}`))
+	if err != nil {
+		t.Fatalf("prepare draft: %v", err)
+	}
+
+	var resp struct {
+		OK                   bool           `json:"ok"`
+		ReadyForConfirmation bool           `json:"ready_for_confirmation"`
+		NextRequiredTool     string         `json:"next_required_tool"`
+		FormData             map[string]any `json:"form_data"`
+	}
+	if err := json.Unmarshal(result, &resp); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if !resp.OK || !resp.ReadyForConfirmation || resp.NextRequiredTool != "itsm.draft_confirm" {
+		t.Fatalf("expected email account to be accepted, got %s", string(result))
+	}
+	if resp.FormData["vpn_account"] != "admin@local.dev" {
+		t.Fatalf("expected email account to be preserved, got %+v", resp.FormData)
+	}
+}
+
+func TestDraftPrepare_BlocksFreeTextForVPNRequestKind(t *testing.T) {
+	store := newMemStateStore()
+	op := &stubOperator{detail: vpnServiceDetail(5)}
+	store.states[1] = &ServiceDeskState{
+		Stage:           "service_loaded",
+		LoadedServiceID: 5,
+		FieldsHash:      "vpn123",
+	}
+	ctx := context.WithValue(context.Background(), app.SessionIDKey, uint(1))
+
+	result, err := draftPrepareHandler(op, store)(ctx, 1, []byte(`{
+		"summary":"VPN 开通申请 - 线上支持用",
+		"form_data":{
+			"vpn_account":"admin@local.dev",
+			"device_usage":"线上支持用",
+			"request_kind":"线上支持用"
+		}
+	}`))
+	if err != nil {
+		t.Fatalf("prepare draft: %v", err)
+	}
+
+	var resp struct {
+		OK                   bool `json:"ok"`
+		ReadyForConfirmation bool `json:"ready_for_confirmation"`
+		Warnings             []struct {
+			Type  string `json:"type"`
+			Field string `json:"field"`
+		} `json:"warnings"`
+	}
+	if err := json.Unmarshal(result, &resp); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if resp.OK || resp.ReadyForConfirmation {
+		t.Fatalf("expected free-text request_kind to block draft, got %s", string(result))
+	}
+	if len(resp.Warnings) != 1 || resp.Warnings[0].Type != "invalid_option" || resp.Warnings[0].Field != "request_kind" {
+		t.Fatalf("expected invalid_option for request_kind, got %+v", resp.Warnings)
+	}
+}
+
+func TestDraftPrepare_BlocksInvalidStructuredFields(t *testing.T) {
+	store := newMemStateStore()
+	op := &stubOperator{detail: &ServiceDetail{
+		ServiceID: 9,
+		Name:      "复杂表单",
+		FormFields: []FormField{
+			{Key: "title", Label: "标题", Type: form.FieldText, Required: true},
+			{Key: "tags", Label: "标签", Type: form.FieldMultiSelect, Required: true, Options: []FormOption{{Label: "VPN", Value: "vpn"}}},
+			{Key: "items", Label: "明细", Type: form.FieldTable, Required: true, Props: map[string]any{"columns": []form.TableColumn{
+				{Key: "name", Type: form.FieldText, Label: "名称", Required: true},
+				{Key: "kind", Type: form.FieldSelect, Label: "类型", Required: true, Options: []form.FieldOption{{Label: "网络", Value: "network"}}},
+			}}},
+		},
+		FieldsHash: "complex123",
+	}}
+	store.states[1] = &ServiceDeskState{Stage: "service_loaded", LoadedServiceID: 9, FieldsHash: "complex123"}
+	ctx := context.WithValue(context.Background(), app.SessionIDKey, uint(1))
+
+	tests := []struct {
+		name string
+		data map[string]any
+		want string
+	}{
+		{
+			name: "multi select text",
+			data: map[string]any{"title": "申请", "tags": "vpn", "items": []any{map[string]any{"name": "A", "kind": "network"}}},
+			want: "tags",
+		},
+		{
+			name: "table shape",
+			data: map[string]any{"title": "申请", "tags": []any{"vpn"}, "items": map[string]any{"name": "A"}},
+			want: "items",
+		},
+		{
+			name: "table column required",
+			data: map[string]any{"title": "申请", "tags": []any{"vpn"}, "items": []any{map[string]any{"kind": "network"}}},
+			want: "items[0].name",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			args, _ := json.Marshal(map[string]any{"summary": "复杂表单", "form_data": tt.data})
+			result, err := draftPrepareHandler(op, store)(ctx, 1, args)
+			if err != nil {
+				t.Fatalf("prepare draft: %v", err)
+			}
+			var resp struct {
+				OK                   bool `json:"ok"`
+				ReadyForConfirmation bool `json:"ready_for_confirmation"`
+				Warnings             []struct {
+					Field string `json:"field"`
+				} `json:"warnings"`
+			}
+			if err := json.Unmarshal(result, &resp); err != nil {
+				t.Fatalf("unmarshal response: %v", err)
+			}
+			if resp.OK || resp.ReadyForConfirmation {
+				t.Fatalf("expected invalid structured field to block draft, got %s", string(result))
+			}
+			if len(resp.Warnings) == 0 || resp.Warnings[0].Field != tt.want {
+				t.Fatalf("expected first warning field %s, got %+v", tt.want, resp.Warnings)
+			}
+		})
 	}
 }
 
@@ -373,7 +608,7 @@ func TestDraftPrepare_StillReportsMissingAccountWhenRequestHasNoAccount(t *testi
 		FieldsHash:      "vpn123",
 		PrefillFormData: map[string]any{
 			"device_usage": "线上支持用",
-			"request_kind": "线上支持用",
+			"request_kind": "online_support",
 		},
 	}
 	ctx := context.WithValue(context.Background(), app.SessionIDKey, uint(1))
@@ -422,7 +657,7 @@ func TestSubmitDraft_UsesSubmittedFormDataForSmartTicket(t *testing.T) {
 		DraftFormData: map[string]any{
 			"vpn_account":  "old@example.com",
 			"device_usage": "线上支持",
-			"request_kind": "线上支持",
+			"request_kind": "online_support",
 		},
 		DraftVersion: 1,
 		FieldsHash:   "vpn123",
@@ -434,7 +669,7 @@ func TestSubmitDraft_UsesSubmittedFormDataForSmartTicket(t *testing.T) {
 		FormData: map[string]any{
 			"vpn_account":  "new@example.com",
 			"device_usage": "生产应急",
-			"request_kind": "生产应急",
+			"request_kind": "production_emergency",
 		},
 	})
 	if err != nil {
@@ -446,7 +681,7 @@ func TestSubmitDraft_UsesSubmittedFormDataForSmartTicket(t *testing.T) {
 	if op.createdServiceID != 5 || op.createdSummary != "VPN 开通申请 - 修改后" {
 		t.Fatalf("unexpected created ticket target: service=%d summary=%q", op.createdServiceID, op.createdSummary)
 	}
-	if op.createdFormData["vpn_account"] != "new@example.com" || op.createdFormData["request_kind"] != "生产应急" {
+	if op.createdFormData["vpn_account"] != "new@example.com" || op.createdFormData["request_kind"] != "production_emergency" {
 		t.Fatalf("expected submitted form data to create ticket, got %+v", op.createdFormData)
 	}
 	if state := store.states[1]; state.Stage != "idle" {
@@ -526,7 +761,7 @@ func TestSubmitDraft_ParticipantPrecheckFailureDoesNotCreateTicket(t *testing.T)
 		FormData: map[string]any{
 			"vpn_account":  "new@example.com",
 			"device_usage": "生产应急",
-			"request_kind": "生产应急",
+			"request_kind": "production_emergency",
 		},
 	})
 	if err != nil {
@@ -570,6 +805,30 @@ func TestParseFormFields_PreservesFieldContextAndOptionValues(t *testing.T) {
 	}
 	if len(field.Options) != 2 || field.Options[0].Label != "线上支持" || field.Options[0].Value != "network_support" {
 		t.Fatalf("expected option label/value to be preserved, got %+v", field.Options)
+	}
+}
+
+func TestExtractRoutingHint_ReadsEdgeConditionsAndNormalizesFormField(t *testing.T) {
+	hint := extractRoutingHint(`{
+		"nodes": [
+			{"id": "route", "type": "exclusive", "data": {"label": "访问原因路由"}},
+			{"id": "network", "type": "process", "data": {"label": "网络管理员处理"}},
+			{"id": "security", "type": "process", "data": {"label": "信息安全管理员处理"}}
+		],
+		"edges": [
+			{"id": "e1", "source": "route", "target": "network", "data": {"condition": {"field": "form.request_kind", "operator": "contains_any", "value": ["online_support", "troubleshooting"]}}},
+			{"id": "e2", "source": "route", "target": "security", "data": {"condition": {"field": "form.request_kind", "operator": "contains_any", "value": ["external_collaboration"]}}}
+		]
+	}`)
+	if hint == nil {
+		t.Fatal("expected routing hint")
+	}
+	if hint.FieldKey != "request_kind" {
+		t.Fatalf("expected normalized field request_kind, got %q", hint.FieldKey)
+	}
+	if hint.OptionRouteMap["online_support"] != "网络管理员处理" ||
+		hint.OptionRouteMap["external_collaboration"] != "信息安全管理员处理" {
+		t.Fatalf("unexpected route map: %+v", hint.OptionRouteMap)
 	}
 }
 
@@ -706,7 +965,7 @@ func TestServiceDeskFlow_UsesLoadedServiceAndConfirmedDraftWhenModelFallsBackToI
 		"form_data": map[string]any{
 			"VPN账号":   "wenhaowu@dev.com",
 			"设备与用途说明": "安卓手机",
-			"访问原因":    "线上支持",
+			"访问原因":    "online_support",
 		},
 	})
 	result, err := draftPrepareHandler(op, store)(ctx, 1, draftArgs)
@@ -725,7 +984,7 @@ func TestServiceDeskFlow_UsesLoadedServiceAndConfirmedDraftWhenModelFallsBackToI
 	}
 	if draftResp.FormData["vpn_account"] != "wenhaowu@dev.com" ||
 		draftResp.FormData["device_usage"] != "安卓手机" ||
-		draftResp.FormData["request_kind"] != "线上支持" {
+		draftResp.FormData["request_kind"] != "online_support" {
 		t.Fatalf("expected label keys to be canonicalized, got %+v", draftResp.FormData)
 	}
 	if _, err := draftConfirmHandler(op, store)(ctx, 1, []byte(`{}`)); err != nil {
@@ -746,7 +1005,7 @@ func TestServiceDeskFlow_UsesLoadedServiceAndConfirmedDraftWhenModelFallsBackToI
 	if op.createdSummary != "VPN 开通申请 - 账号：wenhaowu@dev.com，设备：安卓手机，用途：线上支持" {
 		t.Fatalf("expected confirmed draft summary to be used, got %q", op.createdSummary)
 	}
-	if op.createdFormData["request_kind"] != "线上支持" {
+	if op.createdFormData["request_kind"] != "online_support" {
 		t.Fatalf("expected confirmed draft form data to be used, got %+v", op.createdFormData)
 	}
 }

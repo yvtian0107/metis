@@ -7,10 +7,13 @@
     "dev": "vite --port 3000",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
+    "test": "bun test src",
     "preview": "vite preview"
   },
   "dependencies": {
     "@ai-sdk/react": "^3.0.160",
+    "@assistant-ui/react": "^0.12.25",
+    "@assistant-ui/react-ai-sdk": "^1.3.19",
     "@dagrejs/dagre": "^3.0.0",
     "@dnd-kit/core": "^6.3.1",
     "@dnd-kit/sortable": "^10.0.0",

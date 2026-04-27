@@ -52,28 +52,31 @@ export interface WFNodeData {
   formSchema?: unknown
   // process
   executionMode?: "single" | "parallel" | "sequential"
+  // parallel / inclusive gateway
+  gateway_direction?: "fork" | "join"
   // action
-  actionId?: number
+  action_id?: number
   // exclusive gateway
   // (conditions are on edges)
   // notify
-  channelType?: string
+  channel_id?: number
   template?: string
   // wait / timer
-  waitMode?: "signal" | "timer"
+  wait_mode?: "signal" | "timer"
   duration?: string // e.g. "PT1H"
   // variable mapping
   inputMapping?: VariableMapping[]
   outputMapping?: VariableMapping[]
   // script
-  scriptAssignments?: ScriptAssignment[]
+  assignments?: ScriptAssignment[]
   // subprocess
-  subprocessJson?: unknown
+  subprocess_def?: unknown
   subprocessExpanded?: boolean
 }
 
 export interface WFEdgeData {
   outcome?: string
+  default?: boolean
   isDefault?: boolean
   condition?: GatewayCondition | ConditionGroup
   readonly?: boolean

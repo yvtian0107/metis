@@ -147,18 +147,31 @@
     },
     "builtin": {
       "empty": "No built-in tools",
+      "pageDesc": "Manage built-in tools, availability, and tool-owned runtime settings for Agents.",
       "enableSuccess": "Tool enabled",
       "disableSuccess": "Tool disabled",
+      "runtimeSaveSuccess": "Tool runtime saved",
       "toolsEnabled": "enabled",
       "toolsAvailable": "executable",
       "drawerHint": "Only executable tools enter an Agent's model tool list; unimplemented and risk-gated capabilities are shown as roadmap items.",
       "parameters": "Parameter schema",
+      "runtimeTitle": "Service matching runtime",
+      "runtimeDesc": "Configure the model parameters used inside this tool for structured matching. Agent runtime settings are not changed.",
+      "provider": "Provider",
+      "providerPlaceholder": "Select provider",
+      "model": "Model",
+      "modelPlaceholder": "Select model",
+      "temperature": "Temperature",
+      "maxTokens": "Max tokens",
+      "timeoutSeconds": "Timeout",
+      "seconds": "sec",
       "boundAgentCount": "Affects {{count}} Agents",
       "disableConfirmTitle": "Disable built-in tool?",
       "disableConfirmDesc": "\"{{name}}\" is currently bound to {{count}} Agents. After disabling it, those Agents will no longer receive this tool at runtime.",
       "availability": {
         "available": "Available",
         "inactive": "Disabled",
+        "needs_config": "Needs config",
         "unimplemented": "Unimplemented",
         "risk_disabled": "Risk gated"
       }
@@ -187,6 +200,10 @@
       "decision": {
         "name": "Smart Decision",
         "description": "Ticket context queries, knowledge search, participant resolution, and other workflow decision capabilities."
+      },
+      "sla": {
+        "name": "SLA Assurance",
+        "description": "Read SLA risks and escalation rules, then write assurance audit records."
       },
       "organization": {
         "name": "Organization",

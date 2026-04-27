@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useCallback } from "react"
-import { useForm, Controller } from "react-hook-form"
+import { useForm, Controller, useWatch } from "react-hook-form"
 import { cn } from "@/lib/utils"
 import { renderField } from "./field-renderers"
-import { buildZodSchema } from "./build-zod-schema"
+import { buildZodSchema, defaultValueForField } from "./build-zod-schema"
 import { useFieldVisibility } from "./use-visibility"
 import type { FormRendererProps, FormField } from "./types"
 
@@ -24,9 +24,9 @@ export function FormRenderer({
     const defaults: Record<string, unknown> = {}
     for (const field of schema.fields) {
       if (mode === "create") {
-        defaults[field.key] = field.defaultValue ?? ""
+        defaults[field.key] = defaultValueForField(field)
       } else {
-        defaults[field.key] = data?.[field.key] ?? ""
+        defaults[field.key] = data?.[field.key] ?? defaultValueForField(field)
       }
     }
     return defaults
@@ -37,7 +37,7 @@ export function FormRenderer({
     resolver: undefined, // will set dynamically below
   })
 
-  const watchValues = form.watch()
+  const watchValues = useWatch({ control: form.control }) as Record<string, unknown>
 
   // Compute field visibility
   const visibleFields = useFieldVisibility(schema, watchValues)
@@ -53,34 +53,26 @@ export function FormRenderer({
     const vals: Record<string, unknown> = {}
     for (const field of schema.fields) {
       if (mode === "create") {
-        vals[field.key] = field.defaultValue ?? ""
+        vals[field.key] = defaultValueForField(field)
       } else {
-        vals[field.key] = data?.[field.key] ?? ""
+        vals[field.key] = data?.[field.key] ?? defaultValueForField(field)
       }
     }
     form.reset(vals)
   }, [data, mode, schema, form])
 
   // onChange callback
-  const handleChange = useCallback(() => {
-    if (onChange) {
-      const values = form.getValues()
-      // Exclude hidden fields
-      const filtered: Record<string, unknown> = {}
-      for (const key of Object.keys(values)) {
-        if (visibleFields.has(key)) {
-          filtered[key] = values[key]
-        }
-      }
-      onChange(filtered)
-    }
-  }, [onChange, form, visibleFields])
-
   useEffect(() => {
     if (!onChange) return
-    const subscription = form.watch(() => handleChange())
-    return () => subscription.unsubscribe()
-  }, [form, handleChange, onChange])
+    const values = form.getValues()
+    const filtered: Record<string, unknown> = {}
+    for (const key of Object.keys(values)) {
+      if (visibleFields.has(key)) {
+        filtered[key] = values[key]
+      }
+    }
+    onChange(filtered)
+  }, [form, onChange, visibleFields, watchValues])
 
   // Submit handler with manual Zod validation
   const handleSubmit = useCallback(async () => {
@@ -152,7 +144,7 @@ export function FormRenderer({
                 control={form.control}
                 name={field.key}
                 render={({ field: controllerField, fieldState: { error } }) => (
-                  <div className="space-y-1.5">
+                  <div className="space-y-1.5" data-testid={`itsm-form-field-${field.key}`}>
                     <label className="text-sm font-medium leading-none">
                       {field.label}
                       {field.required && <span className="text-destructive ml-0.5">*</span>}
