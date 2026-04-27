@@ -579,8 +579,8 @@ func TestBuildGenerateResponse_PersistsBlockingDraftAndHealthFailure(t *testing.
 	if resp.HealthCheck.Status != "fail" {
 		t.Fatalf("expected health check fail for blocking draft, got %+v", resp.HealthCheck)
 	}
-	if !serviceHealthHasItem(resp.HealthCheck, "reference_path", "fail") {
-		t.Fatalf("expected reference_path fail item, got %+v", resp.HealthCheck.Items)
+	if !serviceHealthHasItem(resp.HealthCheck, "health_engine", "fail") {
+		t.Fatalf("expected health_engine fail item, got %+v", resp.HealthCheck.Items)
 	}
 	if string(resp.Service.WorkflowJSON) != string(workflowJSON) {
 		t.Fatalf("expected workflow json to be saved, got %s", resp.Service.WorkflowJSON)

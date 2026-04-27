@@ -264,6 +264,16 @@ func TestServiceLoad_ReturnsMissingFieldsAndRecommendedStep(t *testing.T) {
 	if resp.FieldCollection.RecommendedNextStep != "ask_missing_fields" || resp.FieldCollection.NextRequiredTool != "" {
 		t.Fatalf("expected ask_missing_fields recommendation, got %+v", resp.FieldCollection)
 	}
+	state := store.states[1]
+	if state == nil {
+		t.Fatal("expected service state to be persisted")
+	}
+	if state.MinDecisionReady {
+		t.Fatalf("expected min decision not ready, got state %+v", state)
+	}
+	if len(state.MissingFields) != 3 || len(state.AskedFields) != 3 {
+		t.Fatalf("expected missing/asked fields to track all required fields, got missing=%v asked=%v", state.MissingFields, state.AskedFields)
+	}
 }
 
 func TestServiceMatch_ShortConfirmationReusesLoadedServiceWithoutClearingPrefill(t *testing.T) {
@@ -342,6 +352,9 @@ func TestCurrentRequestContext_ReturnsStateAndNextExpectedAction(t *testing.T) {
 		LoadedServiceID    uint           `json:"loaded_service_id"`
 		RequestText        string         `json:"request_text"`
 		PrefillFormData    map[string]any `json:"prefill_form_data"`
+		MissingFields      []string       `json:"missing_fields"`
+		AskedFields        []string       `json:"asked_fields"`
+		MinDecisionReady   bool           `json:"min_decision_ready"`
 		NextExpectedAction string         `json:"next_expected_action"`
 	}
 	if err := json.Unmarshal(result, &resp); err != nil {
@@ -352,6 +365,9 @@ func TestCurrentRequestContext_ReturnsStateAndNextExpectedAction(t *testing.T) {
 	}
 	if resp.RequestText == "" || resp.PrefillFormData["vpn_account"] != "wenhaowu@dev.com" {
 		t.Fatalf("expected request text and prefill data, got %+v", resp)
+	}
+	if resp.MinDecisionReady || len(resp.MissingFields) != 0 || len(resp.AskedFields) != 0 {
+		t.Fatalf("expected no missing/asked fields in prefilled state, got %+v", resp)
 	}
 }
 
@@ -645,6 +661,66 @@ func TestDraftPrepare_StillReportsMissingAccountWhenRequestHasNoAccount(t *testi
 	if len(resp.MissingRequiredFields) != 1 || resp.MissingRequiredFields[0].Key != "vpn_account" {
 		t.Fatalf("expected missing field detail for vpn_account, got %+v", resp.MissingRequiredFields)
 	}
+	if state := store.states[1]; state == nil || !containsAll(state.MissingFields, "vpn_account") || !containsAll(state.AskedFields, "vpn_account") {
+		t.Fatalf("expected state to track missing/asked vpn_account, got %+v", state)
+	}
+}
+
+func TestDraftPrepare_DoesNotReaskConfirmedFields(t *testing.T) {
+	store := newMemStateStore()
+	op := &stubOperator{
+		matchResponse: []ServiceMatch{
+			{ID: 5, Name: "VPN 开通申请", Description: "VPN 开通", Score: 0.97, Reason: "用户明确要求申请 VPN"},
+		},
+		matchDecision: MatchDecision{Kind: MatchDecisionSelectService, SelectedServiceID: 5},
+		details:       map[uint]*ServiceDetail{5: vpnServiceDetail(5)},
+	}
+	ctx := context.WithValue(context.Background(), app.SessionIDKey, uint(1))
+
+	if _, err := serviceMatchHandler(op, store)(ctx, 1, []byte(`{"query":"帮我开个VPN"}`)); err != nil {
+		t.Fatalf("service match: %v", err)
+	}
+	if _, err := serviceLoadHandler(op, store)(ctx, 1, []byte(`{"service_id":5}`)); err != nil {
+		t.Fatalf("service load: %v", err)
+	}
+	if state := store.states[1]; state == nil || len(state.MissingFields) != 3 {
+		t.Fatalf("expected initial missing fields captured, got %+v", state)
+	}
+
+	result, err := draftPrepareHandler(op, store)(ctx, 1, []byte(`{"summary":"VPN申请","form_data":{"vpn_account":"wenhaowu@dev.com"}}`))
+	if err != nil {
+		t.Fatalf("prepare draft: %v", err)
+	}
+	var resp struct {
+		OK                    bool `json:"ok"`
+		MissingRequiredFields []struct {
+			Key string `json:"key"`
+		} `json:"missing_required_fields"`
+	}
+	if err := json.Unmarshal(result, &resp); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if resp.OK {
+		t.Fatalf("expected draft still blocked, got %s", string(result))
+	}
+	for _, item := range resp.MissingRequiredFields {
+		if item.Key == "vpn_account" {
+			t.Fatalf("expected confirmed field vpn_account not to be re-asked, got %+v", resp.MissingRequiredFields)
+		}
+	}
+	state := store.states[1]
+	if state == nil || containsAll(state.MissingFields, "vpn_account") || containsAll(state.AskedFields, "vpn_account") {
+		t.Fatalf("expected confirmed field removed from missing/asked tracking, got %+v", state)
+	}
+}
+
+func containsAll(values []string, target string) bool {
+	for _, item := range values {
+		if item == target {
+			return true
+		}
+	}
+	return false
 }
 
 func TestSubmitDraft_UsesSubmittedFormDataForSmartTicket(t *testing.T) {

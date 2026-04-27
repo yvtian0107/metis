@@ -415,6 +415,11 @@ func TestSeedEngineConfigCreatesPromptAndTitleBuilderDefaults(t *testing.T) {
 		SmartTicketSessionTitleMaxRetriesKey,
 		SmartTicketSessionTitleTimeoutKey,
 		SmartTicketSessionTitlePromptKey,
+		SmartTicketPublishHealthModelKey,
+		SmartTicketPublishHealthTemperatureKey,
+		SmartTicketPublishHealthMaxRetriesKey,
+		SmartTicketPublishHealthTimeoutKey,
+		SmartTicketPublishHealthPromptKey,
 	}
 	for _, key := range requiredKeys {
 		var cfg coremodel.SystemConfig

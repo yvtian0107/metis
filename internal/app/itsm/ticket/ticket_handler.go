@@ -590,6 +590,52 @@ func (h *TicketHandler) OverrideReassign(c *gin.Context) {
 	h.respondTicket(c, ticket)
 }
 
+type RecoveryActionRequest struct {
+	Action string `json:"action" binding:"required"`
+	Reason string `json:"reason"`
+}
+
+func (h *TicketHandler) Recover(c *gin.Context) {
+	id, err := ParseID(c)
+	if err != nil {
+		handler.Fail(c, http.StatusBadRequest, "invalid id")
+		return
+	}
+
+	var req RecoveryActionRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		handler.Fail(c, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	userID, _ := c.Get("userId")
+	operatorID := userID.(uint)
+
+	c.Set("audit_action", "itsm.ticket.recovery")
+	c.Set("audit_resource", "ticket")
+	c.Set("audit_resource_id", c.Param("id"))
+
+	ticket, err := h.svc.Recover(id, req.Action, req.Reason, operatorID)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrTicketNotFound):
+			handler.Fail(c, http.StatusNotFound, err.Error())
+		case errors.Is(err, ErrTicketTerminal), errors.Is(err, ErrInvalidRecoveryAction):
+			handler.Fail(c, http.StatusBadRequest, err.Error())
+		case errors.Is(err, ErrNotRequester):
+			handler.Fail(c, http.StatusForbidden, err.Error())
+		case errors.Is(err, ErrTicketClaimed), errors.Is(err, ErrRecoveryActionTooFrequent):
+			handler.Fail(c, http.StatusConflict, err.Error())
+		default:
+			handler.Fail(c, http.StatusInternalServerError, err.Error())
+		}
+		return
+	}
+
+	c.Set("audit_summary", "recovery action "+req.Action+" for ticket: "+ticket.Code)
+	h.respondTicket(c, ticket)
+}
+
 func (h *TicketHandler) RetryAI(c *gin.Context) {
 	id, err := ParseID(c)
 	if err != nil {

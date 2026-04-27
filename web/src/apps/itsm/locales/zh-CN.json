@@ -625,6 +625,8 @@
     "pathBuilderDesc": "把协作规范生成参考路径/策略草图，用于服务发布前的路径建议与运行提示。",
     "titleBuilderTitle": "会话标题生成",
     "titleBuilderDesc": "根据服务台用户首条问题生成会话标题，用于历史会话列表快速识别。",
+    "healthCheckerTitle": "发布健康检查",
+    "healthCheckerDesc": "基于协作规范、参考路径和动作配置生成发布风险结论，作为是否可发布的直接依据。",
     "guardTitle": "异常兜底与审计",
     "guardDesc": "控制运行记录粒度，并在智能决策异常或无人接管时指定兜底处理人。",
     "provider": "Provider",
@@ -652,6 +654,8 @@
     "pathPromptEditorDesc": "调整参考路径生成的系统提示词，点击应用后即时生效。",
     "titlePromptEditorTitle": "编辑会话标题生成提示词",
     "titlePromptEditorDesc": "调整服务台会话标题生成的系统提示词，点击应用后即时生效。",
+    "healthPromptEditorTitle": "编辑发布健康检查提示词",
+    "healthPromptEditorDesc": "调整发布健康检查的系统提示词，点击应用后即时生效。",
     "auditLevel": "审计级别",
     "fallbackAssignee": "兜底处理人",
     "fallbackAssigneePlaceholder": "选择兜底处理人",
@@ -683,6 +687,11 @@
     "specRequired": "请先填写协作规范",
     "workflowEmptySmartHint": "请在上方填写协作规范，然后点击「生成参考路径」按钮生成策略草图",
     "nodeType": "节点类型"
+  },
+  "publishHealth": {
+    "refresh": "刷新检查",
+    "refreshing": "检查中...",
+    "refreshSuccess": "发布健康检查已刷新"
   },
   "knowledge": {
     "title": "知识文档",

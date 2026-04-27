@@ -1,7 +1,7 @@
 import { useMemo, useState, type ComponentType, type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { ExternalLink, Pencil, Route, Save, ShieldAlert } from "lucide-react"
+import { Activity, ExternalLink, Pencil, Route, Save, ShieldAlert } from "lucide-react"
 import { useNavigate } from "react-router"
 import { toast } from "sonner"
 import { Alert, AlertDescription } from "@/components/ui/alert"
@@ -301,6 +301,12 @@ function configFormKey(config: EngineSettingsConfig) {
     config.runtime.titleBuilder.maxRetries,
     config.runtime.titleBuilder.timeoutSeconds,
     config.runtime.titleBuilder.systemPrompt,
+    config.runtime.healthChecker.providerId,
+    config.runtime.healthChecker.modelId,
+    config.runtime.healthChecker.temperature,
+    config.runtime.healthChecker.maxRetries,
+    config.runtime.healthChecker.timeoutSeconds,
+    config.runtime.healthChecker.systemPrompt,
     config.runtime.guard.auditLevel,
     config.runtime.guard.fallbackAssignee,
   ].join(":")
@@ -327,6 +333,12 @@ function EngineSettingsForm({ config }: { config: EngineSettingsConfig }) {
   const [titleMaxRetries, setTitleMaxRetries] = useState(config.runtime.titleBuilder.maxRetries)
   const [titleTimeoutSeconds, setTitleTimeoutSeconds] = useState(config.runtime.titleBuilder.timeoutSeconds)
   const [titleSystemPrompt, setTitleSystemPrompt] = useState(config.runtime.titleBuilder.systemPrompt)
+  const [healthProviderId, setHealthProviderId] = useState(config.runtime.healthChecker.providerId)
+  const [healthModelId, setHealthModelId] = useState(config.runtime.healthChecker.modelId)
+  const [healthTemperature, setHealthTemperature] = useState(config.runtime.healthChecker.temperature)
+  const [healthMaxRetries, setHealthMaxRetries] = useState(config.runtime.healthChecker.maxRetries)
+  const [healthTimeoutSeconds, setHealthTimeoutSeconds] = useState(config.runtime.healthChecker.timeoutSeconds)
+  const [healthSystemPrompt, setHealthSystemPrompt] = useState(config.runtime.healthChecker.systemPrompt)
   const [auditLevel, setAuditLevel] = useState(config.runtime.guard.auditLevel)
   const [fallbackAssignee, setFallbackAssignee] = useState(config.runtime.guard.fallbackAssignee)
 
@@ -349,7 +361,7 @@ function EngineSettingsForm({ config }: { config: EngineSettingsConfig }) {
     onError: (err) => toast.error(err.message),
   })
 
-  function buildRuntimePayload(pathPrompt: string, titlePrompt: string): EngineSettingsConfigUpdate {
+  function buildRuntimePayload(pathPrompt: string, titlePrompt: string, healthPrompt: string): EngineSettingsConfigUpdate {
     return {
       runtime: {
         pathBuilder: {
@@ -366,18 +378,25 @@ function EngineSettingsForm({ config }: { config: EngineSettingsConfig }) {
           timeoutSeconds: titleTimeoutSeconds,
           systemPrompt: titlePrompt,
         },
+        healthChecker: {
+          modelId: healthModelId,
+          temperature: healthTemperature,
+          maxRetries: healthMaxRetries,
+          timeoutSeconds: healthTimeoutSeconds,
+          systemPrompt: healthPrompt,
+        },
         guard: { auditLevel, fallbackAssignee },
       },
     }
   }
 
   function handleSave() {
-    saveMut.mutate(buildRuntimePayload(pathSystemPrompt, titleSystemPrompt))
+    saveMut.mutate(buildRuntimePayload(pathSystemPrompt, titleSystemPrompt, healthSystemPrompt))
   }
 
   async function applyPathPrompt(nextPrompt: string) {
     try {
-      await saveMut.mutateAsync(buildRuntimePayload(nextPrompt, titleSystemPrompt))
+      await saveMut.mutateAsync(buildRuntimePayload(nextPrompt, titleSystemPrompt, healthSystemPrompt))
       setPathSystemPrompt(nextPrompt)
       return true
     } catch {
@@ -387,8 +406,18 @@ function EngineSettingsForm({ config }: { config: EngineSettingsConfig }) {
 
   async function applyTitlePrompt(nextPrompt: string) {
     try {
-      await saveMut.mutateAsync(buildRuntimePayload(pathSystemPrompt, nextPrompt))
+      await saveMut.mutateAsync(buildRuntimePayload(pathSystemPrompt, nextPrompt, healthSystemPrompt))
       setTitleSystemPrompt(nextPrompt)
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  async function applyHealthPrompt(nextPrompt: string) {
+    try {
+      await saveMut.mutateAsync(buildRuntimePayload(pathSystemPrompt, titleSystemPrompt, nextPrompt))
+      setHealthSystemPrompt(nextPrompt)
       return true
     } catch {
       return false
@@ -453,6 +482,30 @@ function EngineSettingsForm({ config }: { config: EngineSettingsConfig }) {
           onMaxRetriesChange={setTitleMaxRetries}
           onTimeoutSecondsChange={setTitleTimeoutSeconds}
           onApplySystemPrompt={applyTitlePrompt}
+        />
+      </EngineSettingSection>
+
+      <EngineSettingSection
+        icon={Activity}
+        title={t("itsm:engineConfig.healthCheckerTitle")}
+        description={t("itsm:engineConfig.healthCheckerDesc")}
+        health={healthByKey.get("healthChecker")}
+      >
+        <PathBuilderFields
+          providerId={healthProviderId}
+          modelId={healthModelId}
+          temperature={healthTemperature}
+          maxRetries={healthMaxRetries}
+          timeoutSeconds={healthTimeoutSeconds}
+          systemPrompt={healthSystemPrompt}
+          promptDrawerTitle={t("engineConfig.healthPromptEditorTitle")}
+          promptDrawerDescription={t("engineConfig.healthPromptEditorDesc")}
+          onProviderChange={setHealthProviderId}
+          onModelChange={setHealthModelId}
+          onTemperatureChange={setHealthTemperature}
+          onMaxRetriesChange={setHealthMaxRetries}
+          onTimeoutSecondsChange={setHealthTimeoutSeconds}
+          onApplySystemPrompt={applyHealthPrompt}
         />
       </EngineSettingSection>
 

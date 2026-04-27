@@ -7,7 +7,7 @@ import { useForm, useWatch } from "react-hook-form"
 import { z } from "zod"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { useQuery, useMutation, useQueryClient, useIsMutating } from "@tanstack/react-query"
-import { ArrowLeft, Plus, Pencil, Trash2, Zap, Save, Loader2, Sparkles, ShieldCheck, CheckCircle2, AlertTriangle, XCircle } from "lucide-react"
+import { ArrowLeft, Plus, Pencil, Trash2, Zap, Save, Loader2, Sparkles, ShieldCheck, CheckCircle2, AlertTriangle, XCircle, RefreshCw } from "lucide-react"
 import { usePermission } from "@/hooks/use-permission"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
@@ -44,6 +44,7 @@ import {
   fetchCatalogTree, fetchSLATemplates,
   fetchServiceActions, createServiceAction, updateServiceAction, deleteServiceAction,
   generateWorkflow,
+  fetchServiceHealth,
   type ServiceHealthItem, type ServiceHealthCheck,
 } from "../../../api"
 import { SmartServiceConfig } from "../../../components/smart-service-config"
@@ -409,11 +410,23 @@ function healthItemStatusText(status: ServiceHealthItem["status"]) {
   return "需确认"
 }
 
-function ServiceHealthSection({ health, isGenerating }: { health: ServiceHealthCheck | null; isGenerating: boolean }) {
+function ServiceHealthSection({ serviceId, health, isGenerating }: { serviceId: number; health: ServiceHealthCheck | null; isGenerating: boolean }) {
   const { t } = useTranslation("itsm")
+  const queryClient = useQueryClient()
+  const refreshMut = useMutation({
+    mutationFn: () => fetchServiceHealth(serviceId),
+    onSuccess: (next) => {
+      queryClient.setQueryData<ServiceDefItem | undefined>(["itsm-service", serviceId], (prev) => (
+        prev ? { ...prev, publishHealthCheck: next } : prev
+      ))
+      toast.success(t("publishHealth.refreshSuccess"))
+    },
+    onError: (err) => toast.error(err.message),
+  })
   const displayStatus: ServiceHealthItem["status"] | "empty" = !health ? "empty" : health.status
   const overall = healthTone(displayStatus)
   const OverallIcon = overall.icon
+  const isLoading = isGenerating || refreshMut.isPending
 
   return (
     <section className="flex min-h-full flex-col">
@@ -424,14 +437,32 @@ function ServiceHealthSection({ health, isGenerating }: { health: ServiceHealthC
             发布健康检查
           </span>
         )}
-        action={<Badge variant={overall.badge}>{healthStatusText(displayStatus)}</Badge>}
+        action={(
+          <div className="inline-flex items-center gap-2">
+            <Badge variant={overall.badge}>{healthStatusText(displayStatus)}</Badge>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={isLoading}
+              onClick={() => refreshMut.mutate()}
+            >
+              {refreshMut.isPending ? (
+                <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
+              )}
+              {refreshMut.isPending ? t("publishHealth.refreshing") : t("publishHealth.refresh")}
+            </Button>
+          </div>
+        )}
       />
       <div className="workspace-surface flex min-h-0 flex-1 flex-col overflow-hidden rounded-[1.1rem]">
-        {isGenerating ? (
+        {isLoading ? (
           <div className="flex min-h-[260px] flex-1 items-center justify-center px-4 py-5">
             <div className="inline-flex items-center gap-2 text-sm text-muted-foreground">
               <Loader2 className="h-4 w-4 animate-spin" />
-              <span>{t("generate.generating")}</span>
+              <span>{isGenerating ? t("generate.generating") : t("publishHealth.refreshing")}</span>
             </div>
           </div>
         ) : (
@@ -829,7 +860,7 @@ export function Component() {
       {service.engineType === "smart" ? (
         <div className="grid items-stretch gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(320px,0.38fr)]">
           <div className="min-w-0">{workflowSection}</div>
-          <ServiceHealthSection health={service.publishHealthCheck} isGenerating={isGeneratingWorkflow} />
+          <ServiceHealthSection serviceId={serviceId} health={service.publishHealthCheck} isGenerating={isGeneratingWorkflow} />
         </div>
       ) : (
         <>

@@ -14,31 +14,31 @@
 
 ## 3. 决策说明卡能力
 
-- [ ] 3.1 设计并实现决策说明卡数据结构（basis/trigger/decision/next_step/human_override）
-- [ ] 3.2 在 SmartEngine 决策完成与降级路径写入 explanation snapshot
-- [ ] 3.3 在 ticket detail API/read model 返回说明卡并支持按活动追溯
-- [ ] 3.4 补充解释字段完整性校验与异常回退策略
+- [x] 3.1 设计并实现决策说明卡数据结构（basis/trigger/decision/next_step/human_override）
+- [x] 3.2 在 SmartEngine 决策完成与降级路径写入 explanation snapshot
+- [x] 3.3 在 ticket detail API/read model 返回说明卡并支持按活动追溯
+- [x] 3.4 补充解释字段完整性校验与异常回退策略
 
 ## 4. 失败恢复编排
 
-- [ ] 4.1 定义恢复动作模型（retry/handoff_human/withdraw）与可执行状态矩阵
-- [ ] 4.2 实现恢复动作权限校验、幂等键、防重窗口与执行器
-- [ ] 4.3 打通恢复动作时间线与审计日志记录
-- [ ] 4.4 在 ticket API 返回 recoveryActions 合同并覆盖测试
+- [x] 4.1 定义恢复动作模型（retry/handoff_human/withdraw）与可执行状态矩阵
+- [x] 4.2 实现恢复动作权限校验、幂等键、防重窗口与执行器
+- [x] 4.3 打通恢复动作时间线与审计日志记录
+- [x] 4.4 在 ticket API 返回 recoveryActions 合同并覆盖测试
 
 ## 5. 列表与审批体验统一
 
-- [ ] 5.1 统一列表/详情/历史/审批视图的状态展示合同（status/statusLabel/statusTone/outcome）
+- [x] 5.1 统一列表/详情/历史/审批视图的状态展示合同（status/statusLabel/statusTone/outcome）
 - [ ] 5.2 将审批提交交互统一为即时反馈模型并接入状态纠正
 - [ ] 5.3 提供统一手动刷新入口，保持筛选/分页/关键词上下文不丢失
 - [ ] 5.4 将自动刷新降级为纯观察兜底，确认不触发流程推进
 
 ## 6. 对话式提单升级
 
-- [ ] 6.1 扩展 ServiceDeskState，加入 missing_fields/asked_fields/min_decision_ready
-- [ ] 6.2 实现缺失字段检测与增量追问策略（最小可决策集）
-- [ ] 6.3 将 draft_prepare/draft_confirm/ticket_create 接入新状态机前置校验
-- [ ] 6.4 补充“已确认字段不重复追问”的会话一致性测试
+- [x] 6.1 扩展 ServiceDeskState，加入 missing_fields/asked_fields/min_decision_ready
+- [x] 6.2 实现缺失字段检测与增量追问策略（最小可决策集）
+- [x] 6.3 将 draft_prepare/draft_confirm/ticket_create 接入新状态机前置校验
+- [x] 6.4 补充“已确认字段不重复追问”的会话一致性测试
 
 ## 7. 决策质量观测
 

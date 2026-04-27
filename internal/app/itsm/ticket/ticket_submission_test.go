@@ -3,6 +3,7 @@ package ticket
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	. "metis/internal/app/itsm/definition"
 	. "metis/internal/app/itsm/domain"
 	. "metis/internal/app/itsm/sla"
@@ -336,6 +337,63 @@ func TestRetryAI_SingleSQLiteConnectionSubmitsSmartProgressInTransaction(t *test
 
 	if reloaded.Status != TicketStatusDecisioning {
 		t.Fatalf("expected retry to put ticket into %q, got %q", TicketStatusDecisioning, reloaded.Status)
+	}
+}
+
+func TestRecoverRetry_DedupWindow(t *testing.T) {
+	db := newTestDB(t)
+	ticketSvc := newSubmissionTicketService(t, db)
+	service := testutil.SeedSmartSubmissionService(t, db)
+	ticket := Ticket{
+		Code:           "TICK-RECOVER-RETRY",
+		Title:          "恢复重试",
+		ServiceID:      service.ID,
+		EngineType:     "smart",
+		Status:         TicketStatusDecisioning,
+		PriorityID:     1,
+		RequesterID:    1,
+		AIFailureCount: 1,
+	}
+	if err := db.Create(&ticket).Error; err != nil {
+		t.Fatalf("create ticket: %v", err)
+	}
+
+	if _, err := ticketSvc.Recover(ticket.ID, "retry", "第一次重试", 7); err != nil {
+		t.Fatalf("first recover retry: %v", err)
+	}
+	if _, err := ticketSvc.Recover(ticket.ID, "retry", "重复重试", 7); !errors.Is(err, ErrRecoveryActionTooFrequent) {
+		t.Fatalf("expected ErrRecoveryActionTooFrequent, got %v", err)
+	}
+}
+
+func TestRecoverHandoffHuman_WritesAuditTimeline(t *testing.T) {
+	db := newTestDB(t)
+	ticketSvc := newSubmissionTicketService(t, db)
+	service := testutil.SeedSmartSubmissionService(t, db)
+	ticket := Ticket{
+		Code:        "TICK-RECOVER-HANDOFF",
+		Title:       "恢复转人工",
+		ServiceID:   service.ID,
+		EngineType:  "smart",
+		Status:      TicketStatusDecisioning,
+		PriorityID:  1,
+		RequesterID: 1,
+	}
+	if err := db.Create(&ticket).Error; err != nil {
+		t.Fatalf("create ticket: %v", err)
+	}
+
+	recovered, err := ticketSvc.Recover(ticket.ID, "handoff_human", "需要人工接手", 7)
+	if err != nil {
+		t.Fatalf("recover handoff_human: %v", err)
+	}
+	if recovered.Status != TicketStatusWaitingHuman {
+		t.Fatalf("expected waiting_human after handoff, got %q", recovered.Status)
+	}
+
+	var timeline TicketTimeline
+	if err := db.Where("ticket_id = ? AND event_type = ?", ticket.ID, "recovery_handoff_human").First(&timeline).Error; err != nil {
+		t.Fatalf("expected recovery_handoff_human timeline, got %v", err)
 	}
 }
 

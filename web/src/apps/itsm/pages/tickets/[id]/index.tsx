@@ -72,6 +72,7 @@ import {
   fetchTicketTokens,
   fetchUsers,
   progressTicket,
+  recoverTicket,
   withdrawTicket,
   type ActivityItem,
   type TicketItem,
@@ -515,7 +516,7 @@ export function Component() {
         nextStepSummary: "后台决策中",
         smartState: "ai_reasoning",
         status: rejected ? "rejected_decisioning" : "approved_decisioning",
-        statusLabel: rejected ? "驳回后决策中" : "通过后决策中",
+        statusLabel: rejected ? "已驳回，决策中" : "已同意，决策中",
         statusTone: "progress",
       }
     })
@@ -547,6 +548,18 @@ export function Component() {
       invalidateTicket()
       setWithdrawOpen(false)
       toast.success(t("itsm:tickets.withdrawSuccess"))
+    },
+    onError: (err) => toast.error(err.message),
+  })
+
+  const recoverMut = useMutation({
+    mutationFn: (data: { action: "retry" | "handoff_human" | "withdraw"; reason?: string }) => recoverTicket(ticketId, data),
+    onSuccess: (_, variables) => {
+      invalidateTicket()
+      if (variables.action === "retry") {
+        setDecisioningMessage("恢复重试已提交，后台决策中。")
+      }
+      toast.success("恢复动作已执行")
     },
     onError: (err) => toast.error(err.message),
   })
@@ -842,6 +855,27 @@ export function Component() {
                   <Button size="sm" variant="outline" className="w-full" onClick={() => { withdrawForm.reset({ reason: "" }); setWithdrawOpen(true) }}>
                     <DecisionButtonContent icon={RotateCcw}>{t("itsm:tickets.withdraw")}</DecisionButtonContent>
                   </Button>
+                )}
+
+                {ticket.engineType === "smart" && Array.isArray(ticket.recoveryActions) && ticket.recoveryActions.length > 0 && (
+                  <div className="col-span-2 grid grid-cols-2 gap-2">
+                    {ticket.recoveryActions.map((action) => (
+                      <Button
+                        key={action.code}
+                        size="sm"
+                        variant={action.code === "withdraw" ? "destructive" : "outline"}
+                        className="w-full"
+                        disabled={recoverMut.isPending}
+                        onClick={() => recoverMut.mutate({ action: action.code as "retry" | "handoff_human" | "withdraw" })}
+                      >
+                        <DecisionButtonContent
+                          icon={action.code === "retry" ? RotateCcw : action.code === "handoff_human" ? UserPlus : CircleX}
+                        >
+                          {action.label}
+                        </DecisionButtonContent>
+                      </Button>
+                    ))}
+                  </div>
                 )}
 
                 {(!isActive || isTerminal) && (

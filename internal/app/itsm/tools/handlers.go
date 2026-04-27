@@ -35,6 +35,9 @@ type ServiceDeskState struct {
 	DraftVersion          int            `json:"draft_version"`
 	ConfirmedDraftVersion int            `json:"confirmed_draft_version"`
 	FieldsHash            string         `json:"fields_hash,omitempty"`
+	MissingFields         []string       `json:"missing_fields,omitempty"`
+	AskedFields           []string       `json:"asked_fields,omitempty"`
+	MinDecisionReady      bool           `json:"min_decision_ready"`
 }
 
 // validTransitions defines the allowed stage transitions.
@@ -433,6 +436,9 @@ func currentRequestContextHandler(store StateStore) ToolHandler {
 			"draft_form_data":         state.DraftFormData,
 			"draft_version":           state.DraftVersion,
 			"confirmed_draft_version": state.ConfirmedDraftVersion,
+			"missing_fields":          state.MissingFields,
+			"asked_fields":            state.AskedFields,
+			"min_decision_ready":      state.MinDecisionReady,
 			"next_expected_action":    NextExpectedAction(state),
 		}), nil
 	}
@@ -469,6 +475,53 @@ func mustMarshal(v any) json.RawMessage {
 
 func defaultState() *ServiceDeskState {
 	return &ServiceDeskState{Stage: "idle"}
+}
+
+func syncConversationProgress(state *ServiceDeskState, missingRequired []FieldCollectionItem) {
+	if state == nil {
+		return
+	}
+	missingKeys := make([]string, 0, len(missingRequired))
+	missingSet := make(map[string]struct{}, len(missingRequired))
+	for _, item := range missingRequired {
+		key := strings.TrimSpace(item.Key)
+		if key == "" {
+			continue
+		}
+		if _, exists := missingSet[key]; exists {
+			continue
+		}
+		missingSet[key] = struct{}{}
+		missingKeys = append(missingKeys, key)
+	}
+
+	asked := make([]string, 0, len(state.AskedFields)+len(missingKeys))
+	seen := make(map[string]struct{}, len(state.AskedFields)+len(missingKeys))
+	for _, key := range state.AskedFields {
+		key = strings.TrimSpace(key)
+		if key == "" {
+			continue
+		}
+		if _, stillMissing := missingSet[key]; !stillMissing {
+			continue
+		}
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		asked = append(asked, key)
+	}
+	for _, key := range missingKeys {
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		asked = append(asked, key)
+	}
+
+	state.MissingFields = missingKeys
+	state.AskedFields = asked
+	state.MinDecisionReady = len(missingKeys) == 0
 }
 
 func requestHash(data map[string]any) string {
@@ -1208,6 +1261,7 @@ func serviceLoadHandler(op ServiceDeskOperator, store StateStore) ToolHandler {
 		detail.ResolvedFrom = resolvedFrom
 		detail.PrefillSuggestions = buildPrefillSuggestions(state.RequestText, detail.FormFields)
 		detail.FieldCollection = buildFieldCollection(detail.FormFields, detail.PrefillSuggestions, detail.RoutingFieldHint)
+		syncConversationProgress(state, detail.FieldCollection.MissingRequiredFields)
 
 		if state.LoadedServiceID == resolvedServiceID &&
 			(state.Stage == "service_loaded" || state.Stage == "awaiting_confirmation" || state.Stage == "confirmed") {
@@ -1295,8 +1349,12 @@ func draftPrepareHandler(op ServiceDeskOperator, store StateStore) ToolHandler {
 		p.FormData = mergePrefillFormData(p.FormData, state.PrefillFormData)
 
 		warnings, missingRequired, blocking := validateDraftData(detail, p.FormData)
+		syncConversationProgress(state, missingRequired)
 
 		if blocking {
+			if err := store.SaveState(sid, state); err != nil {
+				return nil, fmt.Errorf("save state: %w", err)
+			}
 			return mustMarshal(map[string]any{
 				"ok":                      false,
 				"ready_for_confirmation":  false,
@@ -1321,6 +1379,7 @@ func draftPrepareHandler(op ServiceDeskOperator, store StateStore) ToolHandler {
 		if err := state.TransitionTo("awaiting_confirmation"); err != nil {
 			return nil, err
 		}
+		state.MinDecisionReady = true
 		if err := store.SaveState(sid, state); err != nil {
 			return nil, fmt.Errorf("save state: %w", err)
 		}

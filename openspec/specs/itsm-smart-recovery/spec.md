@@ -3,9 +3,7 @@
 ## Purpose
 
 ITSM SmartEngine 启动恢复 -- 在系统重启后自动扫描并恢复中断的智能引擎决策循环。
-
 ## Requirements
-
 ### Requirement: 智能引擎决策循环恢复任务
 系统 SHALL 注册 scheduler 任务 `itsm-smart-recovery`，在 ITSM App 启动时执行一次，扫描并恢复中断的智能引擎决策循环。恢复时 SHALL 利用活动的 NodeID 获取精确的 workflow 路径信息。
 
@@ -51,3 +49,23 @@ ITSM App 的 `Tasks()` 方法 SHALL 返回 `itsm-smart-recovery` 任务，类型
 #### Scenario: 周期性执行恢复扫描
 - **WHEN** 10 分钟定时器触发 itsm-smart-recovery
 - **THEN** 扫描 status=in_progress AND engine_type=smart 的工单并提交恢复任务
+
+### Requirement: 直接决策路径的恢复兜底
+Smart recovery SHALL scan smart tickets whose status indicates decisioning (`approved_decisioning`, `rejected_decisioning`, or `decisioning`) but have no active human or action activity and no running decision marker. For those orphaned tickets, recovery SHALL call the same direct decision dispatcher used by the main path instead of relying on `itsm-smart-progress` scheduler worker polling.
+
+#### Scenario: 恢复已同意决策中孤儿工单
+- **WHEN** smart recovery finds a ticket with status=`approved_decisioning`
+- **AND** the ticket has no pending or in_progress activity
+- **THEN** recovery SHALL invoke direct decision dispatch for that ticket
+- **AND** triggerReason SHALL be `recovery`
+
+#### Scenario: 恢复已驳回决策中孤儿工单
+- **WHEN** smart recovery finds a ticket with status=`rejected_decisioning`
+- **AND** the ticket has no pending or in_progress activity
+- **THEN** recovery SHALL invoke direct decision dispatch for that ticket
+- **AND** decision context SHALL preserve the rejected activity facts
+
+#### Scenario: 最近已提交恢复不重复触发
+- **WHEN** recovery has dispatched a ticket within the last 10 minutes
+- **THEN** recovery SHALL skip the same ticket until the dedup window expires
+

@@ -22,22 +22,26 @@ import (
 )
 
 var (
-	ErrTicketNotFound          = errors.New("ticket not found")
-	ErrTicketTerminal          = errors.New("ticket is in a terminal state and cannot be modified")
-	ErrServiceNotActive        = errors.New("service is not active")
-	ErrActivityNotOwner        = errors.New("only the assignee or admin can progress this activity")
-	ErrActivityNotWait         = errors.New("signal is only allowed on wait nodes")
-	ErrActivityAlready         = errors.New("activity already completed")
-	ErrSLAAlreadyPaused        = errors.New("SLA is already paused")
-	ErrSLANotPaused            = errors.New("SLA is not paused")
-	ErrAssignmentNotFound      = errors.New("assignment not found")
-	ErrAssignmentNotPending    = errors.New("assignment is not in pending status")
-	ErrNoActiveAssignment      = errors.New("no active pending assignment for this activity")
-	ErrNotRequester            = errors.New("only the ticket requester can withdraw")
-	ErrTicketClaimed           = errors.New("ticket has been claimed and cannot be withdrawn")
-	ErrInvalidProgressOutcome  = errors.New("人工节点只能提交 approved 或 rejected")
-	errSubmissionAlreadyExists = errors.New("service desk submission already exists")
+	ErrTicketNotFound            = errors.New("ticket not found")
+	ErrTicketTerminal            = errors.New("ticket is in a terminal state and cannot be modified")
+	ErrServiceNotActive          = errors.New("service is not active")
+	ErrActivityNotOwner          = errors.New("only the assignee or admin can progress this activity")
+	ErrActivityNotWait           = errors.New("signal is only allowed on wait nodes")
+	ErrActivityAlready           = errors.New("activity already completed")
+	ErrSLAAlreadyPaused          = errors.New("SLA is already paused")
+	ErrSLANotPaused              = errors.New("SLA is not paused")
+	ErrAssignmentNotFound        = errors.New("assignment not found")
+	ErrAssignmentNotPending      = errors.New("assignment is not in pending status")
+	ErrNoActiveAssignment        = errors.New("no active pending assignment for this activity")
+	ErrNotRequester              = errors.New("only the ticket requester can withdraw")
+	ErrTicketClaimed             = errors.New("ticket has been claimed and cannot be withdrawn")
+	ErrInvalidProgressOutcome    = errors.New("人工节点只能提交 approved 或 rejected")
+	ErrInvalidRecoveryAction     = errors.New("invalid recovery action")
+	ErrRecoveryActionTooFrequent = errors.New("recovery action is too frequent")
+	errSubmissionAlreadyExists   = errors.New("service desk submission already exists")
 )
+
+const recoveryDedupWindow = 15 * time.Second
 
 type TicketService struct {
 	ticketRepo    *TicketRepo
@@ -618,6 +622,10 @@ func (s *TicketService) BuildResponses(items []Ticket, operatorID uint) ([]Ticke
 	if err != nil {
 		return responses, err
 	}
+	explanationSnapshots, err := s.loadLatestDecisionExplanations(ticketIDs)
+	if err != nil {
+		return responses, err
+	}
 
 	for i := range responses {
 		resp := &responses[i]
@@ -637,10 +645,127 @@ func (s *TicketService) BuildResponses(items []Ticket, operatorID uint) ([]Ticke
 		if resp.EngineType == "smart" {
 			resp.CanOverride = operatorID > 0 && !IsTerminalTicketStatus(resp.Status)
 			s.populateSmartSummary(resp, activities, assignments)
+			var currentActivity *TicketActivity
+			if resp.CurrentActivityID != nil {
+				if activity, ok := activities[*resp.CurrentActivityID]; ok {
+					currentActivity = &activity
+				}
+			}
+			resp.DecisionExplanation = buildDecisionExplanation(resp, currentActivity, explanationSnapshots[resp.ID])
+			resp.RecoveryActions = buildRecoveryActions(resp)
 		}
 	}
 
 	return responses, nil
+}
+
+func buildDecisionExplanation(resp *TicketResponse, activity *TicketActivity, snapshot *DecisionExplanation) *DecisionExplanation {
+	explanation := &DecisionExplanation{
+		Basis:         "协作规范、workflow_json 与 workflow_context",
+		Trigger:       strings.TrimSpace(resp.DecisioningReason),
+		Decision:      strings.TrimSpace(resp.StatusLabel),
+		NextStep:      strings.TrimSpace(resp.NextStepSummary),
+		HumanOverride: "可执行重试、转人工或撤回",
+	}
+	if snapshot != nil {
+		if snapshot.ActivityID != nil && *snapshot.ActivityID > 0 {
+			explanation.ActivityID = snapshot.ActivityID
+		}
+		if value := strings.TrimSpace(snapshot.Basis); value != "" {
+			explanation.Basis = value
+		}
+		if value := strings.TrimSpace(snapshot.Trigger); value != "" {
+			explanation.Trigger = value
+		}
+		if value := strings.TrimSpace(snapshot.Decision); value != "" {
+			explanation.Decision = value
+		}
+		if value := strings.TrimSpace(snapshot.NextStep); value != "" {
+			explanation.NextStep = value
+		}
+		if value := strings.TrimSpace(snapshot.HumanOverride); value != "" {
+			explanation.HumanOverride = value
+		}
+	}
+	if activity != nil {
+		if explanation.ActivityID == nil {
+			explanation.ActivityID = &activity.ID
+		}
+		if reasoning := strings.TrimSpace(activity.AIReasoning); reasoning != "" {
+			if snapshot == nil || strings.TrimSpace(snapshot.Basis) == "" {
+				explanation.Basis = reasoning
+			}
+		}
+		if decisionReasoning := strings.TrimSpace(activity.DecisionReasoning); decisionReasoning != "" {
+			if snapshot == nil || strings.TrimSpace(snapshot.Decision) == "" {
+				explanation.Decision = decisionReasoning
+			}
+		}
+	}
+	if explanation.Trigger == "" {
+		explanation.Trigger = "ai_decision"
+	}
+	if explanation.Decision == "" {
+		explanation.Decision = "等待决策引擎输出"
+	}
+	if explanation.NextStep == "" {
+		explanation.NextStep = "等待下一活动推进"
+	}
+	return explanation
+}
+
+func (s *TicketService) loadLatestDecisionExplanations(ticketIDs map[uint]struct{}) (map[uint]*DecisionExplanation, error) {
+	result := map[uint]*DecisionExplanation{}
+	ids := keysOf(ticketIDs)
+	if len(ids) == 0 {
+		return result, nil
+	}
+
+	var rows []TicketTimeline
+	if err := s.ticketRepo.DB().Model(&TicketTimeline{}).
+		Where("ticket_id IN ? AND event_type IN ?", ids, []string{"ai_decision_executed", "ai_decision_pending", "ai_decision_failed", "workflow_completed"}).
+		Order("id DESC").
+		Find(&rows).Error; err != nil {
+		return result, err
+	}
+	for _, row := range rows {
+		if _, exists := result[row.TicketID]; exists {
+			continue
+		}
+		snapshot := parseDecisionExplanationDetail(row.Details)
+		if snapshot != nil {
+			result[row.TicketID] = snapshot
+		}
+	}
+	return result, nil
+}
+
+func parseDecisionExplanationDetail(details JSONField) *DecisionExplanation {
+	if len(details) == 0 {
+		return nil
+	}
+	var payload struct {
+		DecisionExplanation *DecisionExplanation `json:"decision_explanation"`
+	}
+	if err := json.Unmarshal(details, &payload); err != nil {
+		return nil
+	}
+	return payload.DecisionExplanation
+}
+
+func buildRecoveryActions(resp *TicketResponse) []RecoveryAction {
+	if resp == nil || resp.EngineType != "smart" {
+		return nil
+	}
+	actions := []RecoveryAction{}
+	if resp.Status == TicketStatusFailed || resp.AIFailureCount > 0 {
+		actions = append(actions, RecoveryAction{Code: "retry", Label: "重试决策"})
+		actions = append(actions, RecoveryAction{Code: "handoff_human", Label: "转人工处理"})
+	}
+	if !IsTerminalTicketStatus(resp.Status) {
+		actions = append(actions, RecoveryAction{Code: "withdraw", Label: "撤回工单"})
+	}
+	return actions
 }
 
 func decisioningReason(status string) string {
@@ -1244,6 +1369,24 @@ func (s *TicketService) OverrideReassign(ticketID uint, activityID uint, newAssi
 
 // RetryAI resets ai_failure_count and triggers a new decision cycle.
 func (s *TicketService) RetryAI(ticketID uint, reason string, operatorID uint) (*Ticket, error) {
+	return s.retryAI(ticketID, reason, operatorID, true)
+}
+
+func (s *TicketService) Recover(ticketID uint, action string, reason string, operatorID uint) (*Ticket, error) {
+	action = strings.TrimSpace(strings.ToLower(action))
+	switch action {
+	case "retry":
+		return s.retryAI(ticketID, reason, operatorID, false)
+	case "handoff_human":
+		return s.handoffHuman(ticketID, reason, operatorID)
+	case "withdraw":
+		return s.Withdraw(ticketID, reason, operatorID)
+	default:
+		return nil, ErrInvalidRecoveryAction
+	}
+}
+
+func (s *TicketService) retryAI(ticketID uint, reason string, operatorID uint, legacyTimeline bool) (*Ticket, error) {
 	t, err := s.ticketRepo.FindByID(ticketID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -1257,8 +1400,16 @@ func (s *TicketService) RetryAI(ticketID uint, reason string, operatorID uint) (
 	if t.EngineType != "smart" {
 		return nil, errors.New("retry-ai is only available for smart engine tickets")
 	}
+	if operatorID == 0 {
+		return nil, errors.New("operator is required")
+	}
 
 	if err := s.ticketRepo.DB().Transaction(func(tx *gorm.DB) error {
+		if blocked, blockErr := s.recentRecoveryActionExists(tx, ticketID, "recovery_retry", recoveryDedupWindow); blockErr != nil {
+			return blockErr
+		} else if blocked {
+			return ErrRecoveryActionTooFrequent
+		}
 		// Reset failure count
 		if err := tx.Model(&Ticket{}).Where("id = ?", ticketID).Updates(map[string]any{
 			"ai_failure_count":    0,
@@ -1269,18 +1420,33 @@ func (s *TicketService) RetryAI(ticketID uint, reason string, operatorID uint) (
 			return err
 		}
 
-		details, _ := json.Marshal(map[string]string{"reason": reason})
-		tl := &TicketTimeline{
+		if legacyTimeline {
+			details, _ := json.Marshal(map[string]string{"reason": reason})
+			tl := &TicketTimeline{
+				TicketID:   ticketID,
+				OperatorID: operatorID,
+				EventType:  "ai_retry",
+				Message:    "重新启用 AI 决策",
+				Details:    JSONField(details),
+			}
+			if reason != "" {
+				tl.Message = "重新启用 AI 决策：" + reason
+			}
+			if err := tx.Create(tl).Error; err != nil {
+				return err
+			}
+		}
+		actionDetails, _ := json.Marshal(map[string]any{
+			"action": "retry",
+			"reason": reason,
+		})
+		if err := tx.Create(&TicketTimeline{
 			TicketID:   ticketID,
 			OperatorID: operatorID,
-			EventType:  "ai_retry",
-			Message:    "重新启用 AI 决策",
-			Details:    JSONField(details),
-		}
-		if reason != "" {
-			tl.Message = "重新启用 AI 决策：" + reason
-		}
-		if err := tx.Create(tl).Error; err != nil {
+			EventType:  "recovery_retry",
+			Message:    "恢复动作：重试决策",
+			Details:    JSONField(actionDetails),
+		}).Error; err != nil {
 			return err
 		}
 
@@ -1290,6 +1456,61 @@ func (s *TicketService) RetryAI(ticketID uint, reason string, operatorID uint) (
 	}
 	s.smartEngine.DispatchDecisionAsync(ticketID, nil, "manual_retry")
 	return s.ticketRepo.FindByID(ticketID)
+}
+
+func (s *TicketService) handoffHuman(ticketID uint, reason string, operatorID uint) (*Ticket, error) {
+	t, err := s.ticketRepo.FindByID(ticketID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrTicketNotFound
+		}
+		return nil, err
+	}
+	if t.IsTerminal() {
+		return nil, ErrTicketTerminal
+	}
+	if t.EngineType != "smart" {
+		return nil, errors.New("handoff-human is only available for smart engine tickets")
+	}
+	if operatorID == 0 {
+		return nil, errors.New("operator is required")
+	}
+
+	if blocked, err := s.recentRecoveryActionExists(s.ticketRepo.DB(), ticketID, "recovery_handoff_human", recoveryDedupWindow); err != nil {
+		return nil, err
+	} else if blocked {
+		return nil, ErrRecoveryActionTooFrequent
+	}
+
+	ticket, err := s.OverrideJump(ticketID, engine.NodeProcess, nil, reason, operatorID)
+	if err != nil {
+		return nil, err
+	}
+
+	actionDetails, _ := json.Marshal(map[string]any{
+		"action": "handoff_human",
+		"reason": reason,
+	})
+	if err := s.ticketRepo.DB().Create(&TicketTimeline{
+		TicketID:   ticketID,
+		OperatorID: operatorID,
+		EventType:  "recovery_handoff_human",
+		Message:    "恢复动作：转人工处理",
+		Details:    JSONField(actionDetails),
+	}).Error; err != nil {
+		return nil, err
+	}
+	return ticket, nil
+}
+
+func (s *TicketService) recentRecoveryActionExists(db *gorm.DB, ticketID uint, eventType string, window time.Duration) (bool, error) {
+	var count int64
+	if err := db.Model(&TicketTimeline{}).
+		Where("ticket_id = ? AND event_type = ? AND created_at >= ?", ticketID, eventType, time.Now().Add(-window)).
+		Count(&count).Error; err != nil {
+		return false, err
+	}
+	return count > 0, nil
 }
 
 func ticketStatusForManualActivity(activityType string) string {

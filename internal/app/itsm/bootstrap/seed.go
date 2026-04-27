@@ -627,6 +627,7 @@ func seedPolicies(enforcer *casbin.Enforcer) error {
 		{"admin", "/api/v1/itsm/services/:id", "GET"},
 		{"admin", "/api/v1/itsm/services/:id", "PUT"},
 		{"admin", "/api/v1/itsm/services/:id", "DELETE"},
+		{"admin", "/api/v1/itsm/services/:id/health", "GET"},
 		// Service Actions
 		{"admin", "/api/v1/itsm/services/:id/actions", "POST"},
 		{"admin", "/api/v1/itsm/services/:id/actions", "GET"},
@@ -681,6 +682,7 @@ func seedPolicies(enforcer *casbin.Enforcer) error {
 		{"admin", "/api/v1/itsm/tickets/:id/override/jump", "POST"},
 		{"admin", "/api/v1/itsm/tickets/:id/override/reassign", "POST"},
 		{"admin", "/api/v1/itsm/tickets/:id/override/retry-ai", "POST"},
+		{"admin", "/api/v1/itsm/tickets/:id/recovery", "POST"},
 	}
 
 	menuPerms := [][]string{
@@ -986,19 +988,24 @@ func SeedEngineConfig(db *gorm.DB) error {
 	seedServiceMatchToolRuntime(db)
 
 	defaults := map[string]string{
-		SmartTicketDecisionModeKey:            "direct_first",
-		SmartTicketPathModelKey:               "0",
-		SmartTicketPathTemperatureKey:         "0.3",
-		SmartTicketPathMaxRetriesKey:          "1",
-		SmartTicketPathTimeoutKey:             "60",
-		SmartTicketPathSystemPromptKey:        prompts.PathBuilderSystemPromptDefault,
-		SmartTicketSessionTitleModelKey:       "0",
-		SmartTicketSessionTitleTemperatureKey: "0.2",
-		SmartTicketSessionTitleMaxRetriesKey:  "1",
-		SmartTicketSessionTitleTimeoutKey:     "30",
-		SmartTicketSessionTitlePromptKey:      SessionTitleSystemPromptDefault,
-		SmartTicketGuardAuditLevelKey:         "full",
-		SmartTicketGuardFallbackKey:           "0",
+		SmartTicketDecisionModeKey:             "direct_first",
+		SmartTicketPathModelKey:                "0",
+		SmartTicketPathTemperatureKey:          "0.3",
+		SmartTicketPathMaxRetriesKey:           "1",
+		SmartTicketPathTimeoutKey:              "60",
+		SmartTicketPathSystemPromptKey:         prompts.PathBuilderSystemPromptDefault,
+		SmartTicketSessionTitleModelKey:        "0",
+		SmartTicketSessionTitleTemperatureKey:  "0.2",
+		SmartTicketSessionTitleMaxRetriesKey:   "1",
+		SmartTicketSessionTitleTimeoutKey:      "30",
+		SmartTicketSessionTitlePromptKey:       SessionTitleSystemPromptDefault,
+		SmartTicketPublishHealthModelKey:       "0",
+		SmartTicketPublishHealthTemperatureKey: "0.2",
+		SmartTicketPublishHealthMaxRetriesKey:  "1",
+		SmartTicketPublishHealthTimeoutKey:     "45",
+		SmartTicketPublishHealthPromptKey:      prompts.PublishHealthSystemPromptDefault,
+		SmartTicketGuardAuditLevelKey:          "full",
+		SmartTicketGuardFallbackKey:            "0",
 	}
 
 	for key, value := range defaults {

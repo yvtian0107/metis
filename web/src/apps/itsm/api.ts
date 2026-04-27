@@ -340,6 +340,18 @@ export interface TicketItem {
   nextStepSummary?: string
   canAct?: boolean
   canOverride?: boolean
+  decisionExplanation?: {
+    activityId?: number
+    basis: string
+    trigger: string
+    decision: string
+    nextStep: string
+    humanOverride: string
+  }
+  recoveryActions?: Array<{
+    code: "retry" | "handoff_human" | "withdraw" | string
+    label: string
+  }>
   createdAt: string
   updatedAt: string
 }
@@ -624,6 +636,10 @@ export function retryAI(ticketId: number, reason?: string) {
   return api.post(`/api/v1/itsm/tickets/${ticketId}/override/retry-ai`, { reason })
 }
 
+export function recoverTicket(ticketId: number, data: { action: "retry" | "handoff_human" | "withdraw" | string; reason?: string }) {
+  return api.post<TicketItem>(`/api/v1/itsm/tickets/${ticketId}/recovery`, data)
+}
+
 // ─── AI App APIs (for smart engine config) ─────────────
 
 export interface AgentItem {
@@ -713,6 +729,7 @@ export interface EngineSettingsConfig {
   runtime: {
     pathBuilder: StaffingPathBuilderConfig
     titleBuilder: StaffingPathBuilderConfig
+    healthChecker: StaffingPathBuilderConfig
     guard: {
       auditLevel: string
       fallbackAssignee: number
@@ -735,6 +752,7 @@ export interface EngineSettingsConfigUpdate {
   runtime: {
     pathBuilder: { modelId: number; temperature: number; maxRetries: number; timeoutSeconds: number; systemPrompt: string }
     titleBuilder: { modelId: number; temperature: number; maxRetries: number; timeoutSeconds: number; systemPrompt: string }
+    healthChecker: { modelId: number; temperature: number; maxRetries: number; timeoutSeconds: number; systemPrompt: string }
     guard: { auditLevel: string; fallbackAssignee: number }
   }
 }

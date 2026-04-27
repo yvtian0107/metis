@@ -391,6 +391,18 @@ func TestSmartProgressFailureRecordsDiagnosticStateWithoutBlockingSQLite(t *test
 	if timeline.Message == "" {
 		t.Fatal("expected diagnostic timeline message")
 	}
+	var details struct {
+		DecisionExplanation map[string]any `json:"decision_explanation"`
+	}
+	if err := json.Unmarshal([]byte(timeline.Details), &details); err != nil {
+		t.Fatalf("decode decision explanation details: %v", err)
+	}
+	if details.DecisionExplanation == nil {
+		t.Fatalf("expected decision_explanation details, got %q", timeline.Details)
+	}
+	if details.DecisionExplanation["trigger"] != "ai_decision_failed" {
+		t.Fatalf("expected trigger ai_decision_failed, got %+v", details.DecisionExplanation)
+	}
 }
 
 func newSmartContinuationDB(t *testing.T) *gorm.DB {

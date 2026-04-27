@@ -1,19 +1,54 @@
 package definition
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	. "metis/internal/app/itsm/catalog"
 	. "metis/internal/app/itsm/config"
 	. "metis/internal/app/itsm/domain"
 	"testing"
+	"time"
 
 	"gorm.io/gorm"
-
 	ai "metis/internal/app/ai/runtime"
-	"metis/internal/app/itsm/engine"
+	"metis/internal/llm"
 	"metis/internal/model"
 )
+
+type fakePublishHealthConfigProvider struct {
+	cfg LLMEngineRuntimeConfig
+	err error
+}
+
+func (f fakePublishHealthConfigProvider) HealthCheckRuntimeConfig() (LLMEngineRuntimeConfig, error) {
+	return f.cfg, f.err
+}
+
+func (fakePublishHealthConfigProvider) DecisionMode() string     { return "direct_first" }
+func (fakePublishHealthConfigProvider) DecisionAgentID() uint    { return 0 }
+func (fakePublishHealthConfigProvider) FallbackAssigneeID() uint { return 0 }
+func (fakePublishHealthConfigProvider) AuditLevel() string       { return "full" }
+
+type fakePublishHealthLLMClient struct {
+	resp *llm.ChatResponse
+	err  error
+}
+
+func (f fakePublishHealthLLMClient) Chat(context.Context, llm.ChatRequest) (*llm.ChatResponse, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	return f.resp, nil
+}
+
+func (fakePublishHealthLLMClient) ChatStream(context.Context, llm.ChatRequest) (<-chan llm.StreamEvent, error) {
+	return nil, llm.ErrNotSupported
+}
+
+func (fakePublishHealthLLMClient) Embedding(context.Context, llm.EmbeddingRequest) (*llm.EmbeddingResponse, error) {
+	return nil, llm.ErrNotSupported
+}
 
 func TestServiceDefServiceCreate_RejectsMissingCatalog(t *testing.T) {
 	db := newTestDB(t)
@@ -67,13 +102,6 @@ func TestServiceDefServiceCreate_AllowsWorkflowJSONOnSmartService(t *testing.T) 
 	}
 	if created.ID == 0 {
 		t.Fatal("expected created service to have ID")
-	}
-}
-
-func TestServiceDefServiceParticipantRiskAllowsRequester(t *testing.T) {
-	svc := &ServiceDefService{}
-	if issue := svc.checkParticipantRisk("form", engine.Participant{Type: "requester"}); issue != nil {
-		t.Fatalf("expected requester participant to be allowed, got %+v", issue)
 	}
 }
 
@@ -170,28 +198,41 @@ func TestServiceDefinitionResponse_NoPublishHealthSnapshotBeforeGeneration(t *te
 	}
 }
 
-func TestServiceDefServiceRefreshPublishHealthCheck_SavesSnapshot(t *testing.T) {
+func TestServiceDefServiceRefreshPublishHealthCheck_SavesAISnapshot(t *testing.T) {
 	db := newTestDB(t)
 	svc := newServiceDefServiceForTest(t, db)
 	catSvc := newCatalogServiceForTest(t, db)
 
 	root, _ := catSvc.Create("Root", "root", "", "", nil, 10)
-	user := createServiceHealthUser(t, db, "operator", true)
-	serviceAgent := createServiceHealthAgent(t, db, "service-agent", true)
-	decisionAgent := createServiceHealthAgent(t, db, "decision-agent", true)
-	setServiceHealthDecisionAgent(t, db, decisionAgent.ID)
-	seedServiceHealthPathEngine(t, db)
 	service, err := svc.Create(&ServiceDefinition{
 		Name:              "Smart",
 		Code:              "smart-health-snapshot",
 		CatalogID:         root.ID,
 		EngineType:        "smart",
 		CollaborationSpec: "用户提交申请后由直属经理处理",
-		AgentID:           &serviceAgent.ID,
-		WorkflowJSON:      JSONField(validServiceHealthWorkflow(user.ID)),
+		WorkflowJSON:      JSONField(`{"nodes":[],"edges":[]}`),
 	})
 	if err != nil {
 		t.Fatalf("create service: %v", err)
+	}
+
+	svc.engineConfigSvc = fakePublishHealthConfigProvider{cfg: LLMEngineRuntimeConfig{
+		Model:          "gpt-test",
+		Protocol:       llm.ProtocolOpenAI,
+		BaseURL:        "https://example.test/v1",
+		APIKey:         "test-key",
+		Temperature:    0.2,
+		MaxTokens:      1024,
+		MaxRetries:     1,
+		TimeoutSeconds: 45,
+		SystemPrompt:   "health prompt",
+	}}
+	svc.llmClientFactory = func(string, string, string) (llm.Client, error) {
+		return fakePublishHealthLLMClient{
+			resp: &llm.ChatResponse{
+				Content: `{"status":"warn","items":[{"key":"spec","label":"协作规范","status":"warn","message":"协作规范中缺少升级路径"}]}`,
+			},
+		}, nil
 	}
 
 	check, err := svc.RefreshPublishHealthCheck(service.ID)
@@ -201,11 +242,11 @@ func TestServiceDefServiceRefreshPublishHealthCheck_SavesSnapshot(t *testing.T) 
 	if check == nil {
 		t.Fatal("expected health check")
 	}
-	if check.Status != "pass" {
-		t.Fatalf("expected pass health check, got %+v", check)
+	if check.Status != "warn" || len(check.Items) != 1 {
+		t.Fatalf("unexpected health check: %+v", check)
 	}
-	if len(check.Items) != 0 {
-		t.Fatalf("expected no risk items, got %+v", check.Items)
+	if check.Items[0].Key != "spec" || check.Items[0].Status != "warn" {
+		t.Fatalf("unexpected health item: %+v", check.Items[0])
 	}
 
 	reloaded, err := svc.Get(service.ID)
@@ -216,140 +257,111 @@ func TestServiceDefServiceRefreshPublishHealthCheck_SavesSnapshot(t *testing.T) 
 	if resp.PublishHealthCheck == nil {
 		t.Fatal("expected saved publish health check in response")
 	}
-	if resp.PublishHealthCheck.ServiceID != service.ID {
-		t.Fatalf("expected service id %d, got %d", service.ID, resp.PublishHealthCheck.ServiceID)
-	}
 	if resp.PublishHealthCheck.CheckedAt == nil {
 		t.Fatal("expected checkedAt to be set")
 	}
-	if resp.PublishHealthCheck.Status != "pass" || len(resp.PublishHealthCheck.Items) != 0 {
-		t.Fatalf("expected saved empty pass snapshot, got %+v", resp.PublishHealthCheck)
+	if resp.PublishHealthCheck.Status != "warn" || len(resp.PublishHealthCheck.Items) != 1 {
+		t.Fatalf("expected saved warn snapshot, got %+v", resp.PublishHealthCheck)
 	}
 }
 
-func TestServiceDefServiceRefreshPublishHealthCheck_CoreFailures(t *testing.T) {
-	tests := []struct {
-		name       string
-		setup      func(t *testing.T, db *gorm.DB, service *ServiceDefinition, serviceAgent *ai.Agent, decisionAgent *ai.Agent)
-		wantKey    string
-		wantStatus string
-	}{
-		{
-			name: "empty collaboration spec",
-			setup: func(t *testing.T, db *gorm.DB, service *ServiceDefinition, serviceAgent *ai.Agent, decisionAgent *ai.Agent) {
-				service.CollaborationSpec = ""
-			},
-			wantKey:    "collaboration_spec",
-			wantStatus: "fail",
-		},
-		{
-			name: "inactive service agent",
-			setup: func(t *testing.T, db *gorm.DB, service *ServiceDefinition, serviceAgent *ai.Agent, decisionAgent *ai.Agent) {
-				if err := db.Model(serviceAgent).Update("is_active", false).Error; err != nil {
-					t.Fatalf("deactivate service agent: %v", err)
-				}
-			},
-			wantKey:    "service_agent",
-			wantStatus: "fail",
-		},
-		{
-			name: "inactive decision agent",
-			setup: func(t *testing.T, db *gorm.DB, service *ServiceDefinition, serviceAgent *ai.Agent, decisionAgent *ai.Agent) {
-				if err := db.Model(decisionAgent).Update("is_active", false).Error; err != nil {
-					t.Fatalf("deactivate decision agent: %v", err)
-				}
-			},
-			wantKey:    "decision_agent",
-			wantStatus: "fail",
-		},
-		{
-			name: "path engine model missing",
-			setup: func(t *testing.T, db *gorm.DB, service *ServiceDefinition, serviceAgent *ai.Agent, decisionAgent *ai.Agent) {
-				if err := db.Model(&model.SystemConfig{}).
-					Where("\"key\" = ?", SmartTicketPathModelKey).
-					Update("value", "0").Error; err != nil {
-					t.Fatalf("clear path engine model: %v", err)
-				}
-			},
-			wantKey:    "path_engine",
-			wantStatus: "fail",
-		},
-	}
-
-	for i, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			db := newTestDB(t)
-			svc := newServiceDefServiceForTest(t, db)
-			catSvc := newCatalogServiceForTest(t, db)
-			root, _ := catSvc.Create("Root", "root", "", "", nil, 10)
-			user := createServiceHealthUser(t, db, "operator", true)
-			serviceAgent := createServiceHealthAgent(t, db, "service-agent", true)
-			decisionAgent := createServiceHealthAgent(t, db, "decision-agent", true)
-			setServiceHealthDecisionAgent(t, db, decisionAgent.ID)
-			seedServiceHealthPathEngine(t, db)
-			service, err := svc.Create(&ServiceDefinition{
-				Name:              "Smart",
-				Code:              fmt.Sprintf("smart-core-%d", i),
-				CatalogID:         root.ID,
-				EngineType:        "smart",
-				CollaborationSpec: "用户提交申请后由处理人处理",
-				AgentID:           &serviceAgent.ID,
-				WorkflowJSON:      JSONField(validServiceHealthWorkflow(user.ID)),
-			})
-			if err != nil {
-				t.Fatalf("create service: %v", err)
-			}
-			tt.setup(t, db, service, &serviceAgent, &decisionAgent)
-			if err := db.Save(service).Error; err != nil {
-				t.Fatalf("save service updates: %v", err)
-			}
-
-			check, err := svc.RefreshPublishHealthCheck(service.ID)
-			if err != nil {
-				t.Fatalf("refresh health check: %v", err)
-			}
-			if check.Status != tt.wantStatus {
-				t.Fatalf("expected status %s, got %+v", tt.wantStatus, check)
-			}
-			if !serviceHealthHasItem(check, tt.wantKey, tt.wantStatus) {
-				t.Fatalf("expected %s item with status %s, got %+v", tt.wantKey, tt.wantStatus, check.Items)
-			}
-		})
-	}
-}
-
-func TestServiceDefServiceRefreshPublishHealthCheck_WarnsOnInvalidReferencedAction(t *testing.T) {
+func TestServiceDefServiceRefreshPublishHealthCheck_FailureBlocks(t *testing.T) {
 	db := newTestDB(t)
 	svc := newServiceDefServiceForTest(t, db)
 	catSvc := newCatalogServiceForTest(t, db)
 
 	root, _ := catSvc.Create("Root", "root", "", "", nil, 10)
-	serviceAgent := createServiceHealthAgent(t, db, "service-agent", true)
-	decisionAgent := createServiceHealthAgent(t, db, "decision-agent", true)
-	setServiceHealthDecisionAgent(t, db, decisionAgent.ID)
-	seedServiceHealthPathEngine(t, db)
 	service, err := svc.Create(&ServiceDefinition{
 		Name:              "Smart",
-		Code:              "smart-invalid-action",
+		Code:              "smart-health-failure",
 		CatalogID:         root.ID,
 		EngineType:        "smart",
-		CollaborationSpec: "用户提交申请后执行自动化动作",
-		AgentID:           &serviceAgent.ID,
-		WorkflowJSON:      JSONField(workflowWithActionID(999)),
+		CollaborationSpec: "用户提交申请后由直属经理处理",
+		WorkflowJSON:      JSONField(`{"nodes":[],"edges":[]}`),
 	})
 	if err != nil {
 		t.Fatalf("create service: %v", err)
 	}
 
+	svc.engineConfigSvc = fakePublishHealthConfigProvider{err: ErrEngineNotConfigured}
+
 	check, err := svc.RefreshPublishHealthCheck(service.ID)
 	if err != nil {
-		t.Fatalf("refresh health check: %v", err)
+		t.Fatalf("refresh health check should not return error when llm fails: %v", err)
 	}
-	if check.Status != "warn" {
-		t.Fatalf("expected warn status, got %+v", check)
+	if check.Status != "fail" {
+		t.Fatalf("expected fail status, got %+v", check)
 	}
-	if !serviceHealthHasItem(check, "reference_path_action", "warn") {
-		t.Fatalf("expected invalid action warning, got %+v", check.Items)
+	if len(check.Items) != 1 || check.Items[0].Key != "health_engine" || check.Items[0].Status != "fail" {
+		t.Fatalf("expected health_engine fail item, got %+v", check.Items)
+	}
+}
+
+func TestServiceDefServiceHealthCheck_RefreshesLatestSnapshot(t *testing.T) {
+	db := newTestDB(t)
+	svc := newServiceDefServiceForTest(t, db)
+	catSvc := newCatalogServiceForTest(t, db)
+
+	root, _ := catSvc.Create("Root", "root", "", "", nil, 10)
+	service, err := svc.Create(&ServiceDefinition{
+		Name:              "Smart",
+		Code:              "smart-health-refresh",
+		CatalogID:         root.ID,
+		EngineType:        "smart",
+		CollaborationSpec: "用户提交申请后由直属经理处理",
+		WorkflowJSON:      JSONField(`{"nodes":[],"edges":[]}`),
+	})
+	if err != nil {
+		t.Fatalf("create service: %v", err)
+	}
+
+	svc.engineConfigSvc = fakePublishHealthConfigProvider{cfg: LLMEngineRuntimeConfig{
+		Model:          "gpt-test",
+		Protocol:       llm.ProtocolOpenAI,
+		BaseURL:        "https://example.test/v1",
+		APIKey:         "test-key",
+		Temperature:    0.2,
+		MaxTokens:      1024,
+		MaxRetries:     1,
+		TimeoutSeconds: 45,
+		SystemPrompt:   "health prompt",
+	}}
+	svc.llmClientFactory = func(string, string, string) (llm.Client, error) {
+		return fakePublishHealthLLMClient{
+			resp: &llm.ChatResponse{
+				Content: `{"status":"pass","items":[]}`,
+			},
+		}, nil
+	}
+
+	first, err := svc.RefreshPublishHealthCheck(service.ID)
+	if err != nil {
+		t.Fatalf("first refresh: %v", err)
+	}
+	if first.Status != "pass" {
+		t.Fatalf("expected first pass, got %+v", first)
+	}
+	firstCheckedAt := *first.CheckedAt
+
+	time.Sleep(10 * time.Millisecond)
+
+	svc.llmClientFactory = func(string, string, string) (llm.Client, error) {
+		return fakePublishHealthLLMClient{
+			resp: &llm.ChatResponse{
+				Content: `{"status":"fail","items":[{"key":"workflow","label":"参考路径","status":"fail","message":"存在阻塞节点"}]}`,
+			},
+		}, nil
+	}
+
+	latest, err := svc.HealthCheck(service.ID)
+	if err != nil {
+		t.Fatalf("health check refresh: %v", err)
+	}
+	if latest.Status != "fail" {
+		t.Fatalf("expected latest fail, got %+v", latest)
+	}
+	if latest.CheckedAt == nil || !latest.CheckedAt.After(firstCheckedAt) {
+		t.Fatalf("expected checkedAt to be refreshed, first=%s latest=%v", firstCheckedAt, latest.CheckedAt)
 	}
 }
 
@@ -406,34 +418,6 @@ func seedServiceHealthPathEngine(t *testing.T, db *gorm.DB) ai.AIModel {
 		t.Fatalf("set path model config: %v", err)
 	}
 	return pathModel
-}
-
-func validServiceHealthWorkflow(userID uint) string {
-	return fmt.Sprintf(`{
-		"nodes": [
-			{"id":"start","type":"start","data":{"label":"开始"}},
-			{"id":"form","type":"form","data":{"label":"收集信息","participants":[{"type":"user","value":"%d"}]}},
-			{"id":"end","type":"end","data":{"label":"结束"}}
-		],
-		"edges": [
-			{"id":"e1","source":"start","target":"form","data":{}},
-			{"id":"e2","source":"form","target":"end","data":{}}
-		]
-	}`, userID)
-}
-
-func workflowWithActionID(actionID uint) string {
-	return fmt.Sprintf(`{
-		"nodes": [
-			{"id":"start","type":"start","data":{"label":"开始"}},
-			{"id":"action","type":"action","data":{"label":"预检","action_id":%d}},
-			{"id":"end","type":"end","data":{"label":"结束"}}
-		],
-		"edges": [
-			{"id":"e1","source":"start","target":"action","data":{}},
-			{"id":"e2","source":"action","target":"end","data":{}}
-		]
-	}`, actionID)
 }
 
 func serviceHealthHasItem(check *ServiceHealthCheck, key string, status string) bool {

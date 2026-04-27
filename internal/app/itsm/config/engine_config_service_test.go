@@ -48,22 +48,27 @@ func newEngineConfigTestService(t *testing.T) (*EngineConfigService, *database.D
 
 func seedEngineConfigForTest(db *gorm.DB) error {
 	defaults := map[string]string{
-		SmartTicketIntakeAgentKey:             "0",
-		SmartTicketDecisionAgentKey:           "0",
-		SmartTicketSLAAssuranceAgentKey:       "0",
-		SmartTicketDecisionModeKey:            "direct_first",
-		SmartTicketPathModelKey:               "0",
-		SmartTicketPathTemperatureKey:         "0.3",
-		SmartTicketPathMaxRetriesKey:          "1",
-		SmartTicketPathTimeoutKey:             "60",
-		SmartTicketPathSystemPromptKey:        prompts.PathBuilderSystemPromptDefault,
-		SmartTicketSessionTitleModelKey:       "0",
-		SmartTicketSessionTitleTemperatureKey: "0.2",
-		SmartTicketSessionTitleMaxRetriesKey:  "1",
-		SmartTicketSessionTitleTimeoutKey:     "30",
-		SmartTicketSessionTitlePromptKey:      SessionTitleSystemPromptDefault,
-		SmartTicketGuardAuditLevelKey:         "full",
-		SmartTicketGuardFallbackKey:           "0",
+		SmartTicketIntakeAgentKey:              "0",
+		SmartTicketDecisionAgentKey:            "0",
+		SmartTicketSLAAssuranceAgentKey:        "0",
+		SmartTicketDecisionModeKey:             "direct_first",
+		SmartTicketPathModelKey:                "0",
+		SmartTicketPathTemperatureKey:          "0.3",
+		SmartTicketPathMaxRetriesKey:           "1",
+		SmartTicketPathTimeoutKey:              "60",
+		SmartTicketPathSystemPromptKey:         prompts.PathBuilderSystemPromptDefault,
+		SmartTicketSessionTitleModelKey:        "0",
+		SmartTicketSessionTitleTemperatureKey:  "0.2",
+		SmartTicketSessionTitleMaxRetriesKey:   "1",
+		SmartTicketSessionTitleTimeoutKey:      "30",
+		SmartTicketSessionTitlePromptKey:       SessionTitleSystemPromptDefault,
+		SmartTicketPublishHealthModelKey:       "0",
+		SmartTicketPublishHealthTemperatureKey: "0.2",
+		SmartTicketPublishHealthMaxRetriesKey:  "1",
+		SmartTicketPublishHealthTimeoutKey:     "45",
+		SmartTicketPublishHealthPromptKey:      prompts.PublishHealthSystemPromptDefault,
+		SmartTicketGuardAuditLevelKey:          "full",
+		SmartTicketGuardFallbackKey:            "0",
 	}
 	for key, value := range defaults {
 		if err := db.FirstOrCreate(&coremodel.SystemConfig{}, coremodel.SystemConfig{Key: key, Value: value}).Error; err != nil {
@@ -142,6 +147,11 @@ func TestEngineConfigServiceReadsAndUpdatesSmartStaffingAndEngineSettings(t *tes
 	engineReq.Runtime.TitleBuilder.MaxRetries = 2
 	engineReq.Runtime.TitleBuilder.TimeoutSeconds = 45
 	engineReq.Runtime.TitleBuilder.SystemPrompt = "title prompt"
+	engineReq.Runtime.HealthChecker.ModelID = model.ID
+	engineReq.Runtime.HealthChecker.Temperature = 0.2
+	engineReq.Runtime.HealthChecker.MaxRetries = 1
+	engineReq.Runtime.HealthChecker.TimeoutSeconds = 55
+	engineReq.Runtime.HealthChecker.SystemPrompt = "health prompt"
 	engineReq.Runtime.Guard.AuditLevel = "summary"
 	engineReq.Runtime.Guard.FallbackAssignee = fallback.ID
 	if err := svc.UpdateEngineSettingsConfig(&engineReq); err != nil {
@@ -175,27 +185,38 @@ func TestEngineConfigServiceReadsAndUpdatesSmartStaffingAndEngineSettings(t *tes
 	if engineSettings.Runtime.TitleBuilder.SystemPrompt != "title prompt" {
 		t.Fatalf("unexpected title builder prompt: %q", engineSettings.Runtime.TitleBuilder.SystemPrompt)
 	}
+	if engineSettings.Runtime.HealthChecker.ModelID != model.ID || engineSettings.Runtime.HealthChecker.ProviderID != provider.ID || engineSettings.Runtime.HealthChecker.MaxRetries != 1 || engineSettings.Runtime.HealthChecker.TimeoutSeconds != 55 {
+		t.Fatalf("unexpected health checker config: %+v", engineSettings.Runtime.HealthChecker)
+	}
+	if engineSettings.Runtime.HealthChecker.SystemPrompt != "health prompt" {
+		t.Fatalf("unexpected health checker prompt: %q", engineSettings.Runtime.HealthChecker.SystemPrompt)
+	}
 	if engineSettings.Runtime.Guard.AuditLevel != "summary" || engineSettings.Runtime.Guard.FallbackAssignee != fallback.ID {
 		t.Fatalf("unexpected guard config: %+v", engineSettings.Runtime.Guard)
 	}
 
 	expectedKeys := map[string]string{
-		SmartTicketIntakeAgentKey:             strconv.FormatUint(uint64(intakeAgent.ID), 10),
-		SmartTicketDecisionAgentKey:           strconv.FormatUint(uint64(decisionAgent.ID), 10),
-		SmartTicketSLAAssuranceAgentKey:       strconv.FormatUint(uint64(slaAssuranceAgent.ID), 10),
-		SmartTicketDecisionModeKey:            "ai_only",
-		SmartTicketPathModelKey:               strconv.FormatUint(uint64(model.ID), 10),
-		SmartTicketPathTemperatureKey:         "0.25",
-		SmartTicketPathMaxRetriesKey:          "4",
-		SmartTicketPathTimeoutKey:             "90",
-		SmartTicketPathSystemPromptKey:        "path prompt",
-		SmartTicketSessionTitleModelKey:       strconv.FormatUint(uint64(model.ID), 10),
-		SmartTicketSessionTitleTemperatureKey: "0.15",
-		SmartTicketSessionTitleMaxRetriesKey:  "2",
-		SmartTicketSessionTitleTimeoutKey:     "45",
-		SmartTicketSessionTitlePromptKey:      "title prompt",
-		SmartTicketGuardAuditLevelKey:         "summary",
-		SmartTicketGuardFallbackKey:           strconv.FormatUint(uint64(fallback.ID), 10),
+		SmartTicketIntakeAgentKey:              strconv.FormatUint(uint64(intakeAgent.ID), 10),
+		SmartTicketDecisionAgentKey:            strconv.FormatUint(uint64(decisionAgent.ID), 10),
+		SmartTicketSLAAssuranceAgentKey:        strconv.FormatUint(uint64(slaAssuranceAgent.ID), 10),
+		SmartTicketDecisionModeKey:             "ai_only",
+		SmartTicketPathModelKey:                strconv.FormatUint(uint64(model.ID), 10),
+		SmartTicketPathTemperatureKey:          "0.25",
+		SmartTicketPathMaxRetriesKey:           "4",
+		SmartTicketPathTimeoutKey:              "90",
+		SmartTicketPathSystemPromptKey:         "path prompt",
+		SmartTicketSessionTitleModelKey:        strconv.FormatUint(uint64(model.ID), 10),
+		SmartTicketSessionTitleTemperatureKey:  "0.15",
+		SmartTicketSessionTitleMaxRetriesKey:   "2",
+		SmartTicketSessionTitleTimeoutKey:      "45",
+		SmartTicketSessionTitlePromptKey:       "title prompt",
+		SmartTicketPublishHealthModelKey:       strconv.FormatUint(uint64(model.ID), 10),
+		SmartTicketPublishHealthTemperatureKey: "0.2",
+		SmartTicketPublishHealthMaxRetriesKey:  "1",
+		SmartTicketPublishHealthTimeoutKey:     "55",
+		SmartTicketPublishHealthPromptKey:      "health prompt",
+		SmartTicketGuardAuditLevelKey:          "summary",
+		SmartTicketGuardFallbackKey:            strconv.FormatUint(uint64(fallback.ID), 10),
 	}
 	for key, value := range expectedKeys {
 		var cfg coremodel.SystemConfig
@@ -217,6 +238,9 @@ func TestEngineConfigServiceRejectsInvalidFallbackAssignee(t *testing.T) {
 	req.Runtime.TitleBuilder.MaxRetries = 1
 	req.Runtime.TitleBuilder.TimeoutSeconds = 30
 	req.Runtime.TitleBuilder.SystemPrompt = "title prompt"
+	req.Runtime.HealthChecker.MaxRetries = 1
+	req.Runtime.HealthChecker.TimeoutSeconds = 45
+	req.Runtime.HealthChecker.SystemPrompt = "health prompt"
 	req.Runtime.Guard.AuditLevel = "full"
 	req.Runtime.Guard.FallbackAssignee = 999
 	if err := svc.UpdateEngineSettingsConfig(&req); err != ErrFallbackUserNotFound {
@@ -258,6 +282,11 @@ func TestEngineConfigServiceRuntimeConfigRequiresDBPrompt(t *testing.T) {
 	req.Runtime.TitleBuilder.MaxRetries = 1
 	req.Runtime.TitleBuilder.TimeoutSeconds = 30
 	req.Runtime.TitleBuilder.SystemPrompt = "title prompt"
+	req.Runtime.HealthChecker.ModelID = model.ID
+	req.Runtime.HealthChecker.Temperature = 0.2
+	req.Runtime.HealthChecker.MaxRetries = 1
+	req.Runtime.HealthChecker.TimeoutSeconds = 45
+	req.Runtime.HealthChecker.SystemPrompt = "health prompt"
 	req.Runtime.Guard.AuditLevel = "full"
 	req.Runtime.Guard.FallbackAssignee = 0
 	if err := svc.UpdateEngineSettingsConfig(&req); err != nil {
@@ -278,5 +307,13 @@ func TestEngineConfigServiceRuntimeConfigRequiresDBPrompt(t *testing.T) {
 	_, err = svc.SessionTitleRuntimeConfig()
 	if err == nil || !errors.Is(err, ErrEngineNotConfigured) {
 		t.Fatalf("expected ErrEngineNotConfigured for title builder prompt, got %v", err)
+	}
+
+	if err := db.Model(&coremodel.SystemConfig{}).Where("\"key\" = ?", SmartTicketPublishHealthPromptKey).Update("value", "").Error; err != nil {
+		t.Fatalf("clear health checker system prompt: %v", err)
+	}
+	_, err = svc.HealthCheckRuntimeConfig()
+	if err == nil || !errors.Is(err, ErrEngineNotConfigured) {
+		t.Fatalf("expected ErrEngineNotConfigured for health checker prompt, got %v", err)
 	}
 }

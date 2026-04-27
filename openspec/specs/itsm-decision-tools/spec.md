@@ -1,9 +1,7 @@
 ## Purpose
 
 ITSM SmartEngine 决策域工具集 -- 提供 8 个决策域工具供 ReAct 循环中的 Agent 按需调用。
-
 ## Requirements
-
 ### Requirement: 决策域工具集定义
 SmartEngine SHALL 提供一组决策域工具，供决策 Agent 在 ReAct 循环中按需调用。工具定义（名称、描述、参数 JSON Schema）在 `smart_tools.go` 中硬编码注册，不通过 `ai_agent_tools` 表动态绑定。每个工具 SHALL 返回 JSON 格式结果。
 
@@ -245,3 +243,31 @@ Decision tools SHALL receive ticket-specific context (ticketID, serviceID, repos
 - **WHEN** Agent 传入的参数 JSON 格式错误（无法 unmarshal）
 - **THEN** 工具 SHALL 返回 `{"error": true, "message": "参数格式错误: <具体解析错误>"}`
 - **AND** 不得静默使用零值参数
+
+### Requirement: 直接调度路径保持 Tools 合同
+Decision tools SHALL remain available and behaviorally identical when SmartEngine is launched by direct goroutine dispatch. Tool registration, tool names, input/output schemas, and validation expectations SHALL NOT differ from the scheduler-launched decision path.
+
+#### Scenario: 决策上下文工具可用
+- **WHEN** SmartEngine starts from direct decision dispatch
+- **THEN** the decision agent SHALL be able to call `decision.ticket_context`
+- **AND** the tool response SHALL include ticket status, activity history, completed activity facts, workflow_json, and workflow_context
+
+#### Scenario: 参与人解析工具可用
+- **WHEN** SmartEngine starts from direct decision dispatch and needs to create a human activity
+- **THEN** the decision agent SHALL be able to call `decision.resolve_participant`
+- **AND** participant resolution SHALL use the same org resolver behavior as the previous path
+
+#### Scenario: 动作工具可用
+- **WHEN** SmartEngine starts from direct decision dispatch and needs to execute an action
+- **THEN** the decision agent SHALL be able to call `decision.list_actions` and `decision.execute_action`
+- **AND** action execution SHALL continue through the existing action execution infrastructure
+
+### Requirement: Rejected context remains explicit
+When direct dispatch follows a rejected human activity, decision tools SHALL expose rejected facts as first-class context, including rejected activity id, node id, outcome, operator opinion, satisfied=false, and requires_recovery_decision=true.
+
+#### Scenario: 驳回后上下文可见
+- **WHEN** a user rejects a human activity and direct dispatch starts SmartEngine
+- **THEN** `decision.ticket_context` SHALL expose the rejected activity as completed_activity
+- **AND** completed_activity SHALL include outcome=`rejected`
+- **AND** completed_activity SHALL include requires_recovery_decision=true
+

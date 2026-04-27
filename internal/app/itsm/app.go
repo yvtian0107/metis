@@ -368,6 +368,7 @@ func (a *ITSMApp) Routes(api *gin.RouterGroup) {
 		g.POST("/tickets/:id/override/jump", ticketH.OverrideJump)
 		g.POST("/tickets/:id/override/reassign", ticketH.OverrideReassign)
 		g.POST("/tickets/:id/override/retry-ai", ticketH.RetryAI)
+		g.POST("/tickets/:id/recovery", ticketH.Recover)
 		// SLA pause/resume
 		g.PUT("/tickets/:id/sla/pause", ticketH.SLAPause)
 		g.PUT("/tickets/:id/sla/resume", ticketH.SLAResume)

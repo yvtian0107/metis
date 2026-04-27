@@ -625,6 +625,8 @@
     "pathBuilderDesc": "Generates reference paths and strategy sketches from collaboration specs for pre-publish guidance and runtime hints.",
     "titleBuilderTitle": "Session Title Generation",
     "titleBuilderDesc": "Generates service desk session titles from the user's first question for faster history scanning.",
+    "healthCheckerTitle": "Publish Health Check",
+    "healthCheckerDesc": "Generates publish risk conclusions from collaboration spec, reference path, and action settings as direct release gates.",
     "guardTitle": "Fallback and Audit",
     "guardDesc": "Controls audit detail and assigns a fallback owner when smart decisions fail or no one takes over.",
     "provider": "Provider",
@@ -652,6 +654,8 @@
     "pathPromptEditorDesc": "Adjust the system prompt for reference path generation. Changes apply immediately after clicking Apply.",
     "titlePromptEditorTitle": "Edit Session Title Prompt",
     "titlePromptEditorDesc": "Adjust the system prompt for service desk session title generation. Changes apply immediately after clicking Apply.",
+    "healthPromptEditorTitle": "Edit Publish Health Prompt",
+    "healthPromptEditorDesc": "Adjust the system prompt for publish health checks. Changes apply immediately after clicking Apply.",
     "auditLevel": "Audit Level",
     "fallbackAssignee": "Fallback Assignee",
     "fallbackAssigneePlaceholder": "Select fallback assignee",
@@ -683,6 +687,11 @@
     "specRequired": "Please fill in the collaboration spec first",
     "workflowEmptySmartHint": "Fill in the collaboration spec above, then click \"Generate Reference Path\" to create a strategy sketch",
     "nodeType": "Node Type"
+  },
+  "publishHealth": {
+    "refresh": "Refresh Check",
+    "refreshing": "Checking...",
+    "refreshSuccess": "Publish health check refreshed"
   },
   "knowledge": {
     "title": "Knowledge Documents",
