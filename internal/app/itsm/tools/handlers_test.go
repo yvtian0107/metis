@@ -525,7 +525,7 @@ func TestDraftPrepare_CanonicalizesLabeledAbsoluteTimeIntoTimeField(t *testing.T
 			"vpn_account":"wenhaowu@dev.com",
 			"device_usage":"线上支持用",
 			"request_kind":"online_support",
-			"reason":"线上支持用，访问时段2026-04-28 12:00:00~2026-04-29 10:00:00"
+			"reason":"线上支持用，访问时段2026-05-01 12:00:00~2026-05-02 10:00:00"
 		}
 	}`))
 	if err != nil {
@@ -542,7 +542,7 @@ func TestDraftPrepare_CanonicalizesLabeledAbsoluteTimeIntoTimeField(t *testing.T
 	if !resp.OK || !resp.ReadyForConfirmation {
 		t.Fatalf("expected canonicalized time field to be ready, got %s", string(result))
 	}
-	if resp.FormData["access_period"] != "2026-04-28 12:00:00~2026-04-29 10:00:00" {
+	if resp.FormData["access_period"] != "2026-05-01 12:00:00~2026-05-02 10:00:00" {
 		t.Fatalf("expected access_period to be canonicalized, got %+v", resp.FormData)
 	}
 }

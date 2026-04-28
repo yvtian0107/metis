@@ -189,7 +189,7 @@ func ValidateWorkflow(workflowJSON json.RawMessage) []ValidationError {
 			errs = append(errs, ValidationError{
 				NodeID:  n.ID,
 				Level:   "blocking",
-				Message: fmt.Sprintf("process 节点 %s 缺少 outcome=\"rejected\" 的出边；协作规范未定义驳回路径时 rejected 应指向一个独立的 end 节点", n.ID),
+				Message: fmt.Sprintf("process 节点 %s 缺少 outcome=\"rejected\" 的出边；协作规范未定义驳回路径时 rejected 应指向统一的驳回结束终态 end_rejected", n.ID),
 			})
 		}
 		if hasApproved && hasRejected && approvedTarget != "" && approvedTarget == rejectedTarget {

@@ -244,7 +244,7 @@ func (bc *bddContext) thenParallelGroupNotConverged() error {
 	var pendingCount int64
 	bc.db.Model(&TicketActivity{}).
 		Where("ticket_id = ? AND activity_group_id != '' AND status NOT IN ?",
-			bc.ticket.ID, []string{"completed", "cancelled"}).
+			bc.ticket.ID, engine.CompletedActivityStatuses()).
 		Count(&pendingCount)
 
 	if pendingCount == 0 {
@@ -270,7 +270,7 @@ func (bc *bddContext) thenParallelGroupConverged() error {
 	var pendingCount int64
 	bc.db.Model(&TicketActivity{}).
 		Where("ticket_id = ? AND activity_group_id != '' AND status NOT IN ?",
-			bc.ticket.ID, []string{"completed", "cancelled"}).
+			bc.ticket.ID, engine.CompletedActivityStatuses()).
 		Count(&pendingCount)
 
 	if pendingCount > 0 {

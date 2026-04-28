@@ -3,6 +3,7 @@ package bootstrap
 import (
 	. "metis/internal/app/itsm/config"
 	. "metis/internal/app/itsm/domain"
+	"metis/internal/app/itsm/prompts"
 	"strings"
 	"testing"
 
@@ -429,5 +430,27 @@ func TestSeedEngineConfigCreatesPromptAndTitleBuilderDefaults(t *testing.T) {
 		if strings.TrimSpace(cfg.Value) == "" {
 			t.Fatalf("required config %s has empty value", key)
 		}
+	}
+}
+
+func TestSeedEngineConfigSyncsPathBuilderPromptDefault(t *testing.T) {
+	db := newSeedAlignmentDB(t)
+	if err := db.Create(&coremodel.SystemConfig{
+		Key:   SmartTicketPathSystemPromptKey,
+		Value: "stale prompt",
+	}).Error; err != nil {
+		t.Fatalf("create stale path prompt config: %v", err)
+	}
+
+	if err := SeedEngineConfig(db); err != nil {
+		t.Fatalf("seed engine config: %v", err)
+	}
+
+	var cfg coremodel.SystemConfig
+	if err := db.Where("\"key\" = ?", SmartTicketPathSystemPromptKey).First(&cfg).Error; err != nil {
+		t.Fatalf("load path prompt config: %v", err)
+	}
+	if cfg.Value != prompts.PathBuilderSystemPromptDefault {
+		t.Fatalf("expected path prompt default to be synced")
 	}
 }

@@ -296,6 +296,31 @@ func TestPathBuilderSystemPromptRequiresHumanNodeParticipants(t *testing.T) {
 	}
 }
 
+func TestPathBuilderSystemPromptReusesEquivalentEndNodes(t *testing.T) {
+	requiredSnippets := []string{
+		"end 节点表达业务终态，不表达“从哪个岗位、部门或分支过来”",
+		"多个通过分支如果本质都是完成，应汇入同一个 end_completed",
+		"多个驳回分支如果本质都是驳回关闭，应汇入同一个 end_rejected",
+		"不要生成“结束（网络管理员通过）”“结束（运维管理员通过）”“结束（信息安全管理员通过）”这类仅按来源岗位命名的重复终点",
+		"只有协作规范明确存在不同业务终态时才拆分 end",
+	}
+	for _, snippet := range requiredSnippets {
+		if !strings.Contains(PathBuilderSystemPrompt, snippet) {
+			t.Fatalf("system prompt missing end-node reuse guidance: %s", snippet)
+		}
+	}
+
+	misleadingSnippets := []string{
+		"即使两条路径最终都到达结束，也必须创建两个独立的 end 节点",
+		"不能复用同一个。这样画布上才能清晰呈现 Y 形审批分支",
+	}
+	for _, snippet := range misleadingSnippets {
+		if strings.Contains(PathBuilderSystemPrompt, snippet) {
+			t.Fatalf("system prompt still contains misleading end-node guidance: %s", snippet)
+		}
+	}
+}
+
 func TestWorkflowValidationMessageGuidesParticipantRepair(t *testing.T) {
 	errs := engine.ValidateWorkflow(json.RawMessage(`{
 		"nodes": [
@@ -318,6 +343,37 @@ func TestWorkflowValidationMessageGuidesParticipantRepair(t *testing.T) {
 	}
 	if !strings.Contains(got, "process_network（网络管理员处理）") {
 		t.Fatalf("expected validation message to include node label, got %q", got)
+	}
+}
+
+func TestWorkflowValidationMessageGuidesSharedRejectedEnd(t *testing.T) {
+	errs := engine.ValidateWorkflow(json.RawMessage(`{
+		"nodes": [
+			{"id":"start","type":"start","data":{"label":"开始"}},
+			{"id":"process_network","type":"process","data":{"label":"网络管理员处理","participants":[{"type":"position_department","department_code":"it","position_code":"network_admin"}]}},
+			{"id":"end_completed","type":"end","data":{"label":"完成"}}
+		],
+		"edges": [
+			{"id":"e1","source":"start","target":"process_network","data":{}},
+			{"id":"e2","source":"process_network","target":"end_completed","data":{"outcome":"approved"}}
+		]
+	}`))
+
+	var got string
+	for _, err := range errs {
+		if strings.Contains(err.Message, `outcome="rejected"`) {
+			got = err.Message
+			break
+		}
+	}
+	if got == "" {
+		t.Fatalf("expected rejected-edge validation message, got %+v", errs)
+	}
+	if !strings.Contains(got, "统一的驳回结束终态 end_rejected") {
+		t.Fatalf("expected shared rejected end guidance, got %q", got)
+	}
+	if strings.Contains(got, "独立的 end 节点") {
+		t.Fatalf("validation message still encourages duplicate end nodes: %q", got)
 	}
 }
 
@@ -549,7 +605,7 @@ func TestBuildGenerateResponse_PersistsWorkflowAndHealthSnapshot(t *testing.T) {
 	}
 
 	svc := &WorkflowGenerateService{serviceDefSvc: serviceDefs}
-	workflowJSON := json.RawMessage(`{"nodes":[],"edges":[]}`)
+	workflowJSON := json.RawMessage(validWorkflowJSONForGenerateTest())
 	resp, err := svc.buildGenerateResponse(&GenerateRequest{
 		ServiceID:         service.ID,
 		CollaborationSpec: "用户提交申请后直属经理处理",

@@ -46,7 +46,7 @@ func registerSessionIsolationSteps(sc *godog.ScenarioContext, bc *bddContext) {
 		prevTicket := bc.dialogState.previousTickets[len(bc.dialogState.previousTickets)-1]
 		var linkCount int64
 		bc.db.Table("itsm_ticket_links").
-			Where("(source_ticket_id = ? AND target_ticket_id = ?) OR (source_ticket_id = ? AND target_ticket_id = ?)",
+			Where("(parent_ticket_id = ? AND child_ticket_id = ?) OR (parent_ticket_id = ? AND child_ticket_id = ?)",
 				bc.ticket.ID, prevTicket.ID, prevTicket.ID, bc.ticket.ID).
 			Count(&linkCount)
 		if linkCount > 0 {

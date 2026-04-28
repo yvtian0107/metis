@@ -457,13 +457,20 @@ func TestServiceDefServiceHealthCheck_RefreshesLatestSnapshot(t *testing.T) {
 	catSvc := newCatalogServiceForTest(t, db)
 
 	root, _ := catSvc.Create("Root", "root", "", "", nil, 10)
+	user := createServiceHealthUser(t, db, "operator", true)
+	serviceAgent := createServiceHealthAgent(t, db, "service-agent", true)
+	decisionAgent := createServiceHealthAgent(t, db, "decision-agent", true)
+	setServiceHealthDecisionAgent(t, db, decisionAgent.ID)
+	seedServiceHealthPathEngine(t, db)
 	service, err := svc.Create(&ServiceDefinition{
 		Name:              "Smart",
 		Code:              "smart-health-refresh",
 		CatalogID:         root.ID,
 		EngineType:        "smart",
+		IntakeFormSchema:  serviceHealthIntakeFormSchema(),
 		CollaborationSpec: "submit request and end after approval",
-		WorkflowJSON:      JSONField(`{"nodes":[],"edges":[]}`),
+		AgentID:           &serviceAgent.ID,
+		WorkflowJSON:      JSONField(validServiceHealthWorkflow(user.ID)),
 	})
 	if err != nil {
 		t.Fatalf("create service: %v", err)
