@@ -16,7 +16,7 @@ Feature: 数据库备份白名单临时放行 — 智能引擎 Action 元调用
   Scenario: 完整流程——Agent 元调用预检、DBA处理、元调用放行、完成
     Given "db-requester-1" 已创建数据库备份白名单放行工单，场景为 "requester-1"
     When 智能引擎执行决策循环
-    Then 工单状态为 "in_progress"
+    Then 工单状态为 "waiting_human"
     And 预检动作已为当前工单触发
     And 当前处理任务分配到岗位 "db_admin"
     When 当前活动的被分配人认领并处理完成

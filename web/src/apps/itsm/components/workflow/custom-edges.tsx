@@ -56,16 +56,22 @@ function WorkflowEdgeInner({
   target,
   sourceHandleId,
   targetHandleId,
+  sourcePosition,
+  targetPosition,
 }: EdgeProps & { data?: WFEdgeData }) {
   const { t } = useTranslation("itsm")
   const { setNodes, setEdges, getNodes } = useReactFlow()
+  const resolvedSourcePosition = sourcePosition ?? Position.Right
+  const resolvedTargetPosition = targetPosition ?? Position.Left
+  const sourcePoint = offsetEdgePoint(sourceX, sourceY, resolvedSourcePosition, EDGE_HANDLE_GAP)
+  const targetPoint = offsetEdgePoint(targetX, targetY, resolvedTargetPosition, EDGE_HANDLE_GAP)
   const [edgePath, labelX, labelY] = getBezierPath({
-    sourceX: sourceX + EDGE_HANDLE_GAP,
-    sourceY,
-    sourcePosition: Position.Right,
-    targetX: targetX - EDGE_HANDLE_GAP,
-    targetY,
-    targetPosition: Position.Left,
+    sourceX: sourcePoint.x,
+    sourceY: sourcePoint.y,
+    sourcePosition: resolvedSourcePosition,
+    targetX: targetPoint.x,
+    targetY: targetPoint.y,
+    targetPosition: resolvedTargetPosition,
     curvature: 0.16,
   })
 
@@ -229,4 +235,11 @@ export const WorkflowEdge = memo(WorkflowEdgeInner)
 
 export const edgeTypes = {
   workflow: WorkflowEdge,
+}
+
+function offsetEdgePoint(x: number, y: number, position: Position, gap: number) {
+  if (position === Position.Left) return { x: x - gap, y }
+  if (position === Position.Right) return { x: x + gap, y }
+  if (position === Position.Top) return { x, y: y - gap }
+  return { x, y: y + gap }
 }

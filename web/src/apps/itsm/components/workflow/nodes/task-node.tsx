@@ -1,16 +1,18 @@
 import { memo } from "react"
-import { Handle, Position, type NodeProps } from "@xyflow/react"
+import { Handle, type NodeProps } from "@xyflow/react"
 import type { WFNodeData } from "../types"
 import { WorkflowNodeCard } from "../visual"
+import { workflowHandlePositions } from "./layout-handles"
 
 function TaskNodeInner({ data: rawData, selected }: NodeProps) {
   const data = rawData as unknown as WFNodeData
+  const positions = workflowHandlePositions(data)
 
   return (
     <div className="relative">
-      <Handle type="target" position={Position.Left} />
+      <Handle type="target" position={positions.target} />
       <WorkflowNodeCard data={data} selected={selected} />
-      <Handle type="source" position={Position.Right} />
+      <Handle type="source" position={positions.source} />
     </div>
   )
 }

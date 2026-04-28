@@ -71,6 +71,20 @@ describe("workflow contract", () => {
     expect(saved.edges[0].data).toEqual({ default: true })
   })
 
+  test("removes transient layout metadata when saving", () => {
+    const nodes: Node[] = [
+      node("form", "form", { participants: [{ type: "user", value: "1" }], _layoutDirection: "TB" }),
+    ]
+
+    const saved = prepareWorkflowForSave(nodes, [])
+
+    expect(saved.nodes[0].data).toEqual({
+      label: "form",
+      nodeType: "form",
+      participants: [{ type: "user", value: "1" }],
+    })
+  })
+
   test("accepts all current frontend-configurable classic node data shapes", () => {
     const data: Record<string, WFNodeData> = {
       form: { label: "表单", nodeType: "form", participants: [{ type: "requester" }], formSchema: { version: 1, fields: [] } },

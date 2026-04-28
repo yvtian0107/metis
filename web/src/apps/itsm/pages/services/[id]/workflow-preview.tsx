@@ -4,16 +4,16 @@ import { useState, useMemo, useCallback, useEffect } from "react"
 import { useTranslation } from "react-i18next"
 import {
   ReactFlow, Background, Controls, MiniMap,
-  type Node, type Edge, MarkerType, type ReactFlowInstance, useNodesState, useEdgesState,
+  Panel, type Node, type Edge, MarkerType, type ReactFlowInstance, useNodesState, useEdgesState,
 } from "@xyflow/react"
 import "@xyflow/react/dist/style.css"
-import { X } from "lucide-react"
+import { LayoutGrid, Maximize2, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { FormRenderer, type FormSchema, type FormField, type FieldOption } from "../../../components/form-engine"
 import { nodeTypes } from "../../../components/workflow/nodes"
 import { edgeTypes } from "../../../components/workflow/custom-edges"
-import { applyDagreLayout } from "../../../components/workflow/auto-layout"
+import { applyViewerLayout } from "../../../components/workflow/auto-layout"
 import { getNodeAccent } from "../../../components/workflow/visual-data"
 import { WorkflowNodeIconGlyph } from "../../../components/workflow/visual"
 import { type WFNodeData, type NodeType, type Participant } from "../../../components/workflow/types"
@@ -21,7 +21,6 @@ import "../../../components/workflow/style.css"
 
 interface WorkflowPreviewProps {
   workflowJson: unknown
-  onWorkflowLayoutChange?: (workflowJson: unknown) => void
   embedded?: boolean
   focusTarget?: {
     kind: "workflow_node" | "workflow_edge"
@@ -117,13 +116,8 @@ function parsePreviewSchema(schema: unknown): FormSchema | null {
   }
 }
 
-function hasValidPosition(node: Node): boolean {
-  return Number.isFinite(node.position?.x) && Number.isFinite(node.position?.y)
-}
-
 export default function WorkflowPreview({
   workflowJson,
-  onWorkflowLayoutChange,
   embedded = false,
   focusTarget,
 }: WorkflowPreviewProps) {
@@ -174,9 +168,8 @@ export default function WorkflowPreview({
       data: { ...e.data, readonly: true } as Record<string, unknown>,
     }))
 
-    const allNodesHavePosition = nodes.length > 0 && nodes.every(hasValidPosition)
     return {
-      initialNodes: allNodesHavePosition ? nodes : applyDagreLayout(nodes, edges),
+      initialNodes: applyViewerLayout(nodes, edges),
       initialEdges: edges,
     }
   }, [workflowJson, focusTarget])
@@ -236,24 +229,14 @@ export default function WorkflowPreview({
     setManualSelectedNode({ id: node.id, data: node.data as unknown as WFNodeData })
   }, [])
 
-  const onNodeDragStop = useCallback(() => {
-    if (!onWorkflowLayoutChange) return
-    const nextWorkflow = {
-      nodes: nodes.map((node) => ({
-        id: node.id,
-        type: typeof node.type === "string" ? node.type : undefined,
-        position: node.position,
-        data: node.data,
-      })),
-      edges: edges.map((edge) => ({
-        id: edge.id,
-        source: edge.source,
-        target: edge.target,
-        data: edge.data,
-      })),
-    }
-    onWorkflowLayoutChange(nextWorkflow)
-  }, [onWorkflowLayoutChange, nodes, edges])
+  const fitWorkflowView = useCallback(() => {
+    void flowInstance?.fitView({ duration: 240, padding: 0.18, maxZoom: 1.05 })
+  }, [flowInstance])
+
+  const handleAutoLayout = useCallback(() => {
+    setNodes(applyViewerLayout(nodes, edges) as typeof nodes)
+    window.requestAnimationFrame(fitWorkflowView)
+  }, [edges, fitWorkflowView, nodes, setNodes])
 
   return (
     <div
@@ -273,14 +256,38 @@ export default function WorkflowPreview({
           nodesConnectable={false}
           elementsSelectable={true}
           onNodeClick={onNodeClick}
-          onNodeDragStop={onNodeDragStop}
           onPaneClick={() => setManualSelectedNode(null)}
           onInit={setFlowInstance}
           fitView
+          fitViewOptions={{ padding: 0.12 }}
           className="workflow-builder-flow"
         >
           <Background gap={24} size={1.2} />
           <Controls showInteractive={false} position="bottom-left" />
+          <Panel position="top-right" className="flex gap-1 rounded-xl border border-border/60 bg-white/75 p-1">
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8"
+              onClick={handleAutoLayout}
+              title={t("workflow.autoLayout")}
+              aria-label={t("workflow.autoLayout")}
+            >
+              <LayoutGrid className="h-3.5 w-3.5" />
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8"
+              onClick={fitWorkflowView}
+              title={t("workflow.fitView")}
+              aria-label={t("workflow.fitView")}
+            >
+              <Maximize2 className="h-3.5 w-3.5" />
+            </Button>
+          </Panel>
           <MiniMap
             position="bottom-right"
             pannable

@@ -17,7 +17,7 @@ Feature: 多角色并行处理后汇聚 — 智能引擎
   Scenario: 全部并行处理处理后汇聚推进到最终处理并完成
     Given "countersign-requester" 已创建并行处理工单，场景为 "standard"
     When 智能引擎执行决策循环
-    Then 工单状态为 "in_progress"
+    Then 工单状态为 "waiting_human"
     And 应存在一个并行处理活动组，包含 2 个并行活动
     When 并行处理组中岗位 "network_admin" 的处理人认领并处理完成
     Then 并行处理组仍有未完成活动，不应触发下一步

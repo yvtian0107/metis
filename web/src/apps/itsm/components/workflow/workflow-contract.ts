@@ -152,6 +152,7 @@ export function prepareWorkflowForSave(nodes: Node[], edges: Edge[]): { nodes: N
     data: stripUndefined({
       ...(node.data as Record<string, unknown>),
       _workflowState: undefined,
+      _layoutDirection: undefined,
     }),
   }))
 

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log"
 	. "metis/internal/app/itsm/domain"
+	"strings"
 	"time"
 
 	"github.com/cucumber/godog"
@@ -20,11 +21,13 @@ func registerSmartSteps(sc *godog.ScenarioContext, bc *bddContext) {
 	sc.Given(`^已基于协作规范发布 VPN 开通服务（智能引擎）$`, bc.givenSmartServicePublished)
 	sc.Given(`^已基于协作规范发布 VPN 服务（智能引擎）$`, bc.givenSmartServicePublished)
 	sc.Given(`^"([^"]*)" 已创建 VPN 工单，访问原因为 "([^"]*)"$`, bc.givenSmartTicketCreated)
+	sc.Given(`^"([^"]*)" 已创建 VPN 工单，访问原因同时包含网络和安全诉求$`, bc.givenSmartTicketWithConflictingReasons)
 	sc.Given(`^智能引擎置信度阈值设为 ([0-9.]+)$`, bc.givenConfidenceThreshold)
 	sc.Given(`^"([^"]*)" 已创建 VPN 工单（使用缺失参与者的工作流）$`, bc.givenSmartTicketMissingParticipant)
 
 	sc.When(`^智能引擎执行决策循环$`, bc.whenSmartEngineDecisionCycle)
 	sc.When(`^管理员接管该人工处置决策$`, bc.whenAdminConfirmsPendingDecision)
+	sc.When(`^管理员确认该人工处置决策$`, bc.whenAdminConfirmsPendingDecision)
 	sc.When(`^当前活动的被分配人认领并处理完成$`, bc.whenAssigneeClaimsAndProcesss)
 	sc.When(`^当前活动的被分配人认领并处理驳回$`, bc.whenAssigneeClaimsAndRejects)
 	sc.When(`^智能引擎再次执行决策循环$`, bc.whenSmartEngineDecisionCycleAgain)
@@ -34,6 +37,14 @@ func registerSmartSteps(sc *godog.ScenarioContext, bc *bddContext) {
 	sc.Then(`^决策置信度在合法范围内$`, bc.thenConfidenceInRange)
 	sc.Then(`^若指定了参与人则参与人在候选列表内$`, bc.thenParticipantInCandidates)
 	sc.Then(`^时间线应包含 AI 决策相关事件$`, bc.thenTimelineContainsAIDecision)
+	sc.Then(`^决策工具 "([^"]*)" 已被调用$`, bc.thenDecisionToolCalled)
+	sc.Then(`^当前处理任务未分配到岗位 "([^"]*)"$`, bc.thenCurrentProcessNotAssignedToPosition)
+	sc.Then(`^没有不可执行的高置信人工任务$`, bc.thenNoUnexecutableHighConfidenceHumanTask)
+	sc.Then(`^决策诊断事件已记录$`, bc.thenDecisionDiagnosticRecorded)
+	sc.Then(`^不得高置信选择单一路由$`, bc.thenNoHighConfidenceSingleRouteChoice)
+	sc.Then(`^进入澄清或低置信人工处置$`, bc.thenClarificationOrLowConfidenceHandling)
+	sc.Then(`^不会重复创建刚完成的人工作业$`, bc.thenNoDuplicateAfterCompletedHumanWork)
+	sc.Then(`^不得创建申请人补充表单$`, bc.thenNoRequesterSupplementForm)
 	sc.Then(`^当前活动状态为 "([^"]*)"$`, bc.thenCurrentActivityStatusIs)
 	sc.Then(`^当前活动状态不为 "([^"]*)"$`, bc.thenCurrentActivityStatusIsNot)
 	sc.Then(`^活动记录中包含 AI 推理说明$`, bc.thenActivityContainsAIReasoning)
@@ -51,10 +62,11 @@ func (bc *bddContext) givenSmartTicketCreated(username, requestKind string) erro
 		return fmt.Errorf("user %q not found in context", username)
 	}
 
+	normalizedKind := normalizeVPNRequestKind(requestKind)
 	formData := map[string]any{
-		"request_kind": requestKind,
-		"vpn_type":     "l2tp",
-		"reason":       "BDD test request",
+		"request_kind": normalizedKind,
+		"vpn_account":  fmt.Sprintf("%s@dev.local", username),
+		"device_usage": vpnDeviceUsageForKind(normalizedKind),
 	}
 	formJSON, _ := json.Marshal(formData)
 
@@ -71,6 +83,70 @@ func (bc *bddContext) givenSmartTicketCreated(username, requestKind string) erro
 	}
 	if err := bc.db.Create(ticket).Error; err != nil {
 		return fmt.Errorf("create ticket: %w", err)
+	}
+	bc.ticket = ticket
+	return nil
+}
+
+func normalizeVPNRequestKind(requestKind string) string {
+	switch requestKind {
+	case "network_support":
+		return "online_support"
+	default:
+		return requestKind
+	}
+}
+
+func vpnDeviceUsageForKind(requestKind string) string {
+	switch requestKind {
+	case "online_support":
+		return "线上支持，需要远程访问内网服务"
+	case "troubleshooting":
+		return "故障排查，需要临时访问诊断环境"
+	case "production_emergency":
+		return "生产应急，需要立即远程处理"
+	case "network_access_issue":
+		return "网络接入问题排查，需要 VPN 连通性验证"
+	case "external_collaboration":
+		return "外部协作，需要访问指定协作系统"
+	case "long_term_remote_work":
+		return "长期远程办公，需要稳定访问办公内网"
+	case "cross_border_access":
+		return "跨境访问，需要安全合规审查"
+	case "security_compliance":
+		return "安全合规事项，需要审计与取证访问"
+	default:
+		return "VPN 开通申请 BDD 测试"
+	}
+}
+
+func (bc *bddContext) givenSmartTicketWithConflictingReasons(username string) error {
+	user, ok := bc.usersByName[username]
+	if !ok {
+		return fmt.Errorf("user %q not found in context", username)
+	}
+
+	formData := map[string]any{
+		"request_kind": []string{"network_access_issue", "security_compliance"},
+		"vpn_account":  "conflict-user@dev.local",
+		"device_usage": "同时用于网络链路调试和安全审计取证",
+		"reason":       "网络链路调试和安全审计属于不同处理路径，需要用户明确本次办理哪一个诉求",
+	}
+	formJSON, _ := json.Marshal(formData)
+
+	ticket := &Ticket{
+		Code:         fmt.Sprintf("VPN-SC-%d", time.Now().UnixNano()),
+		Title:        "VPN开通申请(智能) - 网络与安全诉求冲突",
+		ServiceID:    bc.service.ID,
+		EngineType:   "smart",
+		Status:       "pending",
+		PriorityID:   bc.priority.ID,
+		RequesterID:  user.ID,
+		FormData:     JSONField(formJSON),
+		WorkflowJSON: bc.service.WorkflowJSON,
+	}
+	if err := bc.db.Create(ticket).Error; err != nil {
+		return fmt.Errorf("create conflicting ticket: %w", err)
 	}
 	bc.ticket = ticket
 	return nil
@@ -98,9 +174,9 @@ func (bc *bddContext) givenSmartTicketMissingParticipant(username string) error 
 	}
 
 	formData := map[string]any{
-		"request_kind": "network_support",
-		"vpn_type":     "l2tp",
-		"reason":       "BDD test - missing participant",
+		"request_kind": "online_support",
+		"vpn_account":  fmt.Sprintf("%s@dev.local", username),
+		"device_usage": "BDD test - missing participant",
 	}
 	formJSON, _ := json.Marshal(formData)
 
@@ -129,30 +205,45 @@ func (bc *bddContext) whenSmartEngineDecisionCycle() error {
 		return fmt.Errorf("no ticket in context")
 	}
 
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	err := bc.smartEngine.Start(ctx, bc.db, engine.StartParams{
+		TicketID:     bc.ticket.ID,
+		WorkflowJSON: json.RawMessage(bc.service.WorkflowJSON),
+		RequesterID:  bc.ticket.RequesterID,
+	})
+	cancel()
+	if err != nil {
+		bc.lastErr = err
+		return fmt.Errorf("smart engine start: %w", err)
+	}
+
+	if err := bc.runSmartDecisionCycle(nil); err != nil {
+		return err
+	}
+
+	// Refresh ticket.
+	bc.db.First(bc.ticket, bc.ticket.ID)
+	return nil
+}
+
+func (bc *bddContext) runSmartDecisionCycle(completedID *uint) error {
 	const maxRetries = 3
 	for attempt := 1; attempt <= maxRetries; attempt++ {
 		ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
-		err := bc.smartEngine.Start(ctx, bc.db, engine.StartParams{
-			TicketID:     bc.ticket.ID,
-			WorkflowJSON: json.RawMessage(bc.service.WorkflowJSON),
-			RequesterID:  bc.ticket.RequesterID,
-		})
+		err := bc.smartEngine.RunDecisionCycleForTicket(ctx, bc.db, bc.ticket.ID, completedID)
 		cancel()
 
 		if err == nil {
-			break
+			return nil
 		}
 		bc.lastErr = err
-		log.Printf("smart engine start attempt %d/%d: %v", attempt, maxRetries, err)
+		log.Printf("smart engine decision attempt %d/%d: %v", attempt, maxRetries, err)
 		if (err == engine.ErrAIDecisionFailed || err == engine.ErrAIDisabled) && attempt < maxRetries {
 			bc.db.Model(&Ticket{}).Where("id = ?", bc.ticket.ID).Update("ai_failure_count", 0)
 			continue
 		}
 		break
 	}
-
-	// Refresh ticket.
-	bc.db.First(bc.ticket, bc.ticket.ID)
 	return nil
 }
 
@@ -278,24 +369,18 @@ func (bc *bddContext) whenSmartEngineDecisionCycleAgain() error {
 
 	const maxRetries = 3
 	for attempt := 1; attempt <= maxRetries; attempt++ {
-		// Find the last completed activity to pass as completedActivityID.
-		var lastCompleted TicketActivity
+		// Find the last finished activity to pass as completedActivityID, including
+		// rejected human work so SmartEngine receives recovery context.
+		var lastFinished TicketActivity
 		var completedID *uint
-		if err := bc.db.Where("ticket_id = ? AND status = ?", bc.ticket.ID, "completed").
-			Order("id DESC").First(&lastCompleted).Error; err == nil {
-			completedID = &lastCompleted.ID
+		if err := bc.db.Where("ticket_id = ? AND status IN ?", bc.ticket.ID, engine.CompletedActivityStatuses()).
+			Order("finished_at DESC, id DESC").First(&lastFinished).Error; err == nil {
+			completedID = &lastFinished.ID
 		}
 
-		ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
-		err := bc.smartEngine.RunDecisionCycleForTicket(ctx, bc.db, bc.ticket.ID, completedID)
-		cancel()
-
-		if err != nil {
-			bc.lastErr = err
+		if err := bc.runSmartDecisionCycle(completedID); err != nil {
 			log.Printf("smart engine re-decision attempt %d/%d: %v", attempt, maxRetries, err)
-			if (err == engine.ErrAIDecisionFailed || err == engine.ErrAIDisabled) && attempt < maxRetries {
-				continue
-			}
+			continue
 		}
 		break
 	}
@@ -383,6 +468,174 @@ func (bc *bddContext) thenTimelineContainsAIDecision() error {
 	}
 	if count == 0 {
 		return fmt.Errorf("no AI decision event found in timeline for ticket %d", bc.ticket.ID)
+	}
+	return nil
+}
+
+func (bc *bddContext) thenDecisionToolCalled(name string) error {
+	if bc.hasToolCall(name) {
+		return nil
+	}
+	return fmt.Errorf("expected decision tool %q to be called, got %+v", name, bc.toolCalls)
+}
+
+func (bc *bddContext) thenCurrentProcessNotAssignedToPosition(positionCode string) error {
+	if err := bc.thenCurrentProcessAssignedToPosition(positionCode); err == nil {
+		return fmt.Errorf("current process unexpectedly assigned to position %q", positionCode)
+	}
+	return nil
+}
+
+func (bc *bddContext) thenNoUnexecutableHighConfidenceHumanTask() error {
+	var activities []TicketActivity
+	if err := bc.db.Where("ticket_id = ? AND activity_type IN ? AND status IN ?",
+		bc.ticket.ID,
+		[]string{engine.NodeApprove, engine.NodeForm, engine.NodeProcess},
+		[]string{engine.ActivityPending, engine.ActivityInProgress},
+	).Find(&activities).Error; err != nil {
+		return err
+	}
+
+	for _, activity := range activities {
+		var count int64
+		if err := bc.db.Model(&TicketAssignment{}).Where("activity_id = ?", activity.ID).Count(&count).Error; err != nil {
+			return err
+		}
+		if count == 0 && activity.AIConfidence >= 0.75 {
+			return fmt.Errorf("activity %d is high-confidence human task without executable assignment", activity.ID)
+		}
+	}
+	return nil
+}
+
+func (bc *bddContext) thenDecisionDiagnosticRecorded() error {
+	var count int64
+	if err := bc.db.Model(&TicketTimeline{}).
+		Where("ticket_id = ? AND event_type IN ?", bc.ticket.ID,
+			[]string{"ai_decision_failed", "ai_decision_pending", "participant_fallback_warning"}).
+		Count(&count).Error; err != nil {
+		return err
+	}
+	if count == 0 {
+		return fmt.Errorf("expected decision diagnostic timeline event for ticket %d", bc.ticket.ID)
+	}
+	return nil
+}
+
+func (bc *bddContext) thenNoHighConfidenceSingleRouteChoice() error {
+	var activities []TicketActivity
+	if err := bc.db.Where("ticket_id = ? AND activity_type IN ? AND status IN ?",
+		bc.ticket.ID,
+		[]string{engine.NodeApprove, engine.NodeForm, engine.NodeProcess},
+		[]string{engine.ActivityPending, engine.ActivityInProgress},
+	).Find(&activities).Error; err != nil {
+		return err
+	}
+
+	for _, activity := range activities {
+		if activity.AIConfidence < 0.75 {
+			continue
+		}
+		var assignments []TicketAssignment
+		if err := bc.db.Where("activity_id = ?", activity.ID).Find(&assignments).Error; err != nil {
+			return err
+		}
+		for _, assignment := range assignments {
+			if assignment.PositionID == nil {
+				continue
+			}
+			for code, pos := range bc.positions {
+				if pos.ID == *assignment.PositionID && (code == "network_admin" || code == "security_admin") {
+					return fmt.Errorf("high-confidence conflict decision chose single route %q via activity %d", code, activity.ID)
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func (bc *bddContext) thenClarificationOrLowConfidenceHandling() error {
+	activity, err := bc.getLatestActivity()
+	if err == nil {
+		if activity.ActivityType == engine.NodeForm && (activity.Status == engine.ActivityPending || activity.Status == engine.ActivityInProgress) {
+			return nil
+		}
+		if activity.AIConfidence < 0.75 && (activity.Status == engine.ActivityPending || activity.Status == engine.ActivityInProgress) {
+			return nil
+		}
+	}
+
+	var count int64
+	if err := bc.db.Model(&TicketTimeline{}).
+		Where("ticket_id = ? AND event_type IN ?", bc.ticket.ID,
+			[]string{"ai_decision_failed", "ai_decision_pending"}).
+		Count(&count).Error; err != nil {
+		return err
+	}
+	if count > 0 {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	return fmt.Errorf("expected clarification form, low-confidence pending activity, or diagnostic event for ticket %d", bc.ticket.ID)
+}
+
+func (bc *bddContext) thenNoDuplicateAfterCompletedHumanWork() error {
+	var completed []TicketActivity
+	if err := bc.db.Where("ticket_id = ? AND status IN ? AND activity_type IN ?",
+		bc.ticket.ID,
+		[]string{engine.ActivityCompleted, engine.ActivityApproved},
+		[]string{engine.NodeApprove, engine.NodeForm, engine.NodeProcess},
+	).Find(&completed).Error; err != nil {
+		return err
+	}
+
+	for _, done := range completed {
+		var dupCount int64
+		if err := bc.db.Model(&TicketActivity{}).
+			Where("ticket_id = ? AND id <> ? AND activity_type = ? AND name = ? AND status IN ?",
+				bc.ticket.ID, done.ID, done.ActivityType, done.Name,
+				[]string{engine.ActivityPending, engine.ActivityInProgress}).
+			Count(&dupCount).Error; err != nil {
+			return err
+		}
+		if dupCount > 0 {
+			return fmt.Errorf("completed human activity %d was recreated as active work", done.ID)
+		}
+	}
+	return nil
+}
+
+func (bc *bddContext) thenNoRequesterSupplementForm() error {
+	var activities []TicketActivity
+	if err := bc.db.Where("ticket_id = ? AND activity_type = ? AND status IN ?",
+		bc.ticket.ID, engine.NodeForm, []string{engine.ActivityPending, engine.ActivityInProgress}).
+		Find(&activities).Error; err != nil {
+		return err
+	}
+
+	for _, activity := range activities {
+		var count int64
+		if err := bc.db.Model(&TicketAssignment{}).
+			Where("activity_id = ? AND (participant_type = ? OR user_id = ? OR assignee_id = ?)",
+				activity.ID, "requester", bc.ticket.RequesterID, bc.ticket.RequesterID).
+			Count(&count).Error; err != nil {
+			return err
+		}
+		if count > 0 {
+			return fmt.Errorf("unexpected requester supplement form activity %d", activity.ID)
+		}
+	}
+
+	var timeline []TicketTimeline
+	if err := bc.db.Where("ticket_id = ?", bc.ticket.ID).Find(&timeline).Error; err != nil {
+		return err
+	}
+	for _, event := range timeline {
+		if strings.Contains(event.Message, "退回申请人补充") {
+			return fmt.Errorf("timeline still implies requester supplement: %s", event.Message)
+		}
 	}
 	return nil
 }

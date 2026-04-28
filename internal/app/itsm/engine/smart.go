@@ -848,6 +848,8 @@ func (e *SmartEngine) pendManualHandlingPlan(tx *gorm.DB, ticketID uint, plan *D
 	if err := tx.Model(&ticketModel{}).Where("id = ?", ticketID).Updates(map[string]any{
 		"current_activity_id": act.ID,
 		"assignee_id":         nil,
+		"status":              TicketStatusWaitingHuman,
+		"outcome":             "",
 	}).Error; err != nil {
 		return err
 	}

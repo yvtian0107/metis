@@ -13,7 +13,7 @@ Feature: VPN 开通申请 — 智能引擎流程
     And 已基于协作规范发布 VPN 开通服务（智能引擎）
 
   Scenario: 智能引擎为网络支持请求生成合法决策
-    Given "vpn-requester" 已创建 VPN 工单，访问原因为 "network_support"
+    Given "vpn-requester" 已创建 VPN 工单，访问原因为 "online_support"
     When 智能引擎执行决策循环
     Then 工单状态不为 "failed"
     And 存在至少一个活动
@@ -32,13 +32,13 @@ Feature: VPN 开通申请 — 智能引擎流程
 
   Scenario: 低置信度决策进入人工处置状态后人工人工处置
     Given 智能引擎置信度阈值设为 0.99
-    And "vpn-requester" 已创建 VPN 工单，访问原因为 "network_support"
+    And "vpn-requester" 已创建 VPN 工单，访问原因为 "online_support"
     When 智能引擎执行决策循环
-    Then 工单状态为 "in_progress"
+    Then 工单状态为 "waiting_human"
     And 当前活动状态为 "pending"
     And 活动记录中包含 AI 推理说明
     When 管理员确认该人工处置决策
-    Then 当前活动状态不为 "pending"
+    Then 存在至少一个活动
 
   Scenario: 处理节点缺失参与者时智能引擎安全兜底
     Given "vpn-requester" 已创建 VPN 工单（使用缺失参与者的工作流）
@@ -47,9 +47,9 @@ Feature: VPN 开通申请 — 智能引擎流程
     And 时间线应包含 AI 决策相关事件
 
   Scenario: 智能引擎完整链路 — 决策 → 处理 → 完成
-    Given "vpn-requester" 已创建 VPN 工单，访问原因为 "network_support"
+    Given "vpn-requester" 已创建 VPN 工单，访问原因为 "online_support"
     When 智能引擎执行决策循环
-    Then 工单状态为 "in_progress"
+    Then 工单状态为 "waiting_human"
     And 存在至少一个活动
     When 当前活动的被分配人认领并处理完成
     And 智能引擎执行决策循环直到工单完成

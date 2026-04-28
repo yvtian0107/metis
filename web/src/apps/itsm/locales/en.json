@@ -597,6 +597,7 @@
       "webhook": "Webhook"
     },
     "autoLayout": "Auto Layout",
+    "fitView": "Fit View",
     "copied": "Copied {{count}} nodes",
     "ctx": {
       "paste": "Paste",

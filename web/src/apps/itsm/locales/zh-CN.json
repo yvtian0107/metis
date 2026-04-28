@@ -597,6 +597,7 @@
       "webhook": "Webhook"
     },
     "autoLayout": "自动布局",
+    "fitView": "适配视图",
     "copied": "已复制 {{count}} 个节点",
     "ctx": {
       "paste": "粘贴",

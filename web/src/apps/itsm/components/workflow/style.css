@@ -43,6 +43,14 @@
   right: -7px;
 }
 
+.workflow-builder-flow .react-flow__handle-top {
+  top: -7px;
+}
+
+.workflow-builder-flow .react-flow__handle-bottom {
+  bottom: -7px;
+}
+
 .workflow-builder-flow .react-flow__controls {
   overflow: hidden;
   border: 1px solid color-mix(in oklab, var(--color-border) 76%, transparent);

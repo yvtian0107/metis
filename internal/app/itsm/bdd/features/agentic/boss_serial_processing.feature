@@ -16,7 +16,7 @@ Feature: 高风险变更协同申请（Boss）— 两级串行处理
   Scenario: 完整串行处理——首级指定用户处理→二级部门岗位处理→完成
     Given "boss-requester-1" 已创建高风险变更工单，场景为 "requester-1"
     When 智能引擎执行决策循环
-    Then 工单状态为 "in_progress"
+    Then 工单状态为 "waiting_human"
     And 当前处理任务仅对 "serial-reviewer" 可见
     When 当前活动的被分配人认领并处理完成
     And 智能引擎再次执行决策循环
@@ -28,7 +28,7 @@ Feature: 高风险变更协同申请（Boss）— 两级串行处理
   Scenario: 处理隔离——二级处理人无法操作首级处理，首级处理人无法认领二级处理
     Given "boss-requester-1" 已创建高风险变更工单，场景为 "requester-1"
     When 智能引擎执行决策循环
-    Then 工单状态为 "in_progress"
+    Then 工单状态为 "waiting_human"
     And 当前处理任务仅对 "serial-reviewer" 可见
     And "ops-handler" 认领当前工单应失败
     When 当前活动的被分配人认领并处理完成
@@ -43,7 +43,7 @@ Feature: 高风险变更协同申请（Boss）— 两级串行处理
     Given "boss-requester-1" 已创建高风险变更工单，场景为 "requester-1"
     Then 工单的表单数据中包含完整的 resource_items 明细表格
     When 智能引擎执行决策循环
-    Then 工单状态为 "in_progress"
+    Then 工单状态为 "waiting_human"
     And 工单的表单数据中包含完整的 resource_items 明细表格
     When 当前活动的被分配人认领并处理完成
     And 智能引擎再次执行决策循环
@@ -55,7 +55,7 @@ Feature: 高风险变更协同申请（Boss）— 两级串行处理
   Scenario: 并行工单——两张串行处理工单的处理指派完全隔离
     Given "boss-requester-1" 已创建高风险变更工单 "A"，场景为 "requester-1"
     When 智能引擎执行决策循环
-    Then 工单状态为 "in_progress"
+    Then 工单状态为 "waiting_human"
     When 当前活动的被分配人认领并处理完成
     And 智能引擎再次执行决策循环
     When 当前活动的被分配人认领并处理完成
@@ -63,7 +63,7 @@ Feature: 高风险变更协同申请（Boss）— 两级串行处理
     Then 工单状态为 "completed"
     Given "boss-requester-2" 已创建高风险变更工单 "B"，场景为 "requester-2"
     When 智能引擎执行决策循环
-    Then 工单状态为 "in_progress"
+    Then 工单状态为 "waiting_human"
     When 当前活动的被分配人认领并处理完成
     And 智能引擎再次执行决策循环
     When 当前活动的被分配人认领并处理完成

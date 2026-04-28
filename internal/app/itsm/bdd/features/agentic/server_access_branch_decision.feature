@@ -16,7 +16,7 @@ Feature: 生产服务器临时访问申请 — 智能引擎分支决策
   Scenario: 生产故障排查访问路由到运维管理员并处理完成
     Given "ops-access-requester" 已创建生产服务器访问工单，场景为 "ops"
     When 智能引擎执行决策循环
-    Then 工单状态为 "in_progress"
+    Then 工单状态为 "waiting_human"
     And 当前活动类型为 "process"
     And 当前处理任务分配到岗位 "ops_admin"
     When 当前活动的被分配人认领并处理完成
@@ -26,7 +26,7 @@ Feature: 生产服务器临时访问申请 — 智能引擎分支决策
   Scenario: 网络链路诊断访问路由到网络管理员并处理完成
     Given "ops-access-requester" 已创建生产服务器访问工单，场景为 "network"
     When 智能引擎执行决策循环
-    Then 工单状态为 "in_progress"
+    Then 工单状态为 "waiting_human"
     And 当前活动类型为 "process"
     And 当前处理任务分配到岗位 "network_admin"
     When 当前活动的被分配人认领并处理完成
@@ -36,7 +36,7 @@ Feature: 生产服务器临时访问申请 — 智能引擎分支决策
   Scenario: 安全审计取证访问路由到安全管理员并处理完成
     Given "ops-access-requester" 已创建生产服务器访问工单，场景为 "security"
     When 智能引擎执行决策循环
-    Then 工单状态为 "in_progress"
+    Then 工单状态为 "waiting_human"
     And 当前活动类型为 "process"
     And 当前处理任务分配到岗位 "security_admin"
     When 当前活动的被分配人认领并处理完成
@@ -46,7 +46,7 @@ Feature: 生产服务器临时访问申请 — 智能引擎分支决策
   Scenario: 模糊描述下的边界语义判定路由到安全管理员
     Given "ops-access-requester" 已创建生产服务器访问工单，场景为 "boundary_security"
     When 智能引擎执行决策循环
-    Then 工单状态为 "in_progress"
+    Then 工单状态为 "waiting_human"
     And 当前活动类型为 "process"
     And 当前处理任务分配到岗位 "security_admin"
     When 当前活动的被分配人认领并处理完成
@@ -56,7 +56,7 @@ Feature: 生产服务器临时访问申请 — 智能引擎分支决策
   Scenario: 运维分支处理的责任边界验证
     Given "ops-access-requester" 已创建生产服务器访问工单，场景为 "ops"
     When 智能引擎执行决策循环
-    Then 工单状态为 "in_progress"
+    Then 工单状态为 "waiting_human"
     And 当前活动类型为 "process"
     And 当前处理任务分配到岗位 "ops_admin"
     And 当前处理任务仅对 "ops-operator" 可见

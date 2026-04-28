@@ -244,7 +244,13 @@ test-bdd-agentic:
 	@set -a; . ./.env.test; set +a; \
 	go test ./internal/app/itsm/bdd -run '^TestBDDAgentic$$' -v -timeout 30m
 
-.PHONY: web-full-registry web-build web-install web-dev dev dev-sqlite stop-all build run release release-license build-license build-sidecar release-sidecar refer-clone seed seed-dev seed-dev-sqlite reset-pg clean push test test-license test-fuzz test-llm test-pretty test-cover test-report test-llm-report test-tdd test-bdd test-bdd-vpn test-bdd-api test-bdd-agentic
+test-bdd-agentic-vpn:
+	@test -f .env.test || (echo "Missing .env.test — copy .env.test.example and fill in values" && exit 1)
+	@set -a; . ./.env.test; set +a; \
+	ITSM_BDD_PATHS=features/agentic/vpn_smart_flow.feature,features/agentic/vpn_agentic_torture.feature \
+	go test ./internal/app/itsm/bdd -run '^TestBDDAgentic$$' -v -timeout 30m
+
+.PHONY: web-full-registry web-build web-install web-dev dev dev-sqlite stop-all build run release release-license build-license build-sidecar release-sidecar refer-clone seed seed-dev seed-dev-sqlite reset-pg clean push test test-license test-fuzz test-llm test-pretty test-cover test-report test-llm-report test-tdd test-bdd test-bdd-vpn test-bdd-api test-bdd-agentic test-bdd-agentic-vpn
 
 # Backward-compat aliases
 license: build-license

@@ -27,9 +27,9 @@ const vpnCollaborationSpec = `用户在 IT 服务台申请开通 VPN。先让申
 // vpnSampleFormData provides typical VPN request form values for BDD tests.
 // The "request_kind" field drives the exclusive gateway routing.
 var vpnSampleFormData = map[string]any{
-	"request_kind": "network_support",
-	"vpn_type":     "l2tp",
-	"reason":       "需要远程访问内网开发环境",
+	"request_kind": "online_support",
+	"vpn_account":  "vpn-requester@dev.local",
+	"device_usage": "需要远程访问内网开发环境进行线上支持",
 }
 
 // llmConfig holds LLM configuration loaded from environment variables.

@@ -46,6 +46,7 @@ export interface ScriptAssignment {
 export interface WFNodeData {
   label: string
   nodeType: NodeType
+  _layoutDirection?: "TB" | "LR"
   _workflowState?: "active" | "completed" | "failed" | "cancelled" | "idle"
   // form / process
   participants?: Participant[]
