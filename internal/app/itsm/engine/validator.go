@@ -189,15 +189,18 @@ func ValidateWorkflow(workflowJSON json.RawMessage) []ValidationError {
 			errs = append(errs, ValidationError{
 				NodeID:  n.ID,
 				Level:   "blocking",
-				Message: fmt.Sprintf("process 节点 %s 缺少 outcome=\"rejected\" 的出边；协作规范未定义驳回路径时 rejected 应指向统一的驳回结束终态 end_rejected", n.ID),
+				Message: fmt.Sprintf("process 节点 %s 缺少 outcome=\"rejected\" 的出边；协作规范未定义驳回恢复路径时 rejected 应指向公共结束节点，驳回语义由 edge.data.outcome=\"rejected\" 表达", n.ID),
 			})
 		}
 		if hasApproved && hasRejected && approvedTarget != "" && approvedTarget == rejectedTarget {
-			errs = append(errs, ValidationError{
-				NodeID:  n.ID,
-				Level:   "blocking",
-				Message: fmt.Sprintf("process 节点 %s 的 approved 和 rejected 出边指向同一个目标节点 %s；两条出边必须指向不同的目标节点以形成清晰的审批分支", n.ID, approvedTarget),
-			})
+			targetNode := nodeMap[approvedTarget]
+			if targetNode == nil || targetNode.Type != NodeEnd {
+				errs = append(errs, ValidationError{
+					NodeID:  n.ID,
+					Level:   "blocking",
+					Message: fmt.Sprintf("process 节点 %s 的 approved 和 rejected 出边共同指向非结束节点 %s；只有共同结束时才允许两条结果出边指向同一个 end 节点", n.ID, approvedTarget),
+				})
+			}
 		}
 	}
 

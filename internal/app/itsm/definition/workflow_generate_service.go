@@ -441,10 +441,10 @@ func (s *WorkflowGenerateService) buildUserMessage(spec string, actionsCtx strin
 		if validationErrorsRequireRejectedEdgeRepair(prevErrors) {
 			sb.WriteString("\n## 人工节点出边修正要求\n\n")
 			sb.WriteString("- 每个 type=\"process\" 节点都必须有且仅有两条决策出边：一条 data.outcome=\"approved\"，一条 data.outcome=\"rejected\"。\n")
-			sb.WriteString("- rejected 出边不能省略，且不能和 approved 指向同一个目标节点。\n")
-			sb.WriteString("- 如果协作规范没有明确写驳回后补充、返工或恢复路径，rejected 出边必须指向统一的驳回结束终态 end_rejected。\n")
+			sb.WriteString("- rejected 出边不能省略；如果 approved 和 rejected 都表示流程结束，可以共同指向同一个 type=\"end\" 节点。\n")
+			sb.WriteString("- 如果协作规范没有明确写驳回后补充、返工或恢复路径，rejected 出边应指向公共结束节点，驳回语义由 edge.data.outcome=\"rejected\" 表达。\n")
 			sb.WriteString("- 不要凭空生成“退回申请人补充”或 form 返工节点；只有协作规范明确写了补充/返工路径时才允许这样生成。\n")
-			sb.WriteString("- 多个 process 节点如果驳回后都是关闭，应复用同一个 end_rejected；通过后都是完成，应复用同一个 end_completed。\n")
+			sb.WriteString("- 多个 process 节点如果通过或驳回后都是结束，应复用同一个 end 节点，不要拆成“驳回结束”和“完成”。\n")
 		}
 		if validationErrorsRequireGatewayRepair(prevErrors) {
 			sb.WriteString("\n## 网关修正要求\n\n")
@@ -493,7 +493,6 @@ func validationErrorsRequireRejectedEdgeRepair(validationErrors []engine.Validat
 		if strings.Contains(msg, `outcome="approved"`) ||
 			strings.Contains(msg, `outcome="rejected"`) ||
 			strings.Contains(msg, "驳回路径") ||
-			strings.Contains(msg, "end_rejected") ||
 			strings.Contains(msg, "approved 和 rejected") {
 			return true
 		}

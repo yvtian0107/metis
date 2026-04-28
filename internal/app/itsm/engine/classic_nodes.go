@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -31,6 +32,11 @@ func (e *ClassicEngine) handleEnd(tx *gorm.DB, token *executionTokenModel, opera
 		return err
 	}
 
+	status, outcome, err := resolveClassicCompletionStatus(tx, token.TicketID)
+	if err != nil {
+		return err
+	}
+
 	// Complete the token
 	tx.Model(&executionTokenModel{}).Where("id = ?", token.ID).Update("status", TokenCompleted)
 
@@ -56,7 +62,8 @@ func (e *ClassicEngine) handleEnd(tx *gorm.DB, token *executionTokenModel, opera
 			}
 			// Parent is root — complete ticket
 			if err := tx.Model(&ticketModel{}).Where("id = ?", token.TicketID).Updates(map[string]any{
-				"status":              "completed",
+				"status":              status,
+				"outcome":             outcome,
 				"finished_at":         now,
 				"current_activity_id": act.ID,
 			}).Error; err != nil {
@@ -71,7 +78,8 @@ func (e *ClassicEngine) handleEnd(tx *gorm.DB, token *executionTokenModel, opera
 
 	// Root token — complete the ticket
 	if err := tx.Model(&ticketModel{}).Where("id = ?", token.TicketID).Updates(map[string]any{
-		"status":              "completed",
+		"status":              status,
+		"outcome":             outcome,
 		"finished_at":         now,
 		"current_activity_id": act.ID,
 	}).Error; err != nil {
@@ -79,6 +87,28 @@ func (e *ClassicEngine) handleEnd(tx *gorm.DB, token *executionTokenModel, opera
 	}
 
 	return e.recordTimeline(tx, token.TicketID, &act.ID, operatorID, "workflow_completed", "流程已完结")
+}
+
+func resolveClassicCompletionStatus(tx *gorm.DB, ticketID uint) (string, string, error) {
+	var activity activityModel
+	err := tx.Where("ticket_id = ? AND activity_type IN ? AND status IN ?", ticketID,
+		[]string{NodeApprove, NodeForm, NodeProcess}, CompletedActivityStatuses()).
+		Order("finished_at DESC, id DESC").
+		First(&activity).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return TicketStatusCompleted, TicketOutcomeFulfilled, nil
+	}
+	if err != nil {
+		return "", "", err
+	}
+	switch activity.TransitionOutcome {
+	case ActivityRejected:
+		return TicketStatusRejected, TicketOutcomeRejected, nil
+	case ActivityApproved:
+		return TicketStatusCompleted, TicketOutcomeApproved, nil
+	default:
+		return TicketStatusCompleted, TicketOutcomeFulfilled, nil
+	}
 }
 
 func (e *ClassicEngine) handleForm(tx *gorm.DB, token *executionTokenModel, operatorID uint, node *WFNode, data *NodeData) error {

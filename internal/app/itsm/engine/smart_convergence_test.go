@@ -22,6 +22,54 @@ func (m *mockConfigProvider) SLAWarningThresholdSeconds() int           { return
 func (m *mockConfigProvider) SimilarHistoryLimit() int                  { return 5 }
 func (m *mockConfigProvider) ParallelConvergenceTimeout() time.Duration { return m.convergenceTimeout }
 
+func TestSmartCompletionStatusPreservesOutcomeWithSharedEnd(t *testing.T) {
+	tests := []struct {
+		name        string
+		outcome     string
+		wantStatus  string
+		wantOutcome string
+	}{
+		{name: "approved", outcome: ActivityApproved, wantStatus: TicketStatusCompleted, wantOutcome: TicketOutcomeApproved},
+		{name: "rejected", outcome: ActivityRejected, wantStatus: TicketStatusRejected, wantOutcome: TicketOutcomeRejected},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			db := newSmartContinuationDB(t)
+			ticket, activity := createSmartContinuationTicket(t, db, "shared-end", tt.outcome)
+			sharedEndWorkflow := `{
+				"nodes":[
+					{"id":"start","type":"start","data":{"label":"开始"}},
+					{"id":"process","type":"process","data":{"label":"处理","participants":[{"type":"requester"}]}},
+					{"id":"end","type":"end","data":{"label":"完成"}}
+				],
+				"edges":[
+					{"id":"e1","source":"start","target":"process","data":{}},
+					{"id":"e2","source":"process","target":"end","data":{"outcome":"approved"}},
+					{"id":"e3","source":"process","target":"end","data":{"outcome":"rejected"}}
+				]
+			}`
+			if err := db.Model(&ticketModel{}).Where("id = ?", ticket.ID).Update("workflow_json", sharedEndWorkflow).Error; err != nil {
+				t.Fatalf("set workflow json: %v", err)
+			}
+			now := time.Now()
+			if err := db.Model(&activityModel{}).Where("id = ?", activity.ID).Updates(map[string]any{
+				"status":             HumanActivityResultStatus(tt.outcome),
+				"transition_outcome": tt.outcome,
+				"finished_at":        now,
+			}).Error; err != nil {
+				t.Fatalf("complete activity: %v", err)
+			}
+
+			eng := &SmartEngine{}
+			gotStatus, gotOutcome := eng.resolveCompletionStatus(db, ticket.ID)
+			if gotStatus != tt.wantStatus || gotOutcome != tt.wantOutcome {
+				t.Fatalf("ticket status/outcome = %s/%s, want %s/%s", gotStatus, gotOutcome, tt.wantStatus, tt.wantOutcome)
+			}
+		})
+	}
+}
+
 func TestConvergenceTimeoutCancelsPendingActivities(t *testing.T) {
 	db := newSmartContinuationDB(t)
 

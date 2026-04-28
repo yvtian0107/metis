@@ -282,7 +282,7 @@ func TestBuildUserMessage_WithPrevErrors(t *testing.T) {
 func TestBuildUserMessage_GuidesRejectedEdgeRepair(t *testing.T) {
 	svc := &WorkflowGenerateService{}
 	prevErrors := []engine.ValidationError{
-		{NodeID: "node-process", Level: "blocking", Message: `process 节点 node-process 缺少 outcome="rejected" 的出边；协作规范未定义驳回路径时 rejected 应指向统一的驳回结束终态 end_rejected`},
+		{NodeID: "node-process", Level: "blocking", Message: `process 节点 node-process 缺少 outcome="rejected" 的出边；协作规范未定义驳回恢复路径时 rejected 应指向公共结束节点，驳回语义由 edge.data.outcome="rejected" 表达`},
 	}
 	msg := svc.buildUserMessage("处理流程", "", prevErrors)
 
@@ -290,13 +290,18 @@ func TestBuildUserMessage_GuidesRejectedEdgeRepair(t *testing.T) {
 		"人工节点出边修正要求",
 		`data.outcome="approved"`,
 		`data.outcome="rejected"`,
-		"统一的驳回结束终态 end_rejected",
+		"共同指向同一个 type=\"end\" 节点",
+		"驳回语义由 edge.data.outcome=\"rejected\" 表达",
+		"复用同一个 end 节点，不要拆成“驳回结束”和“完成”",
 		"不要凭空生成“退回申请人补充”",
 	}
 	for _, snippet := range requiredSnippets {
 		if !strings.Contains(msg, snippet) {
 			t.Fatalf("message missing rejected edge repair guidance: %s", snippet)
 		}
+	}
+	if strings.Contains(msg, "end_rejected") || strings.Contains(msg, "不能和 approved 指向同一个目标节点") {
+		t.Fatalf("message still contains old rejected end guidance: %s", msg)
 	}
 }
 
@@ -354,11 +359,11 @@ func TestPathBuilderSystemPromptGuidesParallelGateway(t *testing.T) {
 
 func TestPathBuilderSystemPromptReusesEquivalentEndNodes(t *testing.T) {
 	requiredSnippets := []string{
-		"end 节点表达业务终态，不表达“从哪个岗位、部门或分支过来”",
-		"多个通过分支如果本质都是完成，应汇入同一个 end_completed",
-		"多个驳回分支如果本质都是驳回关闭，应汇入同一个 end_rejected",
-		"不要生成“结束（网络管理员通过）”“结束（运维管理员通过）”“结束（信息安全管理员通过）”这类仅按来源岗位命名的重复终点",
-		"只有协作规范明确存在不同业务终态时才拆分 end",
+		"同一个 process 节点的 approved 和 rejected 可以指向同一个 end 节点",
+		"业务结果由 edge.data.outcome 表达，不由 end 节点名称表达",
+		"默认只生成一个公共终态",
+		"多个 process 节点的 rejected 出边如果最终也是结束，也应全部指向同一个 end",
+		"不要生成“驳回结束”“通过完成”",
 	}
 	for _, snippet := range requiredSnippets {
 		if !strings.Contains(PathBuilderSystemPrompt, snippet) {
@@ -369,6 +374,8 @@ func TestPathBuilderSystemPromptReusesEquivalentEndNodes(t *testing.T) {
 	misleadingSnippets := []string{
 		"即使两条路径最终都到达结束，也必须创建两个独立的 end 节点",
 		"不能复用同一个。这样画布上才能清晰呈现 Y 形审批分支",
+		"同一个 process 节点的 approved 和 rejected 必须指向不同的目标节点",
+		"end_rejected",
 	}
 	for _, snippet := range misleadingSnippets {
 		if strings.Contains(PathBuilderSystemPrompt, snippet) {
@@ -425,10 +432,10 @@ func TestWorkflowValidationMessageGuidesSharedRejectedEnd(t *testing.T) {
 	if got == "" {
 		t.Fatalf("expected rejected-edge validation message, got %+v", errs)
 	}
-	if !strings.Contains(got, "统一的驳回结束终态 end_rejected") {
+	if !strings.Contains(got, "公共结束节点") || !strings.Contains(got, `edge.data.outcome="rejected"`) {
 		t.Fatalf("expected shared rejected end guidance, got %q", got)
 	}
-	if strings.Contains(got, "独立的 end 节点") {
+	if strings.Contains(got, "独立的 end 节点") || strings.Contains(got, "end_rejected") {
 		t.Fatalf("validation message still encourages duplicate end nodes: %q", got)
 	}
 }
