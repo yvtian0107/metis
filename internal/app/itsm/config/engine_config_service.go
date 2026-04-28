@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/samber/do/v2"
@@ -21,10 +22,23 @@ const (
 	SmartTicketSLAAssuranceAgentKey = "itsm.smart_ticket.sla_assurance.agent_id"
 	SmartTicketDecisionModeKey      = "itsm.smart_ticket.decision.mode"
 
-	SmartTicketPathModelKey       = "itsm.smart_ticket.path.model_id"
-	SmartTicketPathTemperatureKey = "itsm.smart_ticket.path.temperature"
-	SmartTicketPathMaxRetriesKey  = "itsm.smart_ticket.path.max_retries"
-	SmartTicketPathTimeoutKey     = "itsm.smart_ticket.path.timeout_seconds"
+	SmartTicketPathModelKey        = "itsm.smart_ticket.path.model_id"
+	SmartTicketPathTemperatureKey  = "itsm.smart_ticket.path.temperature"
+	SmartTicketPathMaxRetriesKey   = "itsm.smart_ticket.path.max_retries"
+	SmartTicketPathTimeoutKey      = "itsm.smart_ticket.path.timeout_seconds"
+	SmartTicketPathSystemPromptKey = "itsm.smart_ticket.path.system_prompt"
+
+	SmartTicketSessionTitleModelKey       = "itsm.smart_ticket.session_title.model_id"
+	SmartTicketSessionTitleTemperatureKey = "itsm.smart_ticket.session_title.temperature"
+	SmartTicketSessionTitleMaxRetriesKey  = "itsm.smart_ticket.session_title.max_retries"
+	SmartTicketSessionTitleTimeoutKey     = "itsm.smart_ticket.session_title.timeout_seconds"
+	SmartTicketSessionTitlePromptKey      = "itsm.smart_ticket.session_title.system_prompt"
+
+	SmartTicketPublishHealthModelKey       = "itsm.smart_ticket.publish_health.model_id"
+	SmartTicketPublishHealthTemperatureKey = "itsm.smart_ticket.publish_health.temperature"
+	SmartTicketPublishHealthMaxRetriesKey  = "itsm.smart_ticket.publish_health.max_retries"
+	SmartTicketPublishHealthTimeoutKey     = "itsm.smart_ticket.publish_health.timeout_seconds"
+	SmartTicketPublishHealthPromptKey      = "itsm.smart_ticket.publish_health.system_prompt"
 
 	SmartTicketGuardAuditLevelKey = "itsm.smart_ticket.guard.audit_level"
 	SmartTicketGuardFallbackKey   = "itsm.smart_ticket.guard.fallback_assignee"
@@ -78,8 +92,10 @@ type EngineSettingsConfig struct {
 }
 
 type EngineSettingsRuntime struct {
-	PathBuilder EnginePathConfig  `json:"pathBuilder"`
-	Guard       EngineGuardConfig `json:"guard"`
+	PathBuilder   EnginePathConfig  `json:"pathBuilder"`
+	TitleBuilder  EnginePathConfig  `json:"titleBuilder"`
+	HealthChecker EnginePathConfig  `json:"healthChecker"`
+	Guard         EngineGuardConfig `json:"guard"`
 }
 
 type EngineAgentSelector struct {
@@ -102,8 +118,9 @@ type EngineModelConfig struct {
 
 type EnginePathConfig struct {
 	EngineModelConfig
-	MaxRetries     int `json:"maxRetries"`
-	TimeoutSeconds int `json:"timeoutSeconds"`
+	MaxRetries     int    `json:"maxRetries"`
+	TimeoutSeconds int    `json:"timeoutSeconds"`
+	SystemPrompt   string `json:"systemPrompt"`
 }
 
 type EngineGuardConfig struct {
@@ -144,7 +161,22 @@ type UpdateEngineSettingsRequest struct {
 			Temperature    float64 `json:"temperature"`
 			MaxRetries     int     `json:"maxRetries"`
 			TimeoutSeconds int     `json:"timeoutSeconds"`
+			SystemPrompt   string  `json:"systemPrompt"`
 		} `json:"pathBuilder"`
+		TitleBuilder struct {
+			ModelID        uint    `json:"modelId"`
+			Temperature    float64 `json:"temperature"`
+			MaxRetries     int     `json:"maxRetries"`
+			TimeoutSeconds int     `json:"timeoutSeconds"`
+			SystemPrompt   string  `json:"systemPrompt"`
+		} `json:"titleBuilder"`
+		HealthChecker struct {
+			ModelID        uint    `json:"modelId"`
+			Temperature    float64 `json:"temperature"`
+			MaxRetries     int     `json:"maxRetries"`
+			TimeoutSeconds int     `json:"timeoutSeconds"`
+			SystemPrompt   string  `json:"systemPrompt"`
+		} `json:"healthChecker"`
 		Guard struct {
 			AuditLevel       string `json:"auditLevel"`
 			FallbackAssignee uint   `json:"fallbackAssignee"`
@@ -161,6 +193,7 @@ type LLMEngineRuntimeConfig struct {
 	MaxTokens      int
 	MaxRetries     int
 	TimeoutSeconds int
+	SystemPrompt   string
 }
 
 func (s *EngineConfigService) GetSmartStaffingConfig() (*SmartStaffingConfig, error) {
@@ -208,8 +241,10 @@ func (s *EngineConfigService) UpdateSmartStaffingConfig(req *UpdateSmartStaffing
 func (s *EngineConfigService) GetEngineSettingsConfig() (*EngineSettingsConfig, error) {
 	cfg := &EngineSettingsConfig{
 		Runtime: EngineSettingsRuntime{
-			PathBuilder: s.readPathConfig(),
-			Guard:       s.readGuardConfig(),
+			PathBuilder:   s.readPathConfig(),
+			TitleBuilder:  s.readTitleBuilderConfig(),
+			HealthChecker: s.readHealthCheckerConfig(),
+			Guard:         s.readGuardConfig(),
 		},
 	}
 	cfg.Health = s.buildEngineSettingsHealth(cfg)
@@ -222,14 +257,51 @@ func (s *EngineConfigService) UpdateEngineSettingsConfig(req *UpdateEngineSettin
 			return err
 		}
 	}
+	if req.Runtime.TitleBuilder.ModelID > 0 {
+		if err := s.validateActiveModel(req.Runtime.TitleBuilder.ModelID); err != nil {
+			return err
+		}
+	}
+	if req.Runtime.HealthChecker.ModelID > 0 {
+		if err := s.validateActiveModel(req.Runtime.HealthChecker.ModelID); err != nil {
+			return err
+		}
+	}
 	if err := validateTemperature("参考路径", req.Runtime.PathBuilder.Temperature); err != nil {
+		return err
+	}
+	if err := validateTemperature("会话标题", req.Runtime.TitleBuilder.Temperature); err != nil {
+		return err
+	}
+	if err := validateTemperature("发布健康检查", req.Runtime.HealthChecker.Temperature); err != nil {
 		return err
 	}
 	if req.Runtime.PathBuilder.MaxRetries < 0 || req.Runtime.PathBuilder.MaxRetries > 10 {
 		return fmt.Errorf("%w: 参考路径最大重试次数必须在 0 到 10 之间", ErrInvalidEngineConfig)
 	}
+	if req.Runtime.TitleBuilder.MaxRetries < 0 || req.Runtime.TitleBuilder.MaxRetries > 10 {
+		return fmt.Errorf("%w: 会话标题最大重试次数必须在 0 到 10 之间", ErrInvalidEngineConfig)
+	}
+	if req.Runtime.HealthChecker.MaxRetries < 0 || req.Runtime.HealthChecker.MaxRetries > 10 {
+		return fmt.Errorf("%w: 发布健康检查最大重试次数必须在 0 到 10 之间", ErrInvalidEngineConfig)
+	}
 	if req.Runtime.PathBuilder.TimeoutSeconds < 10 || req.Runtime.PathBuilder.TimeoutSeconds > 300 {
 		return fmt.Errorf("%w: 参考路径超时时间必须在 10 到 300 秒之间", ErrInvalidEngineConfig)
+	}
+	if req.Runtime.TitleBuilder.TimeoutSeconds < 10 || req.Runtime.TitleBuilder.TimeoutSeconds > 300 {
+		return fmt.Errorf("%w: 会话标题超时时间必须在 10 到 300 秒之间", ErrInvalidEngineConfig)
+	}
+	if req.Runtime.HealthChecker.TimeoutSeconds < 10 || req.Runtime.HealthChecker.TimeoutSeconds > 300 {
+		return fmt.Errorf("%w: 发布健康检查超时时间必须在 10 到 300 秒之间", ErrInvalidEngineConfig)
+	}
+	if strings.TrimSpace(req.Runtime.PathBuilder.SystemPrompt) == "" {
+		return fmt.Errorf("%w: 参考路径系统提示词不能为空", ErrInvalidEngineConfig)
+	}
+	if strings.TrimSpace(req.Runtime.TitleBuilder.SystemPrompt) == "" {
+		return fmt.Errorf("%w: 会话标题系统提示词不能为空", ErrInvalidEngineConfig)
+	}
+	if strings.TrimSpace(req.Runtime.HealthChecker.SystemPrompt) == "" {
+		return fmt.Errorf("%w: 发布健康检查系统提示词不能为空", ErrInvalidEngineConfig)
 	}
 	if err := validateAuditLevel(req.Runtime.Guard.AuditLevel); err != nil {
 		return err
@@ -244,6 +316,17 @@ func (s *EngineConfigService) UpdateEngineSettingsConfig(req *UpdateEngineSettin
 	s.setConfigValue(SmartTicketPathTemperatureKey, formatFloat(req.Runtime.PathBuilder.Temperature))
 	s.setConfigValue(SmartTicketPathMaxRetriesKey, strconv.Itoa(req.Runtime.PathBuilder.MaxRetries))
 	s.setConfigValue(SmartTicketPathTimeoutKey, strconv.Itoa(req.Runtime.PathBuilder.TimeoutSeconds))
+	s.setConfigValue(SmartTicketPathSystemPromptKey, strings.TrimSpace(req.Runtime.PathBuilder.SystemPrompt))
+	s.setConfigValue(SmartTicketSessionTitleModelKey, strconv.FormatUint(uint64(req.Runtime.TitleBuilder.ModelID), 10))
+	s.setConfigValue(SmartTicketSessionTitleTemperatureKey, formatFloat(req.Runtime.TitleBuilder.Temperature))
+	s.setConfigValue(SmartTicketSessionTitleMaxRetriesKey, strconv.Itoa(req.Runtime.TitleBuilder.MaxRetries))
+	s.setConfigValue(SmartTicketSessionTitleTimeoutKey, strconv.Itoa(req.Runtime.TitleBuilder.TimeoutSeconds))
+	s.setConfigValue(SmartTicketSessionTitlePromptKey, strings.TrimSpace(req.Runtime.TitleBuilder.SystemPrompt))
+	s.setConfigValue(SmartTicketPublishHealthModelKey, strconv.FormatUint(uint64(req.Runtime.HealthChecker.ModelID), 10))
+	s.setConfigValue(SmartTicketPublishHealthTemperatureKey, formatFloat(req.Runtime.HealthChecker.Temperature))
+	s.setConfigValue(SmartTicketPublishHealthMaxRetriesKey, strconv.Itoa(req.Runtime.HealthChecker.MaxRetries))
+	s.setConfigValue(SmartTicketPublishHealthTimeoutKey, strconv.Itoa(req.Runtime.HealthChecker.TimeoutSeconds))
+	s.setConfigValue(SmartTicketPublishHealthPromptKey, strings.TrimSpace(req.Runtime.HealthChecker.SystemPrompt))
 	s.setConfigValue(SmartTicketGuardAuditLevelKey, req.Runtime.Guard.AuditLevel)
 	s.setConfigValue(SmartTicketGuardFallbackKey, strconv.FormatUint(uint64(req.Runtime.Guard.FallbackAssignee), 10))
 	return nil
@@ -251,7 +334,59 @@ func (s *EngineConfigService) UpdateEngineSettingsConfig(req *UpdateEngineSettin
 
 func (s *EngineConfigService) PathBuilderRuntimeConfig() (LLMEngineRuntimeConfig, error) {
 	cfg := s.readPathConfig()
-	return s.buildLLMRuntimeConfig("参考路径生成引擎", cfg.ModelID, cfg.Temperature, 4096, cfg.MaxRetries, cfg.TimeoutSeconds)
+	if cfg.SystemPrompt == "" {
+		return LLMEngineRuntimeConfig{}, fmt.Errorf("%w: 参考路径系统提示词未配置，请前往引擎设置页面设置", ErrEngineNotConfigured)
+	}
+	if cfg.TimeoutSeconds <= 0 {
+		return LLMEngineRuntimeConfig{}, fmt.Errorf("%w: 参考路径超时时间未配置，请前往引擎设置页面设置", ErrEngineNotConfigured)
+	}
+	if cfg.MaxRetries < 0 {
+		return LLMEngineRuntimeConfig{}, fmt.Errorf("%w: 参考路径重试次数配置无效，请前往引擎设置页面设置", ErrEngineNotConfigured)
+	}
+	runtimeCfg, err := s.buildLLMRuntimeConfig("参考路径生成引擎", cfg.ModelID, cfg.Temperature, 4096, cfg.MaxRetries, cfg.TimeoutSeconds)
+	if err != nil {
+		return LLMEngineRuntimeConfig{}, err
+	}
+	runtimeCfg.SystemPrompt = cfg.SystemPrompt
+	return runtimeCfg, nil
+}
+
+func (s *EngineConfigService) SessionTitleRuntimeConfig() (LLMEngineRuntimeConfig, error) {
+	cfg := s.readTitleBuilderConfig()
+	if cfg.SystemPrompt == "" {
+		return LLMEngineRuntimeConfig{}, fmt.Errorf("%w: 会话标题系统提示词未配置，请前往引擎设置页面设置", ErrEngineNotConfigured)
+	}
+	if cfg.TimeoutSeconds <= 0 {
+		return LLMEngineRuntimeConfig{}, fmt.Errorf("%w: 会话标题超时时间未配置，请前往引擎设置页面设置", ErrEngineNotConfigured)
+	}
+	if cfg.MaxRetries < 0 {
+		return LLMEngineRuntimeConfig{}, fmt.Errorf("%w: 会话标题重试次数配置无效，请前往引擎设置页面设置", ErrEngineNotConfigured)
+	}
+	runtimeCfg, err := s.buildLLMRuntimeConfig("会话标题引擎", cfg.ModelID, cfg.Temperature, 96, cfg.MaxRetries, cfg.TimeoutSeconds)
+	if err != nil {
+		return LLMEngineRuntimeConfig{}, err
+	}
+	runtimeCfg.SystemPrompt = cfg.SystemPrompt
+	return runtimeCfg, nil
+}
+
+func (s *EngineConfigService) HealthCheckRuntimeConfig() (LLMEngineRuntimeConfig, error) {
+	cfg := s.readHealthCheckerConfig()
+	if cfg.SystemPrompt == "" {
+		return LLMEngineRuntimeConfig{}, fmt.Errorf("%w: 发布健康检查系统提示词未配置，请前往引擎设置页面设置", ErrEngineNotConfigured)
+	}
+	if cfg.TimeoutSeconds <= 0 {
+		return LLMEngineRuntimeConfig{}, fmt.Errorf("%w: 发布健康检查超时时间未配置，请前往引擎设置页面设置", ErrEngineNotConfigured)
+	}
+	if cfg.MaxRetries < 0 {
+		return LLMEngineRuntimeConfig{}, fmt.Errorf("%w: 发布健康检查重试次数配置无效，请前往引擎设置页面设置", ErrEngineNotConfigured)
+	}
+	runtimeCfg, err := s.buildLLMRuntimeConfig("发布健康检查引擎", cfg.ModelID, cfg.Temperature, 1024, cfg.MaxRetries, cfg.TimeoutSeconds)
+	if err != nil {
+		return LLMEngineRuntimeConfig{}, err
+	}
+	runtimeCfg.SystemPrompt = cfg.SystemPrompt
+	return runtimeCfg, nil
 }
 
 func (s *EngineConfigService) buildLLMRuntimeConfig(label string, modelID uint, temperature float64, maxTokens int, maxRetries int, timeoutSeconds int) (LLMEngineRuntimeConfig, error) {
@@ -285,10 +420,39 @@ func (s *EngineConfigService) readPathConfig() EnginePathConfig {
 	cfg := EnginePathConfig{
 		EngineModelConfig: EngineModelConfig{
 			ModelID:     uint(s.getConfigInt(SmartTicketPathModelKey, 0)),
-			Temperature: s.getConfigFloat(SmartTicketPathTemperatureKey, 0.3),
+			Temperature: s.getConfigFloat(SmartTicketPathTemperatureKey, 0),
 		},
-		MaxRetries:     s.getConfigInt(SmartTicketPathMaxRetriesKey, 1),
-		TimeoutSeconds: s.getConfigInt(SmartTicketPathTimeoutKey, 60),
+		MaxRetries:     s.getConfigInt(SmartTicketPathMaxRetriesKey, 0),
+		TimeoutSeconds: s.getConfigInt(SmartTicketPathTimeoutKey, 0),
+		SystemPrompt:   strings.TrimSpace(s.getConfigValue(SmartTicketPathSystemPromptKey, "")),
+	}
+	s.fillModelMeta(&cfg.EngineModelConfig)
+	return cfg
+}
+
+func (s *EngineConfigService) readTitleBuilderConfig() EnginePathConfig {
+	cfg := EnginePathConfig{
+		EngineModelConfig: EngineModelConfig{
+			ModelID:     uint(s.getConfigInt(SmartTicketSessionTitleModelKey, 0)),
+			Temperature: s.getConfigFloat(SmartTicketSessionTitleTemperatureKey, 0),
+		},
+		MaxRetries:     s.getConfigInt(SmartTicketSessionTitleMaxRetriesKey, 0),
+		TimeoutSeconds: s.getConfigInt(SmartTicketSessionTitleTimeoutKey, 0),
+		SystemPrompt:   strings.TrimSpace(s.getConfigValue(SmartTicketSessionTitlePromptKey, "")),
+	}
+	s.fillModelMeta(&cfg.EngineModelConfig)
+	return cfg
+}
+
+func (s *EngineConfigService) readHealthCheckerConfig() EnginePathConfig {
+	cfg := EnginePathConfig{
+		EngineModelConfig: EngineModelConfig{
+			ModelID:     uint(s.getConfigInt(SmartTicketPublishHealthModelKey, 0)),
+			Temperature: s.getConfigFloat(SmartTicketPublishHealthTemperatureKey, 0),
+		},
+		MaxRetries:     s.getConfigInt(SmartTicketPublishHealthMaxRetriesKey, 0),
+		TimeoutSeconds: s.getConfigInt(SmartTicketPublishHealthTimeoutKey, 0),
+		SystemPrompt:   strings.TrimSpace(s.getConfigValue(SmartTicketPublishHealthPromptKey, "")),
 	}
 	s.fillModelMeta(&cfg.EngineModelConfig)
 	return cfg
@@ -434,6 +598,8 @@ func (s *EngineConfigService) buildSmartStaffingHealth(cfg *SmartStaffingConfig)
 func (s *EngineConfigService) buildEngineSettingsHealth(cfg *EngineSettingsConfig) EngineHealth {
 	items := []EngineHealthItem{
 		s.pathHealth(cfg.Runtime.PathBuilder),
+		s.titleBuilderHealth(cfg.Runtime.TitleBuilder),
+		s.healthCheckerHealth(cfg.Runtime.HealthChecker),
 		s.guardHealth(cfg.Runtime.Guard),
 	}
 	return EngineHealth{Items: items}
@@ -491,10 +657,32 @@ func (s *EngineConfigService) pathHealth(path EnginePathConfig) EngineHealthItem
 	if base.Status != "pass" {
 		return base
 	}
-	if path.MaxRetries < 0 {
+	if path.MaxRetries < 0 || strings.TrimSpace(path.SystemPrompt) == "" {
 		return EngineHealthItem{Key: "pathBuilder", Label: "参考路径生成", Status: "fail", Message: "参考路径运行参数无效"}
 	}
 	return EngineHealthItem{Key: "pathBuilder", Label: "参考路径生成", Status: "pass", Message: "参考路径生成已就绪"}
+}
+
+func (s *EngineConfigService) titleBuilderHealth(titleCfg EnginePathConfig) EngineHealthItem {
+	base := s.modelEngineHealth("titleBuilder", "会话标题生成", titleCfg.EngineModelConfig, titleCfg.TimeoutSeconds)
+	if base.Status != "pass" {
+		return base
+	}
+	if titleCfg.MaxRetries < 0 || strings.TrimSpace(titleCfg.SystemPrompt) == "" {
+		return EngineHealthItem{Key: "titleBuilder", Label: "会话标题生成", Status: "fail", Message: "会话标题运行参数无效"}
+	}
+	return EngineHealthItem{Key: "titleBuilder", Label: "会话标题生成", Status: "pass", Message: "会话标题生成已就绪"}
+}
+
+func (s *EngineConfigService) healthCheckerHealth(healthCfg EnginePathConfig) EngineHealthItem {
+	base := s.modelEngineHealth("healthChecker", "发布健康检查", healthCfg.EngineModelConfig, healthCfg.TimeoutSeconds)
+	if base.Status != "pass" {
+		return base
+	}
+	if healthCfg.MaxRetries < 0 || strings.TrimSpace(healthCfg.SystemPrompt) == "" {
+		return EngineHealthItem{Key: "healthChecker", Label: "发布健康检查", Status: "fail", Message: "发布健康检查运行参数无效"}
+	}
+	return EngineHealthItem{Key: "healthChecker", Label: "发布健康检查", Status: "pass", Message: "发布健康检查已就绪"}
 }
 
 func (s *EngineConfigService) guardHealth(guard EngineGuardConfig) EngineHealthItem {

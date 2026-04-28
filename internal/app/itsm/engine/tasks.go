@@ -74,7 +74,8 @@ func HandleActionExecute(db *gorm.DB, classicEngine *ClassicEngine, smartEngine 
 			}
 
 			if smartEngine != nil {
-				smartEngine.DispatchDecisionAsync(p.TicketID, &p.ActivityID, "action_completed")
+				event := NewActionFinishedEvent(p.TicketID, p.ActivityID, outcome)
+				smartEngine.DispatchDecisionAsync(event.TicketID, event.CompletedActivityID, event.TriggerReason)
 			}
 			return nil
 		}
@@ -378,7 +379,7 @@ func HandleSmartRecovery(db *gorm.DB, smartEngine *SmartEngine) func(ctx context
 			}
 			recoverySubmissionsMu.Unlock()
 
-			smartEngine.DispatchDecisionAsync(t.ID, nil, "recovery")
+			smartEngine.DispatchDecisionAsync(t.ID, nil, TriggerReasonRecovery)
 
 			// Record submission time
 			recoverySubmissionsMu.Lock()

@@ -401,3 +401,33 @@ func TestSeedEngineConfigMigratesLegacySmartTicketConfig(t *testing.T) {
 		t.Fatalf("expected legacy path agent code to be removed")
 	}
 }
+
+func TestSeedEngineConfigCreatesPromptAndTitleBuilderDefaults(t *testing.T) {
+	db := newSeedAlignmentDB(t)
+	if err := SeedEngineConfig(db); err != nil {
+		t.Fatalf("seed engine config: %v", err)
+	}
+
+	requiredKeys := []string{
+		SmartTicketPathSystemPromptKey,
+		SmartTicketSessionTitleModelKey,
+		SmartTicketSessionTitleTemperatureKey,
+		SmartTicketSessionTitleMaxRetriesKey,
+		SmartTicketSessionTitleTimeoutKey,
+		SmartTicketSessionTitlePromptKey,
+		SmartTicketPublishHealthModelKey,
+		SmartTicketPublishHealthTemperatureKey,
+		SmartTicketPublishHealthMaxRetriesKey,
+		SmartTicketPublishHealthTimeoutKey,
+		SmartTicketPublishHealthPromptKey,
+	}
+	for _, key := range requiredKeys {
+		var cfg coremodel.SystemConfig
+		if err := db.Where("\"key\" = ?", key).First(&cfg).Error; err != nil {
+			t.Fatalf("required config %s missing: %v", key, err)
+		}
+		if strings.TrimSpace(cfg.Value) == "" {
+			t.Fatalf("required config %s has empty value", key)
+		}
+	}
+}

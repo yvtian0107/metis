@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useState, type ReactNode } from "react"
-import { useParams, useNavigate } from "react-router"
+import { useLocation, useParams, useNavigate } from "react-router"
 import { useTranslation } from "react-i18next"
 import { useForm } from "react-hook-form"
 import { z } from "zod"
@@ -16,7 +16,7 @@ import {
   CheckCircle2,
   CircleX,
   Clock,
-  FileText,
+  Info,
   Loader2,
   Play,
   PlusCircle,
@@ -29,12 +29,6 @@ import {
 import { toast } from "sonner"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card"
 import {
   Form,
   FormControl,
@@ -58,10 +52,11 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
 import { Progress } from "@/components/ui/progress"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { usePermission } from "@/hooks/use-permission"
+import { getActiveMenuPermission } from "@/lib/navigation-state"
 import { useAuthStore } from "@/stores/auth"
 import {
   assignTicket,
@@ -77,12 +72,10 @@ import {
   type TicketItem,
   type TimelineItem,
 } from "../../../api"
-import { OverrideActions } from "../../../components/override-actions"
 import { SLABadge } from "../../../components/sla-badge"
 import { TicketStatusBadge } from "../../../components/ticket-status-badge"
-import { SmartFlowVisualization } from "../../../components/smart-flow-visualization"
-import { VariablesPanel } from "../../../components/variables-panel"
 import { WorkflowViewer } from "../../../components/workflow"
+import { TICKET_MENU_PERMISSION } from "../navigation"
 
 const ACTIVE_STATUSES = new Set(["submitted", "waiting_human", "approved_decisioning", "rejected_decisioning", "decisioning", "executing_action"])
 const TERMINAL_STATUSES = new Set(["completed", "rejected", "withdrawn", "cancelled", "failed"])
@@ -194,16 +187,188 @@ function toRecord(value: unknown) {
     : null
 }
 
+function asTrimmedString(value: unknown) {
+  return typeof value === "string" ? value.trim() : ""
+}
+
+function hasCJK(value: string) {
+  return /[\u3400-\u9fff]/.test(value)
+}
+
+interface FieldDisplayMeta {
+  label?: string
+  valueLabels: Record<string, string>
+}
+
+function parseFieldDisplayMeta(schema: unknown) {
+  const root = toRecord(schema)
+  const rawFields = Array.isArray(root?.fields) ? root.fields : []
+  const meta: Record<string, FieldDisplayMeta> = {}
+  for (const rawField of rawFields) {
+    const field = toRecord(rawField)
+    if (!field) continue
+    const key = asTrimmedString(field.key)
+    if (!key) continue
+    const label = asTrimmedString(field.label)
+    const valueLabels: Record<string, string> = {}
+    const rawOptions = Array.isArray(field.options) ? field.options : []
+    for (const rawOption of rawOptions) {
+      const option = toRecord(rawOption)
+      if (option) {
+        const optionLabel = asTrimmedString(option.label)
+        const optionValue = option.value
+        if (optionLabel && optionValue != null) valueLabels[String(optionValue)] = optionLabel
+        continue
+      }
+      if (typeof rawOption === "string" || typeof rawOption === "number" || typeof rawOption === "boolean") {
+        valueLabels[String(rawOption)] = String(rawOption)
+      }
+    }
+    meta[key] = { label: label || undefined, valueLabels }
+  }
+  return meta
+}
+
 function formatDate(value?: string | null) {
   return value ? new Date(value).toLocaleString() : "—"
 }
 
-function summarizeDecision(plan: DecisionPlan | null, fallback?: string | null) {
+function formatDateCompact(value?: string | null) {
+  if (!value) return "—"
+  const d = new Date(value)
+  if (Number.isNaN(d.getTime())) return "—"
+  const pad = (n: number) => String(n).padStart(2, "0")
+  return `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()} ${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
+
+const GENERIC_STEP_TERMS = new Set([
+  "处理",
+  "process",
+  "step",
+  "node",
+  "activity",
+  "步骤",
+  "节点",
+  "活动",
+])
+
+function normalizeStepText(value: string) {
+  return value.trim().toLowerCase().replace(/[\s_-]+/g, "")
+}
+
+function isGenericStepText(value?: string | null) {
+  if (!value) return false
+  return GENERIC_STEP_TERMS.has(normalizeStepText(value))
+}
+
+function mapStepTypeToLabel(stepType?: string | null) {
+  if (!stepType) return null
+  const normalized = normalizeStepText(stepType)
+  if (normalized === "process") return "等待人工处理"
+  if (normalized === "处理") return "等待人工审核"
+  if (normalized === "form" || normalized === "表单") return "等待补充信息"
+  if (normalized === "approve" || normalized === "审批") return "等待审批决策"
+  if (normalized === "action" || normalized === "动作") return "执行自动化动作"
+  return null
+}
+
+function mapStatusToSuggestion(status?: string | null, smartState?: string | null) {
+  const normalizedStatus = normalizeStepText(status ?? "")
+  const normalizedSmartState = normalizeStepText(smartState ?? "")
+  if (normalizedSmartState === "waitinghuman" || normalizedStatus === "waitinghuman") return "等待人工审核"
+  return null
+}
+
+function resolveI18nValue(
+  t: (key: string, options?: Record<string, unknown>) => string,
+  path: string,
+) {
+  const value = t(path, { defaultValue: "" })
+  if (!value || value === path) return ""
+  return value
+}
+
+function resolveFieldLabel(
+  key: string,
+  fieldMeta: Record<string, FieldDisplayMeta>,
+  t: (key: string, options?: Record<string, unknown>) => string,
+  locale: string,
+) {
+  const schemaLabel = fieldMeta[key]?.label || ""
+  const i18nLabel = resolveI18nValue(t, `itsm:tickets.fieldLabels.${key}`)
+  if (locale.startsWith("zh")) return schemaLabel || i18nLabel || key
+  if (i18nLabel) return i18nLabel
+  if (schemaLabel && !hasCJK(schemaLabel)) return schemaLabel
+  return schemaLabel || key
+}
+
+function resolveFieldOptionLabel(
+  fieldKey: string,
+  rawValue: unknown,
+  fieldMeta: Record<string, FieldDisplayMeta>,
+  t: (key: string, options?: Record<string, unknown>) => string,
+  locale: string,
+) {
+  const valueKey = String(rawValue)
+  const schemaLabel = fieldMeta[fieldKey]?.valueLabels[valueKey] || ""
+  const i18nLabel = resolveI18nValue(t, `itsm:tickets.fieldValueLabels.${fieldKey}.${valueKey}`)
+  if (locale.startsWith("zh")) return schemaLabel || i18nLabel || valueKey
+  if (i18nLabel) return i18nLabel
+  if (schemaLabel && !hasCJK(schemaLabel)) return schemaLabel
+  return schemaLabel || valueKey
+}
+
+function resolveFieldDisplayValue(
+  fieldKey: string,
+  rawValue: unknown,
+  fieldMeta: Record<string, FieldDisplayMeta>,
+  t: (key: string, options?: Record<string, unknown>) => string,
+  locale: string,
+) {
+  if (Array.isArray(rawValue)) {
+    const separator = locale.startsWith("zh") ? "、" : ", "
+    return rawValue
+      .map((item) => {
+        if (typeof item === "string" || typeof item === "number" || typeof item === "boolean") {
+          return resolveFieldOptionLabel(fieldKey, item, fieldMeta, t, locale)
+        }
+        return compactValue(item)
+      })
+      .join(separator)
+  }
+  if (typeof rawValue === "string" || typeof rawValue === "number" || typeof rawValue === "boolean") {
+    return resolveFieldOptionLabel(fieldKey, rawValue, fieldMeta, t, locale)
+  }
+  return compactValue(rawValue)
+}
+
+function summarizeDecision(
+  plan: DecisionPlan | null,
+  fallback?: string | null,
+  activityName?: string | null,
+  context?: { activityType?: string | null; ticketStatus?: string | null; smartState?: string | null },
+) {
   const first = plan?.activities?.[0]
-  if (first?.instructions) return first.instructions
-  if (plan?.next_step_name) return plan.next_step_name
-  if (first?.type) return `${first.type}${plan?.execution_mode ? ` · ${plan.execution_mode}` : ""}`
-  return plan?.next_step_type || fallback || "等待系统给出下一步"
+  const candidates = [first?.instructions, plan?.next_step_name, activityName, fallback]
+  let mappedFromGenericCandidate: string | null = null
+  for (const candidate of candidates) {
+    if (!candidate) continue
+    const trimmed = candidate.trim()
+    if (!trimmed) continue
+    if (isGenericStepText(trimmed)) {
+      mappedFromGenericCandidate = mappedFromGenericCandidate ?? mapStepTypeToLabel(trimmed)
+      continue
+    }
+    return trimmed
+  }
+  const mapped = mappedFromGenericCandidate
+    ?? mapStepTypeToLabel(first?.type || plan?.next_step_type)
+    ?? mapStepTypeToLabel(context?.activityType)
+    ?? mapStepTypeToLabel(fallback)
+  if (mapped) return mapped
+  const statusMapped = mapStatusToSuggestion(context?.ticketStatus, context?.smartState)
+  if (statusMapped) return statusMapped
+  return "等待系统给出下一步"
 }
 
 function ownerName(ticket: TicketItem, activity?: ActivityItem | null) {
@@ -228,28 +393,19 @@ function factSource(ticket: TicketItem, t: (key: string) => string) {
   return ticket.source === "agent" ? t("itsm:tickets.sourceAgent") : t("itsm:tickets.sourceCatalog")
 }
 
-function FactItem({ label, value }: { label: string; value: ReactNode }) {
+function DetailItem({ label, value, title }: { label: string; value: ReactNode; title?: string }) {
   return (
-    <div className="min-w-0 rounded-lg border border-border/50 bg-background/35 px-3 py-2">
-      <p className="text-[11px] text-muted-foreground">{label}</p>
-      <div className="mt-1 truncate text-sm font-medium">{value}</div>
-    </div>
-  )
-}
-
-function SectionBlock({ label, value }: { label: string; value: ReactNode }) {
-  return (
-    <div className="rounded-lg border border-border/50 bg-background/35 p-4">
+    <div className="space-y-1.5" title={title}>
       <p className="text-xs font-medium text-muted-foreground">{label}</p>
-      <div className="mt-2 text-sm leading-6 text-foreground">{value}</div>
+      <div className="truncate whitespace-nowrap text-sm leading-6 text-foreground">{value}</div>
     </div>
   )
 }
 
 function DecisionButtonContent({ icon: Icon, children }: { icon: LucideIcon; children: ReactNode }) {
   return (
-    <span className="grid w-[5.25rem] grid-cols-[0.875rem_minmax(0,1fr)] items-center gap-2 text-left text-[11px] leading-none">
-      <Icon className="h-3.5 w-3.5 shrink-0 justify-self-center" />
+    <span className="inline-flex w-full items-center justify-center gap-1.5 text-center text-[11px] leading-none">
+      <Icon className="h-3.5 w-3.5 shrink-0" />
       <span className="truncate font-medium">{children}</span>
     </span>
   )
@@ -286,68 +442,111 @@ function AIEvidencePanel({
   activity?: ActivityItem | null
   plan: DecisionPlan | null
 }) {
+  const { t, i18n } = useTranslation("itsm")
   const formRecord = toRecord(ticket.formData)
   const activityFormRecord = toRecord(activity?.formData)
+  const fieldMeta = parseFieldDisplayMeta(activity?.formSchema)
+  const locale = i18n.resolvedLanguage || i18n.language || "zh-CN"
   const confidence = confidenceOf(activity, plan)
   const confidencePct = confidence == null ? null : Math.round(confidence * 100)
   const firstActivity = plan?.activities?.[0]
+  const nextStepSuggestion = summarizeDecision(
+    plan,
+    ticket.nextStepSummary,
+    activity?.name,
+    { activityType: activity?.activityType, ticketStatus: ticket.status, smartState: ticket.smartState },
+  )
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2 text-base">
+    <section className="workspace-surface rounded-[1.1rem] p-5">
+      <div className="flex items-center gap-2 text-base font-semibold">
           <Bot className="h-4 w-4" />
           AI 依据
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-5">
-        <div className="grid gap-3 md:grid-cols-3">
-          <SectionBlock
-            label="判断依据"
-            value={activity?.aiReasoning ? "AI 已记录推理摘要" : formRecord ? "申请字段与运行轨迹" : "流程运行轨迹"}
-          />
-          <SectionBlock label="下一步建议" value={summarizeDecision(plan, ticket.nextStepSummary)} />
-          <SectionBlock label="置信度" value={confidencePct == null ? "—" : `${confidencePct}%`} />
-        </div>
+      </div>
 
+      <div className="mt-4 grid gap-x-8 gap-y-4 border-b border-border/45 pb-4 md:grid-cols-3">
+        <DetailItem
+          label="判断依据"
+          value={activity?.aiReasoning ? "AI 已记录推理摘要" : formRecord ? "申请字段与运行轨迹" : "流程运行轨迹"}
+        />
+        <DetailItem label="下一步建议" value={nextStepSuggestion} title={nextStepSuggestion} />
+        <div className="space-y-1.5">
+          <div className="inline-flex items-center gap-1 text-xs font-medium text-muted-foreground">
+            <span>置信度</span>
+            {activity?.aiReasoning && (
+              <Popover>
+                <PopoverTrigger asChild>
+                  <button
+                    type="button"
+                    aria-label="查看推理摘要"
+                    className="inline-flex h-4 w-4 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                  >
+                    <Info className="h-3.5 w-3.5" />
+                  </button>
+                </PopoverTrigger>
+                <PopoverContent align="end" className="w-[22rem] max-w-[85vw] p-3">
+                  <p className="text-xs font-medium text-foreground">推理摘要</p>
+                  <p className="mt-2 max-h-60 overflow-y-auto whitespace-pre-wrap pr-1 text-xs leading-5 text-muted-foreground">
+                    {activity.aiReasoning}
+                  </p>
+                </PopoverContent>
+              </Popover>
+            )}
+          </div>
+          <div className="truncate whitespace-nowrap text-sm leading-6 text-foreground">
+            {confidencePct == null ? "—" : `${confidencePct}%`}
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-4 space-y-5">
         {confidencePct != null && (
-          <div className="rounded-lg border border-border/50 bg-background/35 p-4">
-            <div className="mb-2 flex items-center justify-between text-xs text-muted-foreground">
-              <span>置信度边界</span>
-              <span>{confidencePct >= 80 ? "可自动推进" : confidencePct >= 50 ? "建议观察" : "需要人工确认"}</span>
-            </div>
+          <div className="space-y-2">
+            <div className="text-xs text-muted-foreground">置信度</div>
             <Progress value={confidencePct} className="h-2" />
           </div>
         )}
 
-        {activity?.aiReasoning && (
-          <div className="space-y-2">
-            <p className="text-sm font-medium">推理摘要</p>
-            <p className="whitespace-pre-wrap rounded-lg border border-border/50 bg-background/45 p-4 text-sm leading-6 text-muted-foreground">
-              {activity.aiReasoning}
-            </p>
-          </div>
-        )}
-
         {firstActivity && (
-          <div className="grid gap-3 md:grid-cols-4">
-            <SectionBlock label="步骤类型" value={firstActivity.type || plan?.next_step_type || "—"} />
-            <SectionBlock label="执行模式" value={plan?.execution_mode || "single"} />
-            <SectionBlock label="参与者" value={firstActivity.participant_name || firstActivity.participant_type || firstActivity.participant_id || "—"} />
-            <SectionBlock label="动作 ID" value={firstActivity.action_id || "—"} />
+          <div className="grid gap-x-8 gap-y-4 border-t border-border/45 pt-4 md:grid-cols-4">
+            <DetailItem label="步骤类型" value={firstActivity.type || plan?.next_step_type || "—"} />
+            <DetailItem label="执行模式" value={plan?.execution_mode || "single"} />
+            <DetailItem label="参与者" value={firstActivity.participant_name || firstActivity.participant_type || firstActivity.participant_id || "—"} />
+            <DetailItem label="动作 ID" value={firstActivity.action_id || "—"} />
           </div>
         )}
 
         {(formRecord || activityFormRecord) && (
-          <div className="space-y-2">
+          <div className="space-y-2 border-t border-border/45 pt-4">
             <p className="text-sm font-medium">申请字段</p>
-            <div className="grid gap-2 md:grid-cols-2">
-              {Object.entries(activityFormRecord ?? formRecord ?? {}).slice(0, 10).map(([key, value]) => (
-                <div key={key} className="rounded-lg border border-border/50 bg-background/45 p-3 text-xs">
-                  <span className="text-muted-foreground">{key}</span>
-                  <p className="mt-1 truncate font-medium">{compactValue(value)}</p>
-                </div>
-              ))}
+            <div className="grid gap-x-6 gap-y-0.5 md:grid-cols-2">
+              {Object.entries(activityFormRecord ?? formRecord ?? {}).slice(0, 10).map(([key, value]) => {
+                const displayLabel = resolveFieldLabel(key, fieldMeta, t, locale)
+                const displayValue = resolveFieldDisplayValue(key, value, fieldMeta, t, locale)
+                const isLongField = /(remark|description|comment|note|reason|详情|描述|备注|说明|原因)/i.test(key)
+                return (
+                  <div
+                    key={key}
+                    className={`min-w-0 border-b border-border/35 py-3 ${isLongField ? "md:col-span-2" : ""}`}
+                  >
+                    <p className="truncate whitespace-nowrap text-[11px] font-medium text-muted-foreground/90" title={displayLabel}>
+                      {displayLabel}
+                    </p>
+                    {isLongField ? (
+                    <p
+                      className="mt-1 overflow-hidden text-[15px] font-medium leading-6 text-foreground [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2]"
+                      title={displayValue}
+                    >
+                      {displayValue}
+                    </p>
+                  ) : (
+                    <p className="mt-1 truncate whitespace-nowrap text-[15px] font-medium leading-6 text-foreground" title={displayValue}>
+                      {displayValue}
+                    </p>
+                  )}
+                  </div>
+                )
+              })}
             </div>
           </div>
         )}
@@ -360,20 +559,17 @@ function AIEvidencePanel({
         {!activity?.aiReasoning && !plan && !formRecord && (
           <p className="text-sm text-muted-foreground">暂无结构化 AI 证据，先查看流程轨迹与审计时间线。</p>
         )}
-      </CardContent>
-    </Card>
+      </div>
+    </section>
   )
 }
 
 function TimelinePanel({ timeline }: { timeline: TimelineItem[] }) {
   const { t } = useTranslation(["itsm", "common"])
-
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-base">{t("itsm:tickets.timeline")}</CardTitle>
-      </CardHeader>
-      <CardContent>
+    <section className="workspace-surface rounded-[1.1rem] p-5">
+      <h3 className="text-base font-semibold">{t("itsm:tickets.timeline")}</h3>
+      <div className="mt-4">
         {timeline.length === 0 ? (
           <p className="text-sm text-muted-foreground">{t("itsm:tickets.empty")}</p>
         ) : (
@@ -382,7 +578,7 @@ function TimelinePanel({ timeline }: { timeline: TimelineItem[] }) {
               const style = TIMELINE_EVENT_STYLE[event.eventType] ?? DEFAULT_EVENT_STYLE
               const Icon = style.icon
               return (
-                <div key={event.id} className="flex gap-3 pb-6 last:pb-0">
+                <div key={event.id} className="flex gap-3 pb-5 last:pb-0">
                   <div className="flex flex-col items-center">
                     <div className={`flex h-6 w-6 items-center justify-center rounded-full ${style.bg}`}>
                       <Icon className={`h-3 w-3 ${style.fg}`} />
@@ -410,14 +606,256 @@ function TimelinePanel({ timeline }: { timeline: TimelineItem[] }) {
             })}
           </div>
         )}
-      </CardContent>
-    </Card>
+      </div>
+    </section>
   )
+}
+
+function CompactEmpty({ text }: { text: string }) {
+  return (
+    <section className="workspace-surface rounded-[1.1rem] p-5 text-sm text-muted-foreground">
+      {text}
+    </section>
+  )
+}
+
+function ticketSummaryText(ticket: TicketItem) {
+  return ticket.description || ticket.title
+}
+
+function conciseSLA(ticket: TicketItem, t: (key: string) => string) {
+  const map: Record<string, string> = {
+    on_track: t("itsm:tickets.slaOnTrack"),
+    breached_response: t("itsm:tickets.slaBreachedResponse"),
+    breached_resolution: t("itsm:tickets.slaBreachedResolution"),
+    normal: t("itsm:tickets.slaNormal"),
+    warning: t("itsm:tickets.slaWarning"),
+    breached: t("itsm:tickets.slaBreached"),
+  }
+  return map[ticket.slaStatus] ?? ticket.slaStatus ?? "—"
+}
+
+function SummaryChip({ children }: { children: ReactNode }) {
+  return (
+    <div className="inline-flex items-center gap-2 rounded-full border border-border/55 bg-background/35 px-3 py-1 text-xs font-medium text-muted-foreground">
+      {children}
+    </div>
+  )
+}
+
+function DividerMeta({ label, value, title }: { label: string; value: ReactNode; title?: string }) {
+  return (
+    <div className="min-w-0 space-y-1" title={title}>
+      <p className="truncate whitespace-nowrap text-[11px] text-muted-foreground">{label}</p>
+      <p className="truncate whitespace-nowrap text-sm font-medium tracking-[-0.01em]">{value}</p>
+    </div>
+  )
+}
+
+function SummaryBand({
+  ticket,
+  owner,
+  nextStep,
+  t,
+}: {
+  ticket: TicketItem
+  owner: string
+  nextStep: string
+  t: (key: string) => string
+}) {
+  const summary = ticketSummaryText(ticket)
+  return (
+    <section className="workspace-surface rounded-[1.2rem] p-5">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/45 pb-3">
+        <SummaryChip>
+          <ShieldCheck className="h-3.5 w-3.5" />
+          处置摘要
+        </SummaryChip>
+        <p className="text-sm">
+          <span className="text-muted-foreground">当前责任方</span>
+          <span className="ml-2 font-semibold">{owner}</span>
+        </p>
+      </div>
+
+      <div className="grid gap-4 border-b border-border/45 py-4 lg:grid-cols-[minmax(0,1fr)_minmax(220px,0.45fr)]">
+        <DividerMeta label="工单诉求" value={summary} title={summary} />
+        <DividerMeta label="下一步" value={nextStep} title={nextStep} />
+      </div>
+
+      <div className="grid gap-x-5 gap-y-3 pt-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+        <DividerMeta label={t("itsm:tickets.service")} value={ticket.serviceName} title={ticket.serviceName} />
+        <DividerMeta
+          label={t("itsm:tickets.priority")}
+          value={(
+            <span className="inline-flex min-w-0 items-center gap-1.5">
+              <span className="inline-block h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: ticket.priorityColor }} />
+              <span className="truncate">{ticket.priorityName}</span>
+            </span>
+          )}
+          title={ticket.priorityName}
+        />
+        <DividerMeta label={t("itsm:tickets.requester")} value={ticket.requesterName} title={ticket.requesterName} />
+        <DividerMeta label={t("itsm:tickets.source")} value={factSource(ticket, t)} title={factSource(ticket, t)} />
+        <DividerMeta label={t("itsm:tickets.createdAt")} value={formatDateCompact(ticket.createdAt)} title={formatDate(ticket.createdAt)} />
+        <DividerMeta label={t("itsm:tickets.slaStatus")} value={conciseSLA(ticket, t)} title={conciseSLA(ticket, t)} />
+      </div>
+    </section>
+  )
+}
+
+function FlatAside({
+  ticket,
+  owner,
+  confidencePct,
+  decisioningMessage,
+  isDecisioning,
+  isActive,
+  activeHumanActivity,
+  isCurrentUserResponsible,
+  progressPending,
+  openApprovalSheet,
+  getNodeOutcomes,
+  outcomeLabel,
+  t,
+  canProcess,
+  canAssign,
+  assignForm,
+  setAssignOpen,
+  canCancel,
+  cancelForm,
+  setCancelOpen,
+  canWithdraw,
+  withdrawForm,
+  setWithdrawOpen,
+  actionableActivity,
+}: {
+  ticket: TicketItem
+  owner: string
+  confidencePct: number | null
+  decisioningMessage: string
+  isDecisioning: boolean
+  isActive: boolean
+  activeHumanActivity: ActivityItem | undefined
+  isCurrentUserResponsible: boolean
+  progressPending: boolean
+  openApprovalSheet: (activityId: number, outcome: ApprovalOutcome) => void
+  getNodeOutcomes: (activityType: string) => ApprovalOutcome[]
+  outcomeLabel: (activity: ActivityItem, outcome: string, t: (key: string) => string) => string
+  t: (key: string) => string
+  canProcess: boolean
+  canAssign: boolean
+  assignForm: ReturnType<typeof useForm<{ assigneeId: number }>>
+  setAssignOpen: (open: boolean) => void
+  canCancel: boolean
+  cancelForm: ReturnType<typeof useForm<{ reason: string }>>
+  setCancelOpen: (open: boolean) => void
+  canWithdraw: boolean
+  withdrawForm: ReturnType<typeof useForm<{ reason: string }>>
+  setWithdrawOpen: (open: boolean) => void
+  actionableActivity: ActivityItem | undefined
+}) {
+  return (
+    <aside className="workspace-surface rounded-[1.2rem] p-4">
+      <div className="flex items-center justify-between gap-3 border-b border-border/45 pb-3">
+        <h3 className="inline-flex items-center gap-2 text-base font-semibold">
+          <CheckCircle2 className="h-4 w-4" />
+          处置栏
+        </h3>
+        {confidencePct != null && (
+          <Badge variant={confidencePct >= 80 ? "default" : confidencePct >= 50 ? "secondary" : "destructive"} className="h-6 px-2 text-[11px]">
+            {t("itsm:smart.confidence")} {confidencePct}%
+          </Badge>
+        )}
+      </div>
+
+      <div className="grid grid-cols-2 gap-x-4 gap-y-3 py-3 text-sm">
+        <DetailItem label="责任人" value={owner} title={owner} />
+        <DetailItem label="SLA 风险" value={<SLABadge slaStatus={ticket.slaStatus} slaResolutionDeadline={ticket.slaResolutionDeadline} />} />
+        <DetailItem label={t("itsm:tickets.slaResponseDeadline")} value={formatDateCompact(ticket.slaResponseDeadline)} title={formatDate(ticket.slaResponseDeadline)} />
+        <DetailItem label={t("itsm:tickets.slaResolutionDeadline")} value={formatDateCompact(ticket.slaResolutionDeadline)} title={formatDate(ticket.slaResolutionDeadline)} />
+      </div>
+
+      <div className="grid grid-cols-2 gap-2 border-t border-border/50 pt-3 [&_[data-slot=button]]:h-8 [&_[data-slot=button]]:text-xs">
+        {isDecisioning && (
+          <p className="col-span-2 inline-flex items-center gap-2 rounded-lg border border-sky-200 bg-sky-50 p-3 text-sm text-sky-800">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            {decisioningMessage}
+          </p>
+        )}
+
+        {canProcess && isActive && !isDecisioning && activeHumanActivity && isCurrentUserResponsible && getNodeOutcomes(activeHumanActivity.activityType).map((outcome) => (
+          <Button
+            data-testid={outcome === "approved" ? "itsm-ticket-approve-button" : "itsm-ticket-reject-button"}
+            key={`${activeHumanActivity.id}-${outcome}`}
+            size="sm"
+                    className={outcome === "rejected" ? "w-full text-destructive" : "w-full"}
+                    variant={outcome === "approved" ? "default" : "outline"}
+                    disabled={progressPending}
+                    onClick={() => openApprovalSheet(activeHumanActivity.id, outcome)}
+                  >
+            <DecisionButtonContent icon={outcome === "approved" ? CheckCircle2 : CircleX}>{outcomeLabel(activeHumanActivity, outcome, t)}</DecisionButtonContent>
+          </Button>
+        ))}
+
+        {isActive && !isDecisioning && canAssign && (
+          <Button size="sm" variant="outline" className="w-full" onClick={() => { assignForm.reset({ assigneeId: ticket.assigneeId ?? 0 }); setAssignOpen(true) }}>
+            <DecisionButtonContent icon={UserPlus}>{t("itsm:tickets.assign")}</DecisionButtonContent>
+          </Button>
+        )}
+
+        {isActive && !isDecisioning && canCancel && (
+          <Button size="sm" variant="outline" className="w-full text-destructive" onClick={() => { cancelForm.reset({ reason: "" }); setCancelOpen(true) }}>
+            <DecisionButtonContent icon={CircleX}>{t("itsm:tickets.cancel")}</DecisionButtonContent>
+          </Button>
+        )}
+
+        {canWithdraw && (
+          <Button size="sm" variant="outline" className="w-full" onClick={() => { withdrawForm.reset({ reason: "" }); setWithdrawOpen(true) }}>
+            <DecisionButtonContent icon={RotateCcw}>{t("itsm:tickets.withdraw")}</DecisionButtonContent>
+          </Button>
+        )}
+
+        {isActive && !isDecisioning && actionableActivity && !isCurrentUserResponsible && (
+          <p className="col-span-2 rounded-lg border border-border/50 bg-background/35 p-3 text-sm text-muted-foreground">
+            当前步骤正在等待责任人处理，你可以查看依据和审计记录。
+          </p>
+        )}
+      </div>
+    </aside>
+  )
+}
+
+function renderFlowTab(
+  ticket: TicketItem,
+  activities: ActivityItem[],
+  tokens: unknown[],
+  t: (key: string) => string,
+) {
+  if (ticket.engineType === "smart") {
+    return null
+  }
+  if (ticket.workflowJson) {
+    return (
+      <section className="workspace-surface rounded-[1.1rem] p-5">
+        <h3 className="text-base font-semibold">{t("itsm:workflow.viewer.workflowGraph")}</h3>
+        <div className="mt-4 overflow-visible">
+          <WorkflowViewer
+            workflowJson={ticket.workflowJson}
+            activities={activities}
+            tokens={tokens as never[]}
+            currentActivityId={ticket.currentActivityId}
+          />
+        </div>
+      </section>
+    )
+  }
+  return <CompactEmpty text="暂无流程图。" />
 }
 
 export function Component() {
   const { t } = useTranslation(["itsm", "common"])
   const { id } = useParams<{ id: string }>()
+  const location = useLocation()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const ticketId = Number(id)
@@ -431,7 +869,12 @@ export function Component() {
 
   const canAssign = usePermission("itsm:ticket:assign")
   const canCancel = usePermission("itsm:ticket:cancel")
-  const canOverride = usePermission("itsm:ticket:override")
+  const activeMenuPermission = getActiveMenuPermission(location.state)
+  const canProcessFromEntry = activeMenuPermission === TICKET_MENU_PERMISSION.approvalPending
+  const canManageFromEntry = activeMenuPermission === TICKET_MENU_PERMISSION.list || activeMenuPermission === "itsm:ticket:monitor"
+  const canWithdrawFromEntry = activeMenuPermission === TICKET_MENU_PERMISSION.mine
+  const canAssignFromEntry = canAssign && canManageFromEntry
+  const canCancelFromEntry = canCancel && canManageFromEntry
   const currentUser = useAuthStore((s) => s.user)
   const currentUserId = currentUser?.id ?? 0
 
@@ -493,10 +936,22 @@ export function Component() {
     defaultValues: { opinion: "" },
   })
 
-  const invalidateTicket = () => {
+  const invalidateTicketDetail = () => {
     queryClient.invalidateQueries({ queryKey: ["itsm-ticket", ticketId] })
     queryClient.invalidateQueries({ queryKey: ["itsm-ticket-timeline", ticketId] })
     queryClient.invalidateQueries({ queryKey: ["itsm-ticket-activities", ticketId] })
+  }
+
+  const invalidateTicketLists = () => {
+    queryClient.invalidateQueries({ queryKey: ["itsm-ticket-monitor"] })
+    queryClient.invalidateQueries({ queryKey: ["itsm-tickets-mine"] })
+    queryClient.invalidateQueries({ queryKey: ["itsm-ticket-approval-pending"] })
+    queryClient.invalidateQueries({ queryKey: ["itsm-ticket-approval-history"] })
+  }
+
+  const invalidateTicket = () => {
+    invalidateTicketDetail()
+    invalidateTicketLists()
   }
 
   const markSmartDecisioning = (message: string) => {
@@ -515,7 +970,7 @@ export function Component() {
         nextStepSummary: "后台决策中",
         smartState: "ai_reasoning",
         status: rejected ? "rejected_decisioning" : "approved_decisioning",
-        statusLabel: rejected ? "驳回后决策中" : "通过后决策中",
+        statusLabel: rejected ? "已驳回，决策中" : "已同意，决策中",
         statusTone: "progress",
       }
     })
@@ -564,7 +1019,7 @@ export function Component() {
       toast.success(t("itsm:tickets.progressSuccess"))
     },
     onError: (err) => {
-      invalidateTicket()
+      invalidateTicketDetail()
       toast.error(err.message)
     },
   })
@@ -608,14 +1063,20 @@ export function Component() {
   const confidence = confidenceOf(explanationActivity, plan)
   const confidencePct = confidence == null ? null : Math.round(confidence * 100)
   const isActive = ticket ? ACTIVE_STATUSES.has(ticket.status) : false
-  const isTerminal = ticket ? TERMINAL_STATUSES.has(ticket.status) : false
   const isDecisioning = ticket?.engineType === "smart" && ticket.smartState === "ai_reasoning"
-  const canWithdraw = Boolean(ticket && isActive && !isDecisioning && ticket.status === "submitted" && ticket.requesterId === currentUserId)
+  const canWithdraw = Boolean(canWithdrawFromEntry && ticket && isActive && !isDecisioning && ticket.status === "submitted" && ticket.requesterId === currentUserId)
   const actionableActivity = activeHumanActivity
   const isCurrentUserResponsible = Boolean(
     ticket?.canAct || actionableActivity?.canAct || (ticket?.assigneeId && ticket.assigneeId === currentUserId),
   )
-  const nextStep = ticket ? (isDecisioning ? t("itsm:tickets.statusDecisioning") : summarizeDecision(plan, ticket.nextStepSummary || actionableActivity?.name)) : ""
+  const nextStep = ticket
+    ? (isDecisioning ? t("itsm:tickets.statusDecisioning") : summarizeDecision(
+      plan,
+      ticket.nextStepSummary,
+      actionableActivity?.name,
+      { activityType: actionableActivity?.activityType, ticketStatus: ticket.status, smartState: ticket.smartState },
+    ))
+    : ""
   const owner = ticket ? ownerName(ticket, actionableActivity) : "—"
 
   if (isLoading) {
@@ -647,218 +1108,46 @@ export function Component() {
               <TicketStatusBadge ticket={ticket} />
               <Badge variant="outline">{ticket.engineType === "smart" ? "智能工单" : "经典流程"}</Badge>
             </div>
-            <p className="workspace-page-description">{ticket.title}</p>
           </div>
         </div>
       </div>
 
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_300px]">
         <main className="min-w-0 space-y-4">
-          <section className="workspace-surface rounded-[1.25rem] p-5">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div className="inline-flex items-center gap-2 rounded-full border border-border/60 bg-background/45 px-3 py-1 text-xs font-medium text-muted-foreground">
-                <ShieldCheck className="h-3.5 w-3.5" />
-                处置摘要
-              </div>
-              <div className="text-sm">
-                <span className="text-muted-foreground">当前责任方</span>
-                <span className="ml-2 font-semibold">{owner}</span>
-              </div>
-            </div>
-
-            <div className="mt-4 grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(240px,0.55fr)]">
-              <SectionBlock
-                label="工单诉求"
-                value={ticket.description ? <span className="whitespace-pre-wrap">{ticket.description}</span> : ticket.title}
-              />
-              <SectionBlock label="下一步" value={nextStep} />
-            </div>
-
-            <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
-              <FactItem label={t("itsm:tickets.service")} value={ticket.serviceName} />
-              <FactItem
-                label={t("itsm:tickets.priority")}
-                value={(
-                  <span className="inline-flex min-w-0 items-center gap-1.5">
-                    <span className="inline-block h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: ticket.priorityColor }} />
-                    <span className="truncate">{ticket.priorityName}</span>
-                  </span>
-                )}
-              />
-              <FactItem label={t("itsm:tickets.requester")} value={ticket.requesterName} />
-              <FactItem label={t("itsm:tickets.source")} value={factSource(ticket, t)} />
-              <FactItem label={t("itsm:tickets.createdAt")} value={formatDate(ticket.createdAt)} />
-              <FactItem label={t("itsm:tickets.slaStatus")} value={<SLABadge slaStatus={ticket.slaStatus} slaResolutionDeadline={ticket.slaResolutionDeadline} />} />
-            </div>
-          </section>
-
-          <Tabs defaultValue="ai" className="space-y-3">
-            <TabsList className="workspace-surface rounded-xl p-1.5" variant="default">
-              <TabsTrigger value="ai">
-                <Bot className="h-4 w-4" />
-                AI 依据
-              </TabsTrigger>
-              <TabsTrigger value="flow">
-                <ShieldCheck className="h-4 w-4" />
-                流程轨迹
-              </TabsTrigger>
-              <TabsTrigger value="variables">
-                <FileText className="h-4 w-4" />
-                变量
-              </TabsTrigger>
-              <TabsTrigger value="timeline">
-                <Clock className="h-4 w-4" />
-                时间线
-              </TabsTrigger>
-            </TabsList>
-
-            <TabsContent value="ai">
-              <AIEvidencePanel ticket={ticket} activity={explanationActivity} plan={plan} />
-            </TabsContent>
-
-            <TabsContent value="flow">
-              {ticket.engineType === "smart" ? (
-                activities.length > 0 ? (
-                  <SmartFlowVisualization activities={activities} currentActivityId={ticket.currentActivityId} />
-                ) : (
-                  <Card>
-                    <CardContent className="py-8 text-sm text-muted-foreground">暂无活动记录。</CardContent>
-                  </Card>
-                )
-              ) : ticket.workflowJson ? (
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="text-base">{t("itsm:workflow.viewer.workflowGraph")}</CardTitle>
-                  </CardHeader>
-                  <CardContent className="overflow-visible">
-                    <WorkflowViewer
-                      workflowJson={ticket.workflowJson}
-                      activities={activities}
-                      tokens={tokens}
-                      currentActivityId={ticket.currentActivityId}
-                    />
-                  </CardContent>
-                </Card>
-              ) : (
-                <Card>
-                  <CardContent className="py-8 text-sm text-muted-foreground">暂无流程图。</CardContent>
-                </Card>
-              )}
-            </TabsContent>
-
-            <TabsContent value="variables">
-              <VariablesPanel ticketId={ticketId} />
-            </TabsContent>
-
-            <TabsContent value="timeline">
-              <TimelinePanel timeline={timeline} />
-            </TabsContent>
-          </Tabs>
+          <SummaryBand ticket={ticket} owner={owner} nextStep={nextStep} t={t} />
+          <AIEvidencePanel ticket={ticket} activity={explanationActivity} plan={plan} />
+          <TimelinePanel timeline={timeline} />
+          {renderFlowTab(ticket, activities, tokens, t)}
         </main>
 
-        <aside className="xl:sticky xl:top-4 xl:self-start">
-          <Card className="py-5">
-            <CardHeader className="px-5 pb-1">
-              <CardTitle className="flex items-center justify-between gap-3 text-base">
-                <span className="inline-flex items-center gap-2">
-                  <CheckCircle2 className="h-4 w-4" />
-                  处置栏
-                </span>
-                {confidencePct != null && (
-                  <Badge variant={confidencePct >= 80 ? "default" : confidencePct >= 50 ? "secondary" : "destructive"} className="h-6 px-2 text-[11px]">
-                    {t("itsm:smart.confidence")} {confidencePct}%
-                  </Badge>
-                )}
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4 px-5">
-              <div className="grid grid-cols-2 gap-x-4 gap-y-3">
-                <div className="text-sm">
-                  <span className="text-muted-foreground">责任人</span>
-                  <p className="mt-1 font-medium">{owner}</p>
-                </div>
-                <div className="text-sm">
-                  <span className="text-muted-foreground">SLA 风险</span>
-                  <div className="mt-1">
-                    <SLABadge slaStatus={ticket.slaStatus} slaResolutionDeadline={ticket.slaResolutionDeadline} />
-                  </div>
-                </div>
-                <div className="text-sm">
-                  <span className="text-muted-foreground">{t("itsm:tickets.slaResponseDeadline")}</span>
-                  <p className="mt-1 text-xs">{formatDate(ticket.slaResponseDeadline)}</p>
-                </div>
-                <div className="text-sm">
-                  <span className="text-muted-foreground">{t("itsm:tickets.slaResolutionDeadline")}</span>
-                  <p className="mt-1 text-xs">{formatDate(ticket.slaResolutionDeadline)}</p>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-2 border-t border-border/50 pt-3 [&_[data-slot=button]]:h-8 [&_[data-slot=button]]:text-xs">
-                {isDecisioning && (
-                  <p className="col-span-2 inline-flex items-center gap-2 rounded-lg border border-sky-200 bg-sky-50 p-3 text-sm text-sky-800">
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    {decisioningMessage}
-                  </p>
-                )}
-
-                {isActive && !isDecisioning && activeHumanActivity && isCurrentUserResponsible && getNodeOutcomes(activeHumanActivity.activityType).map((outcome) => (
-                  <Button
-                    data-testid={outcome === "approved" ? "itsm-ticket-approve-button" : "itsm-ticket-reject-button"}
-                    key={`${activeHumanActivity.id}-${outcome}`}
-                    size="sm"
-                    className={outcome === "rejected" ? "w-full text-destructive" : "w-full"}
-                    variant={outcome === "approved" ? "default" : "outline"}
-                    disabled={progressMut.isPending}
-                    onClick={() => openApprovalSheet(activeHumanActivity.id, outcome)}
-                  >
-                    <DecisionButtonContent icon={outcome === "approved" ? CheckCircle2 : CircleX}>{outcomeLabel(activeHumanActivity, outcome, t)}</DecisionButtonContent>
-                  </Button>
-                ))}
-
-                {isActive && !isDecisioning && canAssign && (
-                  <Button size="sm" variant="outline" className="w-full" onClick={() => { assignForm.reset({ assigneeId: ticket.assigneeId ?? 0 }); setAssignOpen(true) }}>
-                    <DecisionButtonContent icon={UserPlus}>{t("itsm:tickets.assign")}</DecisionButtonContent>
-                  </Button>
-                )}
-
-                {isActive && ticket.engineType === "smart" && canOverride && (
-                  <div>
-                    <OverrideActions
-                      ticketId={ticketId}
-                      currentActivityId={ticket.currentActivityId}
-                      aiFailureCount={ticket.aiFailureCount}
-                      triggerClassName="h-8 w-full text-xs"
-                    />
-                  </div>
-                )}
-
-                {isActive && !isDecisioning && canCancel && (
-                  <Button size="sm" variant="outline" className="w-full text-destructive" onClick={() => { cancelForm.reset({ reason: "" }); setCancelOpen(true) }}>
-                    <DecisionButtonContent icon={CircleX}>{t("itsm:tickets.cancel")}</DecisionButtonContent>
-                  </Button>
-                )}
-
-                {canWithdraw && (
-                  <Button size="sm" variant="outline" className="w-full" onClick={() => { withdrawForm.reset({ reason: "" }); setWithdrawOpen(true) }}>
-                    <DecisionButtonContent icon={RotateCcw}>{t("itsm:tickets.withdraw")}</DecisionButtonContent>
-                  </Button>
-                )}
-
-                {(!isActive || isTerminal) && (
-                  <p className="col-span-2 rounded-lg border border-border/50 bg-background/35 p-3 text-sm text-muted-foreground">
-                    当前工单已结束，证据区保留完整流程与审计记录。
-                  </p>
-                )}
-
-                {isActive && !isDecisioning && actionableActivity && !isCurrentUserResponsible && (
-                  <p className="col-span-2 rounded-lg border border-border/50 bg-background/35 p-3 text-sm text-muted-foreground">
-                    当前步骤正在等待责任人处理，你可以查看依据和审计记录。
-                  </p>
-                )}
-              </div>
-            </CardContent>
-          </Card>
-        </aside>
+        <div className="xl:sticky xl:top-4 xl:self-start">
+          <FlatAside
+            ticket={ticket}
+            owner={owner}
+            confidencePct={confidencePct}
+          decisioningMessage={decisioningMessage}
+          isDecisioning={isDecisioning}
+          isActive={isActive}
+          activeHumanActivity={activeHumanActivity}
+            isCurrentUserResponsible={isCurrentUserResponsible}
+            progressPending={progressMut.isPending}
+            openApprovalSheet={openApprovalSheet}
+            getNodeOutcomes={getNodeOutcomes}
+            outcomeLabel={outcomeLabel}
+            t={t}
+            canProcess={canProcessFromEntry}
+            canAssign={canAssignFromEntry}
+            assignForm={assignForm}
+            setAssignOpen={setAssignOpen}
+            canCancel={canCancelFromEntry}
+            cancelForm={cancelForm}
+            setCancelOpen={setCancelOpen}
+            canWithdraw={canWithdraw}
+            withdrawForm={withdrawForm}
+            setWithdrawOpen={setWithdrawOpen}
+            actionableActivity={actionableActivity}
+          />
+        </div>
       </div>
 
       <Sheet open={assignOpen} onOpenChange={setAssignOpen}>

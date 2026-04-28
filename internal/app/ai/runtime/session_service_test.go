@@ -1,8 +1,11 @@
 package runtime
 
 import (
+	"context"
+	"errors"
 	"testing"
 
+	"metis/internal/app"
 	"metis/internal/model"
 )
 
@@ -141,4 +144,65 @@ func TestSessionService_GetOwned_HidesCrossUserSession(t *testing.T) {
 	if _, err := svc.GetOwned(session.ID, 2); err != ErrSessionNotFound {
 		t.Fatalf("expected ErrSessionNotFound, got %v", err)
 	}
+}
+
+func TestSessionService_StoreMessage_UsesSessionTitleProvider(t *testing.T) {
+	db := setupTestDB(t)
+	agentSvc := newAgentServiceForTest(t, db)
+	svc := newSessionServiceForTest(t, db)
+
+	modelID := uint(1)
+	agent := &Agent{Name: "Agent", Type: AgentTypeAssistant, ModelID: &modelID, CreatedBy: 1}
+	_ = agentSvc.Create(agent)
+	session, _ := svc.Create(agent.ID, 1)
+
+	svc.titleProviders = []app.SessionTitleProvider{
+		fakeSessionTitleProvider{
+			title:   "VPN 线上支持申请",
+			handled: true,
+		},
+	}
+	if _, err := svc.StoreMessage(session.ID, MessageRoleUser, "我想申请 VPN，线上支持用", nil, 0); err != nil {
+		t.Fatalf("store message: %v", err)
+	}
+	reloaded, _ := svc.Get(session.ID)
+	if reloaded.Title != "VPN 线上支持申请" {
+		t.Fatalf("expected provider title, got %q", reloaded.Title)
+	}
+}
+
+func TestSessionService_StoreMessage_FallbackWhenSessionTitleProviderFails(t *testing.T) {
+	db := setupTestDB(t)
+	agentSvc := newAgentServiceForTest(t, db)
+	svc := newSessionServiceForTest(t, db)
+
+	modelID := uint(1)
+	agent := &Agent{Name: "Agent", Type: AgentTypeAssistant, ModelID: &modelID, CreatedBy: 1}
+	_ = agentSvc.Create(agent)
+	session, _ := svc.Create(agent.ID, 1)
+
+	svc.titleProviders = []app.SessionTitleProvider{
+		fakeSessionTitleProvider{
+			handled: true,
+			err:     errors.New("upstream failed"),
+		},
+	}
+	content := "我想申请 VPN，线上支持用"
+	if _, err := svc.StoreMessage(session.ID, MessageRoleUser, content, nil, 0); err != nil {
+		t.Fatalf("store message: %v", err)
+	}
+	reloaded, _ := svc.Get(session.ID)
+	if reloaded.Title != content {
+		t.Fatalf("expected fallback title %q, got %q", content, reloaded.Title)
+	}
+}
+
+type fakeSessionTitleProvider struct {
+	title   string
+	handled bool
+	err     error
+}
+
+func (f fakeSessionTitleProvider) GenerateSessionTitle(context.Context, uint, uint, uint, string) (string, bool, error) {
+	return f.title, f.handled, f.err
 }

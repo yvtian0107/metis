@@ -97,6 +97,12 @@ func (a *ITSMApp) BuildAgentRuntimeContext(ctx context.Context, _ string, sessio
 	return "## ITSM Service Desk Runtime Context\nUse this session state as current facts. Continue from next_expected_action unless the user explicitly starts a new request.\n```json\n" + string(b) + "\n```", nil
 }
 
+// GenerateSessionTitle implements app.SessionTitleProvider.
+func (a *ITSMApp) GenerateSessionTitle(ctx context.Context, sessionID, userID, agentID uint, firstUserMessage string) (string, bool, error) {
+	titleSvc := do.MustInvoke[*desk.SessionTitleService](a.injector)
+	return titleSvc.Generate(ctx, sessionID, userID, agentID, firstUserMessage)
+}
+
 func (a *ITSMApp) Models() []any {
 	return []any{
 		// Configuration models
@@ -216,6 +222,7 @@ func (a *ITSMApp) Providers(i do.Injector) {
 	do.Provide(i, definition.NewKnowledgeDocService)
 	// Engine config
 	do.Provide(i, config.NewEngineConfigService)
+	do.Provide(i, desk.NewSessionTitleService)
 	// Workflow generate
 	do.Provide(i, definition.NewWorkflowGenerateService)
 	// Handlers
@@ -343,6 +350,7 @@ func (a *ITSMApp) Routes(api *gin.RouterGroup) {
 		g.GET("/tickets/approvals/pending", ticketH.PendingApprovals)
 		g.GET("/tickets/approvals/history", ticketH.ApprovalHistory)
 		g.GET("/tickets/monitor", ticketH.Monitor)
+		g.GET("/tickets/decision-quality", ticketH.DecisionQuality)
 		g.GET("/tickets", ticketH.List)
 		g.GET("/tickets/:id", ticketH.Get)
 		g.PUT("/tickets/:id/assign", ticketH.Assign)
@@ -361,6 +369,7 @@ func (a *ITSMApp) Routes(api *gin.RouterGroup) {
 		g.POST("/tickets/:id/override/jump", ticketH.OverrideJump)
 		g.POST("/tickets/:id/override/reassign", ticketH.OverrideReassign)
 		g.POST("/tickets/:id/override/retry-ai", ticketH.RetryAI)
+		g.POST("/tickets/:id/recovery", ticketH.Recover)
 		// SLA pause/resume
 		g.PUT("/tickets/:id/sla/pause", ticketH.SLAPause)
 		g.PUT("/tickets/:id/sla/resume", ticketH.SLAResume)
@@ -511,6 +520,7 @@ var _ engine.WorkflowEngine = (*engine.SmartEngine)(nil)
 // Ensure ITSMApp implements app.ToolRegistryProvider at compile time
 var _ app.ToolRegistryProvider = (*ITSMApp)(nil)
 var _ app.AgentRuntimeContextProvider = (*ITSMApp)(nil)
+var _ app.SessionTitleProvider = (*ITSMApp)(nil)
 
 // lazyTicketCreator defers resolution of ticket.TicketService to break circular dependency.
 type lazyTicketCreator struct {

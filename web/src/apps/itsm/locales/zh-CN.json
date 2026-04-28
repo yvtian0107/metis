@@ -295,7 +295,7 @@
     "title": "工单监控",
     "monitorDesc": "跨用户观察 Agentic 与经典流程工单，定位卡单并从同一视图手工推进。",
     "mine": "我的工单",
-    "mineDesc": "只展示我自己提交的工单，用于跟踪请求进度和历史结果。",
+    "mineDesc": "查看我提交过的工单，快速跟踪处理进度与最终结果。",
     "approvalPending": "我的待办",
     "approvalPendingDesc": "当前需要我通过或驳回的人工节点，来自直接分配或岗位职责。",
     "approvalPendingEmpty": "暂无待办工单",
@@ -356,6 +356,10 @@
     "slaResponseDeadline": "响应截止",
     "slaResolutionDeadline": "解决截止",
     "allStatuses": "全部状态",
+    "groupActive": "进行中",
+    "groupTerminal": "已结束",
+    "groupAll": "全部",
+    "mineEmpty": "你还没有提交过工单",
     "allPriorities": "全部优先级",
     "allServices": "全部服务",
     "currentOwner": "当前责任方",
@@ -386,7 +390,24 @@
     "startDate": "开始日期",
     "endDate": "结束日期",
     "titlePlaceholder": "请输入工单标题",
-    "descriptionPlaceholder": "请输入工单描述"
+    "descriptionPlaceholder": "请输入工单描述",
+    "fieldLabels": {
+      "vpn_account": "VPN账号",
+      "device_usage": "设备与用途说明",
+      "request_kind": "访问原因"
+    },
+    "fieldValueLabels": {
+      "request_kind": {
+        "online_support": "线上支持",
+        "troubleshooting": "故障排查",
+        "production_emergency": "生产应急",
+        "network_access_issue": "网络接入问题",
+        "external_collaboration": "外部协作",
+        "long_term_remote_work": "长期远程办公",
+        "cross_border_access": "跨境访问",
+        "security_compliance": "安全合规事项"
+      }
+    }
   },
   "validation": {
     "nameRequired": "名称不能为空",
@@ -524,6 +545,36 @@
       "actionUnbound": "未绑定动作",
       "notifyUnset": "未设置通道"
     },
+    "edge": {
+      "rawLabel": "原始",
+      "defaultPath": "默认路径",
+      "valueSeparator": " / ",
+      "logic": {
+        "and": "且",
+        "or": "或"
+      },
+      "operator": {
+        "equals": "等于",
+        "not_equals": "不等于",
+        "contains_any": "属于",
+        "gt": "大于",
+        "lt": "小于",
+        "gte": "大于等于",
+        "lte": "小于等于",
+        "is_empty": "为空",
+        "is_not_empty": "非空"
+      },
+      "outcome": {
+        "submitted": "已提交",
+        "completed": "已完成",
+        "approved": "已通过",
+        "rejected": "已驳回",
+        "success": "成功",
+        "failed": "失败",
+        "timeout": "超时",
+        "cancelled": "已取消"
+      }
+    },
     "condition": {
       "add": "添加条件",
       "addGroup": "添加条件组"
@@ -546,6 +597,7 @@
       "webhook": "Webhook"
     },
     "autoLayout": "自动布局",
+    "fitView": "适配视图",
     "copied": "已复制 {{count}} 个节点",
     "ctx": {
       "paste": "粘贴",
@@ -623,6 +675,10 @@
     "runtimeDesc": "收敛参考路径生成、重试超时、审计级别和异常兜底，不作为独立岗位。",
     "pathBuilderTitle": "参考路径生成",
     "pathBuilderDesc": "把协作规范生成参考路径/策略草图，用于服务发布前的路径建议与运行提示。",
+    "titleBuilderTitle": "会话标题生成",
+    "titleBuilderDesc": "根据服务台用户首条问题生成会话标题，用于历史会话列表快速识别。",
+    "healthCheckerTitle": "发布健康检查",
+    "healthCheckerDesc": "基于协作规范、参考路径和动作配置生成发布风险结论，作为是否可发布的直接依据。",
     "guardTitle": "异常兜底与审计",
     "guardDesc": "控制运行记录粒度，并在智能决策异常或无人接管时指定兜底处理人。",
     "provider": "Provider",
@@ -641,6 +697,17 @@
     "maxTokens": "最大 Token",
     "timeoutSeconds": "超时时间",
     "seconds": "秒",
+    "systemPrompt": "系统提示词",
+    "systemPromptPlaceholder": "请输入系统提示词",
+    "systemPromptEmpty": "尚未配置系统提示词",
+    "openPromptEditor": "编辑提示词",
+    "applyPrompt": "应用",
+    "pathPromptEditorTitle": "编辑参考路径生成提示词",
+    "pathPromptEditorDesc": "调整参考路径生成的系统提示词，点击应用后即时生效。",
+    "titlePromptEditorTitle": "编辑会话标题生成提示词",
+    "titlePromptEditorDesc": "调整服务台会话标题生成的系统提示词，点击应用后即时生效。",
+    "healthPromptEditorTitle": "编辑发布健康检查提示词",
+    "healthPromptEditorDesc": "调整发布健康检查的系统提示词，点击应用后即时生效。",
     "auditLevel": "审计级别",
     "fallbackAssignee": "兜底处理人",
     "fallbackAssigneePlaceholder": "选择兜底处理人",
@@ -672,6 +739,15 @@
     "specRequired": "请先填写协作规范",
     "workflowEmptySmartHint": "请在上方填写协作规范，然后点击「生成参考路径」按钮生成策略草图",
     "nodeType": "节点类型"
+  },
+  "publishHealth": {
+    "refresh": "刷新检查",
+    "refreshing": "检查中...",
+    "refreshSuccess": "发布健康检查已刷新",
+    "location": "定位",
+    "recommendation": "建议修复",
+    "evidence": "依据",
+    "locate": "定位到流程图"
   },
   "knowledge": {
     "title": "知识文档",

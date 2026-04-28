@@ -402,7 +402,7 @@ export function SessionSidebar({
                 <div
                   key={s.id}
                   className={cn(
-                    "group flex items-start gap-2 rounded-lg border border-transparent px-1.5 py-1 transition-colors",
+                    "group flex items-start gap-2 rounded-lg border border-transparent px-1.5 py-1 transition-colors hover:bg-accent/45",
                     isServiceDesk
                       ? s.id === currentSessionId && "border-primary/15 bg-primary/8 text-foreground"
                       : s.id === currentSessionId && "border-primary/18 bg-primary/8 text-foreground",
@@ -410,7 +410,7 @@ export function SessionSidebar({
                 >
                   <button
                     type="button"
-                    className="flex min-w-0 flex-1 flex-col rounded-md px-2 py-1 text-left text-sm hover:bg-accent/45"
+                    className="flex min-w-0 flex-1 flex-col rounded-md px-2 py-1 text-left text-sm"
                     onClick={() => handleSelect(s.id)}
                   >
                     <span className="line-clamp-2">{s.title || `#${s.id}`}</span>
@@ -421,7 +421,7 @@ export function SessionSidebar({
                   {showItemActions && onDeleteSession && (
                     <button
                       type="button"
-                      className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground/70 opacity-0 transition hover:bg-muted hover:text-destructive focus-visible:opacity-100 group-hover:opacity-100"
+                      className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground/70 opacity-0 transition-colors hover:text-destructive focus-visible:opacity-100 group-hover:opacity-100"
                       onClick={(e) => {
                         e.stopPropagation()
                         setDeleteTarget(s)

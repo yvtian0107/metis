@@ -340,6 +340,18 @@ export interface TicketItem {
   nextStepSummary?: string
   canAct?: boolean
   canOverride?: boolean
+  decisionExplanation?: {
+    activityId?: number
+    basis: string
+    trigger: string
+    decision: string
+    nextStep: string
+    humanOverride: string
+  }
+  recoveryActions?: Array<{
+    code: "retry" | "handoff_human" | "withdraw" | string
+    label: string
+  }>
   createdAt: string
   updatedAt: string
 }
@@ -373,6 +385,25 @@ export interface TicketMonitorResponse {
   summary: TicketMonitorSummary
   items: TicketMonitorItem[]
   total: number
+}
+
+export interface DecisionQualityItem {
+  dimensionType: "service" | "department" | string
+  dimensionId: number
+  dimensionName: string
+  approvalRate: number
+  rejectionRate: number
+  retryRate: number
+  avgDecisionLatencySeconds: number
+  recoverySuccessRate: number
+  decisionCount: number
+}
+
+export interface DecisionQualityResponse {
+  version: string
+  windowDays: number
+  generatedAt: string
+  items: DecisionQualityItem[]
 }
 
 export interface TicketListParams {
@@ -412,6 +443,15 @@ export function fetchTicketMonitor(params: TicketMonitorParams) {
   p.set("page", String(params.page ?? 1))
   p.set("pageSize", String(params.pageSize ?? 20))
   return api.get<TicketMonitorResponse>(`/api/v1/itsm/tickets/monitor?${p}`)
+}
+
+export function fetchDecisionQuality(params?: { dimension?: "service" | "department"; windowDays?: number; serviceId?: number; departmentId?: number }) {
+  const p = new URLSearchParams()
+  if (params?.dimension) p.set("dimension", params.dimension)
+  if (params?.windowDays) p.set("windowDays", String(params.windowDays))
+  if (params?.serviceId) p.set("serviceId", String(params.serviceId))
+  if (params?.departmentId) p.set("departmentId", String(params.departmentId))
+  return api.get<DecisionQualityResponse>(`/api/v1/itsm/tickets/decision-quality?${p.toString()}`)
 }
 
 export function fetchTicket(id: number) {
@@ -624,6 +664,10 @@ export function retryAI(ticketId: number, reason?: string) {
   return api.post(`/api/v1/itsm/tickets/${ticketId}/override/retry-ai`, { reason })
 }
 
+export function recoverTicket(ticketId: number, data: { action: "retry" | "handoff_human" | "withdraw" | string; reason?: string }) {
+  return api.post<TicketItem>(`/api/v1/itsm/tickets/${ticketId}/recovery`, data)
+}
+
 // ─── AI App APIs (for smart engine config) ─────────────
 
 export interface AgentItem {
@@ -688,6 +732,7 @@ export interface StaffingAgentSelector {
 export interface StaffingPathBuilderConfig extends EngineAgentConfig {
   maxRetries: number
   timeoutSeconds: number
+  systemPrompt: string
 }
 
 export interface EngineHealthItem {
@@ -711,6 +756,8 @@ export interface SmartStaffingConfig {
 export interface EngineSettingsConfig {
   runtime: {
     pathBuilder: StaffingPathBuilderConfig
+    titleBuilder: StaffingPathBuilderConfig
+    healthChecker: StaffingPathBuilderConfig
     guard: {
       auditLevel: string
       fallbackAssignee: number
@@ -731,7 +778,9 @@ export interface SmartStaffingConfigUpdate {
 
 export interface EngineSettingsConfigUpdate {
   runtime: {
-    pathBuilder: { modelId: number; temperature: number; maxRetries: number; timeoutSeconds: number }
+    pathBuilder: { modelId: number; temperature: number; maxRetries: number; timeoutSeconds: number; systemPrompt: string }
+    titleBuilder: { modelId: number; temperature: number; maxRetries: number; timeoutSeconds: number; systemPrompt: string }
+    healthChecker: { modelId: number; temperature: number; maxRetries: number; timeoutSeconds: number; systemPrompt: string }
     guard: { auditLevel: string; fallbackAssignee: number }
   }
 }
@@ -800,6 +849,13 @@ export interface ServiceHealthItem {
   label: string
   status: "pass" | "warn" | "fail"
   message: string
+  location: {
+    kind: "collaboration_spec" | "workflow_node" | "workflow_edge" | "action" | "runtime_config"
+    path: string
+    refId?: string
+  }
+  recommendation: string
+  evidence: string
 }
 
 export interface ServiceHealthCheck {

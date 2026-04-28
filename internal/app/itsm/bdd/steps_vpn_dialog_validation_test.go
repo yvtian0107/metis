@@ -110,11 +110,13 @@ type dialogTestState struct {
 }
 
 type toolCallRecord struct {
+	ID   string
 	Name string
 	Args json.RawMessage
 }
 
 type toolResultRecord struct {
+	ID      string
 	Name    string
 	Output  string
 	IsError bool
@@ -142,7 +144,11 @@ const serviceDeskTestPrompt = `你是 IT 服务台智能体，帮助用户完成
 - 在调用 itsm.draft_prepare 之前，必须先根据 service_load 返回的 routing_field_hint 中的 option_route_map 判断用户的诉求是否跨越了多条路由分支。如果用户同时提到了映射到不同处理路径的多种需求，你必须主动向用户说明这些需求分属不同处理路径，请用户明确选择当前要办理哪一个，而不是替用户做选择或直接提交
 - 在调用 itsm.draft_prepare 前，先对照 service_load 返回的字段定义检查所有必填字段是否已收集；如果有必填字段缺失，必须先向用户追问缺失字段
 - 如果 itsm.draft_prepare 返回的 warnings 中包含 multivalue_on_single_field，根据 resolved_values 判断这些值是否属于同一路由分支：若跨路由，向用户说明并请用户选择；若同路由，修正为单值后重新调用
-- 不需要调用 system.current_user_profile 或 general.current_time，直接使用用户消息中的信息`
+- 访问时段、执行窗口、生效时间等时间字段必须写成中国本地时间的绝对时间：YYYY-MM-DD HH:mm:ss，范围用 ~ 连接
+- 用户给出“今天”“明天”“下午 5 点”“明天下午 5 点”等相对日期或缺少年月日但时刻明确的表达时，必须先调用 general.current_time，并以返回的 china_formatted_time 为基准解析，不得使用过去日期
+- 用户只给“今天上午”“明天晚上”“后天下午”等宽泛时段、无法唯一确定具体时分时，不得自行补全为具体时分，必须追问具体时间后再 draft_prepare
+- 用户给出 22:00-01:00、12:00-10:00 这类自然解析后结束不晚于开始的时间区间时，默认按跨天处理，把结束时间解释为次日对应时刻并写入草稿，由用户人工检查确认
+- “尽快”“随时”“越快越好”不能写入时间字段；需要追问具体时间`
 
 func setupDialogTest(bc *bddContext) (func(ctx context.Context, userMsg string) error, error) {
 	// Build LLM client.
@@ -160,9 +166,9 @@ func setupDialogTest(bc *bddContext) (func(ctx context.Context, userMsg string) 
 	const testSessionID uint = 99
 	const testUserID uint = 1
 
-	// Build CompositeToolExecutor with only the ITSM registry.
+	// Build CompositeToolExecutor with ITSM and general runtime tools.
 	toolExec := ai.NewCompositeToolExecutor(
-		[]ai.ToolHandlerRegistry{registry},
+		[]ai.ToolHandlerRegistry{registry, ai.NewGeneralToolRegistry(nil, nil)},
 		testSessionID,
 		testUserID,
 	)
@@ -177,6 +183,17 @@ func setupDialogTest(bc *bddContext) (func(ctx context.Context, userMsg string) 
 			Parameters:  t.ParametersSchema,
 		})
 	}
+	toolDefs = append(toolDefs, ai.ToolDefinition{
+		Type:        "builtin",
+		Name:        "general.current_time",
+		Description: "获取当前时间。支持传入标准 IANA 时区名（如 Asia/Shanghai），返回服务端时间、UTC 时间、中国时间和目标时区时间。",
+		Parameters: json.RawMessage(`{
+			"type": "object",
+			"properties": {
+				"timezone": {"type": "string", "description": "IANA 时区名（如 Asia/Shanghai），可选"}
+			}
+		}`),
+	})
 
 	// Build ReactExecutor.
 	executor := ai.NewReactExecutor(client, toolExec)
@@ -208,23 +225,28 @@ func setupDialogTest(bc *bddContext) (func(ctx context.Context, userMsg string) 
 		bc.dialogState.toolResults = nil
 		bc.dialogState.finalContent = ""
 		var contentParts []string
+		toolNamesByID := map[string]string{}
 
 		for evt := range ch {
 			switch evt.Type {
 			case ai.EventTypeToolCall:
 				log.Printf("[BDD-DIALOG] tool_call: %s args=%s", evt.ToolName, string(evt.ToolArgs))
+				toolNamesByID[evt.ToolCallID] = evt.ToolName
 				bc.dialogState.toolCalls = append(bc.dialogState.toolCalls, toolCallRecord{
+					ID:   evt.ToolCallID,
 					Name: evt.ToolName,
 					Args: evt.ToolArgs,
 				})
 			case ai.EventTypeToolResult:
+				toolName := toolNamesByID[evt.ToolCallID]
 				preview := evt.ToolOutput
 				if len(preview) > 500 {
 					preview = preview[:500] + "..."
 				}
-				log.Printf("[BDD-DIALOG] tool_result: %s output=%s", evt.ToolName, preview)
+				log.Printf("[BDD-DIALOG] tool_result: %s output=%s", toolName, preview)
 				bc.dialogState.toolResults = append(bc.dialogState.toolResults, toolResultRecord{
-					Name:    evt.ToolName,
+					ID:      evt.ToolCallID,
+					Name:    toolName,
 					Output:  evt.ToolOutput,
 					IsError: strings.HasPrefix(evt.ToolOutput, "Error:"),
 				})
@@ -260,6 +282,15 @@ func getToolCallArgs(calls []toolCallRecord, name string) json.RawMessage {
 	for _, c := range calls {
 		if c.Name == name {
 			return c.Args
+		}
+	}
+	return nil
+}
+
+func getToolResult(results []toolResultRecord, name string) *toolResultRecord {
+	for i := len(results) - 1; i >= 0; i-- {
+		if results[i].Name == name {
+			return &results[i]
 		}
 	}
 	return nil
@@ -438,6 +469,38 @@ func (bc *bddContext) thenDraftNotCalledOrConfirmNotCalled() error {
 	return nil
 }
 
+func (bc *bddContext) thenDraftPrepareNotCalled() error {
+	if hasToolCall(bc.dialogState.toolCalls, "itsm.draft_prepare") {
+		names := make([]string, len(bc.dialogState.toolCalls))
+		for i, c := range bc.dialogState.toolCalls {
+			names[i] = c.Name
+		}
+		return fmt.Errorf("expected no itsm.draft_prepare call, got calls: %v", names)
+	}
+	return nil
+}
+
+func (bc *bddContext) thenDraftNotReadyForConfirmation() error {
+	if !hasToolCall(bc.dialogState.toolCalls, "itsm.draft_prepare") {
+		return nil
+	}
+	result := getToolResult(bc.dialogState.toolResults, "itsm.draft_prepare")
+	if result == nil {
+		return fmt.Errorf("itsm.draft_prepare was called but result was not captured")
+	}
+	var resp struct {
+		OK                   bool `json:"ok"`
+		ReadyForConfirmation bool `json:"ready_for_confirmation"`
+	}
+	if err := json.Unmarshal([]byte(result.Output), &resp); err != nil {
+		return fmt.Errorf("parse draft_prepare result: %w; output=%s", err, result.Output)
+	}
+	if resp.OK || resp.ReadyForConfirmation {
+		return fmt.Errorf("expected draft_prepare to stay not ready, got ok=%v ready=%v output=%s", resp.OK, resp.ReadyForConfirmation, result.Output)
+	}
+	return nil
+}
+
 func (bc *bddContext) thenDraftPrepareCalledWithSingleRouteValue() error {
 	args := getToolCallArgs(bc.dialogState.toolCalls, "itsm.draft_prepare")
 	if args == nil {
@@ -459,6 +522,153 @@ func (bc *bddContext) thenDraftPrepareCalledWithSingleRouteValue() error {
 	strVal := fmt.Sprintf("%v", val)
 	if strings.Contains(strVal, ",") {
 		return fmt.Errorf("expected single routing value, got comma-separated: %q", strVal)
+	}
+	return nil
+}
+
+func (bc *bddContext) draftPrepareFormValue(field string) (string, error) {
+	if value, ok, err := formValueFromDraftPrepareResult(bc.dialogState.toolResults, field); err != nil {
+		return "", err
+	} else if ok {
+		return value, nil
+	}
+
+	args := getToolCallArgs(bc.dialogState.toolCalls, "itsm.draft_prepare")
+	if args == nil {
+		return "", fmt.Errorf("itsm.draft_prepare was not called")
+	}
+
+	var parsed struct {
+		FormData map[string]any `json:"form_data"`
+	}
+	if err := json.Unmarshal(args, &parsed); err != nil {
+		return "", fmt.Errorf("parse draft_prepare args: %w", err)
+	}
+	raw, ok := parsed.FormData[field]
+	if !ok {
+		return "", fmt.Errorf("draft_prepare form_data missing %q; form_data=%v", field, parsed.FormData)
+	}
+	value, ok := raw.(string)
+	if !ok {
+		return "", fmt.Errorf("draft_prepare form_data.%s should be string, got %T (%v)", field, raw, raw)
+	}
+	return value, nil
+}
+
+func formValueFromDraftPrepareResult(results []toolResultRecord, field string) (string, bool, error) {
+	result := getToolResult(results, "itsm.draft_prepare")
+	if result == nil {
+		return "", false, nil
+	}
+	var parsed struct {
+		FormData map[string]any `json:"form_data"`
+	}
+	if err := json.Unmarshal([]byte(result.Output), &parsed); err != nil {
+		return "", false, fmt.Errorf("parse draft_prepare result: %w; output=%s", err, result.Output)
+	}
+	raw, ok := parsed.FormData[field]
+	if !ok {
+		return "", false, nil
+	}
+	value, ok := raw.(string)
+	if !ok {
+		return "", false, fmt.Errorf("draft_prepare result form_data.%s should be string, got %T (%v)", field, raw, raw)
+	}
+	return value, true, nil
+}
+
+func (bc *bddContext) currentChinaTimeFromTool() (time.Time, error) {
+	result := getToolResult(bc.dialogState.toolResults, "general.current_time")
+	if result == nil {
+		return time.Time{}, fmt.Errorf("general.current_time result not found")
+	}
+	var payload struct {
+		ChinaFormattedTime string `json:"china_formatted_time"`
+	}
+	if err := json.Unmarshal([]byte(result.Output), &payload); err != nil {
+		return time.Time{}, fmt.Errorf("parse general.current_time output: %w; output=%s", err, result.Output)
+	}
+	if payload.ChinaFormattedTime == "" {
+		return time.Time{}, fmt.Errorf("general.current_time output missing china_formatted_time: %s", result.Output)
+	}
+	parsed, err := time.ParseInLocation("2006-01-02 15:04:05", payload.ChinaFormattedTime, time.FixedZone("CST", 8*3600))
+	if err != nil {
+		return time.Time{}, fmt.Errorf("parse china_formatted_time %q: %w", payload.ChinaFormattedTime, err)
+	}
+	return parsed, nil
+}
+
+func (bc *bddContext) thenAccessPeriodIsTomorrowAt17FromCurrentTime() error {
+	now, err := bc.currentChinaTimeFromTool()
+	if err != nil {
+		return err
+	}
+	expected := time.Date(now.Year(), now.Month(), now.Day()+1, 17, 0, 0, 0, now.Location()).Format("2006-01-02 15:04:05")
+	actual, err := bc.draftPrepareFormValue("access_period")
+	if err != nil {
+		return err
+	}
+	if !strings.Contains(actual, expected) {
+		return fmt.Errorf("expected access_period to contain %q based on current time %s, got %q", expected, now.Format("2006-01-02 15:04:05"), actual)
+	}
+	return nil
+}
+
+func (bc *bddContext) thenAccessPeriodIsCrossDayRange(startClock, endClock string) error {
+	now, err := bc.currentChinaTimeFromTool()
+	if err != nil {
+		return err
+	}
+	startTOD, err := time.Parse("15:04", startClock)
+	if err != nil {
+		return fmt.Errorf("parse start clock %q: %w", startClock, err)
+	}
+	endTOD, err := time.Parse("15:04", endClock)
+	if err != nil {
+		return fmt.Errorf("parse end clock %q: %w", endClock, err)
+	}
+	start := time.Date(now.Year(), now.Month(), now.Day(), startTOD.Hour(), startTOD.Minute(), 0, 0, now.Location())
+	if !start.After(now) {
+		start = start.AddDate(0, 0, 1)
+	}
+	end := time.Date(start.Year(), start.Month(), start.Day(), endTOD.Hour(), endTOD.Minute(), 0, 0, now.Location())
+	if !end.After(start) {
+		end = end.AddDate(0, 0, 1)
+	}
+	expectedStart := start.Format("2006-01-02 15:04:05")
+	expectedEnd := end.Format("2006-01-02 15:04:05")
+	actual, err := bc.draftPrepareFormValue("access_period")
+	if err != nil {
+		return err
+	}
+	if !strings.Contains(actual, expectedStart) || !strings.Contains(actual, expectedEnd) {
+		return fmt.Errorf("expected access_period to contain cross-day range %q ~ %q based on current time %s, got %q", expectedStart, expectedEnd, now.Format("2006-01-02 15:04:05"), actual)
+	}
+	return nil
+}
+
+func (bc *bddContext) thenAccessPeriodNeverUsesPastAfternoonFive() error {
+	now, err := bc.currentChinaTimeFromTool()
+	if err != nil {
+		return err
+	}
+	todayAt17 := time.Date(now.Year(), now.Month(), now.Day(), 17, 0, 0, 0, now.Location())
+	actual, valueErr := bc.draftPrepareFormValue("access_period")
+	if now.Before(todayAt17) {
+		if valueErr != nil {
+			return valueErr
+		}
+		expected := todayAt17.Format("2006-01-02 15:04:05")
+		if !strings.Contains(actual, expected) {
+			return fmt.Errorf("expected future same-day 17:00 access_period %q, got %q", expected, actual)
+		}
+		return nil
+	}
+	if valueErr == nil && strings.Contains(actual, todayAt17.Format("2006-01-02 15:04:05")) {
+		return fmt.Errorf("access_period uses past same-day 17:00 %q after current time %s", actual, now.Format("2006-01-02 15:04:05"))
+	}
+	if hasToolCall(bc.dialogState.toolCalls, "itsm.draft_prepare") {
+		return fmt.Errorf("current time is after 17:00; expected clarification instead of draft_prepare, got access_period=%q", actual)
 	}
 	return nil
 }
@@ -521,7 +731,12 @@ func registerDialogValidationSteps(sc *godog.ScenarioContext, bc *bddContext) {
 	sc.When(`^服务台 Agent 处理用户消息$`, bc.whenAgentProcessesMessage)
 	sc.Then(`^工具调用序列包含 "([^"]*)"$`, bc.thenToolCallSequenceContains)
 	sc.Then(`^Agent 未调用 draft_prepare 或未继续到 draft_confirm$`, bc.thenDraftNotCalledOrConfirmNotCalled)
+	sc.Then(`^Agent 未调用 draft_prepare$`, bc.thenDraftPrepareNotCalled)
+	sc.Then(`^Agent 未进入可确认草稿$`, bc.thenDraftNotReadyForConfirmation)
 	sc.Then(`^draft_prepare 的路由字段为单值$`, bc.thenDraftPrepareCalledWithSingleRouteValue)
+	sc.Then(`^draft_prepare 的访问时段等于基于当前时间的明天 17 点$`, bc.thenAccessPeriodIsTomorrowAt17FromCurrentTime)
+	sc.Then(`^draft_prepare 的访问时段按当前时间解析为跨天区间 "([^"]*)" 到 "([^"]*)"$`, bc.thenAccessPeriodIsCrossDayRange)
+	sc.Then(`^下午 5 点没有被解析为过去时间$`, bc.thenAccessPeriodNeverUsesPastAfternoonFive)
 	sc.Then(`^回复内容匹配 "([^"]*)"$`, bc.thenResponseMatches)
 	sc.Then(`^回复内容不匹配 "([^"]*)"$`, bc.thenResponseNotMatches)
 	sc.Then(`^"([^"]*)" 被调用至少 (\d+) 次$`, bc.thenToolCalledAtLeastParsed)

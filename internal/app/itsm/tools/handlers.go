@@ -35,6 +35,9 @@ type ServiceDeskState struct {
 	DraftVersion          int            `json:"draft_version"`
 	ConfirmedDraftVersion int            `json:"confirmed_draft_version"`
 	FieldsHash            string         `json:"fields_hash,omitempty"`
+	MissingFields         []string       `json:"missing_fields,omitempty"`
+	AskedFields           []string       `json:"asked_fields,omitempty"`
+	MinDecisionReady      bool           `json:"min_decision_ready"`
 }
 
 // validTransitions defines the allowed stage transitions.
@@ -433,6 +436,9 @@ func currentRequestContextHandler(store StateStore) ToolHandler {
 			"draft_form_data":         state.DraftFormData,
 			"draft_version":           state.DraftVersion,
 			"confirmed_draft_version": state.ConfirmedDraftVersion,
+			"missing_fields":          state.MissingFields,
+			"asked_fields":            state.AskedFields,
+			"min_decision_ready":      state.MinDecisionReady,
 			"next_expected_action":    NextExpectedAction(state),
 		}), nil
 	}
@@ -469,6 +475,53 @@ func mustMarshal(v any) json.RawMessage {
 
 func defaultState() *ServiceDeskState {
 	return &ServiceDeskState{Stage: "idle"}
+}
+
+func syncConversationProgress(state *ServiceDeskState, missingRequired []FieldCollectionItem) {
+	if state == nil {
+		return
+	}
+	missingKeys := make([]string, 0, len(missingRequired))
+	missingSet := make(map[string]struct{}, len(missingRequired))
+	for _, item := range missingRequired {
+		key := strings.TrimSpace(item.Key)
+		if key == "" {
+			continue
+		}
+		if _, exists := missingSet[key]; exists {
+			continue
+		}
+		missingSet[key] = struct{}{}
+		missingKeys = append(missingKeys, key)
+	}
+
+	asked := make([]string, 0, len(state.AskedFields)+len(missingKeys))
+	seen := make(map[string]struct{}, len(state.AskedFields)+len(missingKeys))
+	for _, key := range state.AskedFields {
+		key = strings.TrimSpace(key)
+		if key == "" {
+			continue
+		}
+		if _, stillMissing := missingSet[key]; !stillMissing {
+			continue
+		}
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		asked = append(asked, key)
+	}
+	for _, key := range missingKeys {
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		asked = append(asked, key)
+	}
+
+	state.MissingFields = missingKeys
+	state.AskedFields = asked
+	state.MinDecisionReady = len(missingKeys) == 0
 }
 
 func requestHash(data map[string]any) string {
@@ -638,6 +691,17 @@ func validateDraftData(detail *ServiceDetail, formData map[string]any) ([]DraftW
 			})
 			continue
 		}
+		if value != "" && isTimeSemanticField(f) && hasAmbiguousRelativeTime(value) {
+			blocking = true
+			warnedFields[f.Key] = struct{}{}
+			missingRequired = append(missingRequired, item)
+			warnings = append(warnings, DraftWarning{
+				Type:    "ambiguous_time",
+				Field:   f.Key,
+				Message: fmt.Sprintf("%s 包含相对日期和宽泛时段，但缺少具体时分，请继续追问具体时间。", f.Label),
+			})
+			continue
+		}
 		if value == "" || (f.Type != form.FieldSelect && f.Type != form.FieldRadio) {
 			continue
 		}
@@ -720,6 +784,125 @@ func validateDraftData(detail *ServiceDetail, formData map[string]any) ([]DraftW
 		})
 	}
 	return warnings, missingRequired, blocking
+}
+
+func isTimeSemanticField(f FormField) bool {
+	if f.Type == form.FieldDate || f.Type == form.FieldDatetime || f.Type == form.FieldDateRange {
+		return true
+	}
+	text := strings.ToLower(strings.Join([]string{f.Key, f.Label, f.Description}, " "))
+	return strings.Contains(text, "time") ||
+		strings.Contains(text, "date") ||
+		strings.Contains(text, "时间") ||
+		strings.Contains(text, "时段") ||
+		strings.Contains(text, "窗口") ||
+		strings.Contains(text, "生效")
+}
+
+func canonicalizeTimeSemanticFields(detail *ServiceDetail, summary string, formData map[string]any) map[string]any {
+	if len(formData) == 0 {
+		return formData
+	}
+	canonical := make(map[string]any, len(formData))
+	for key, val := range formData {
+		canonical[key] = val
+	}
+
+	sources := []string{summary}
+	for _, raw := range formData {
+		if raw != nil {
+			sources = append(sources, strings.TrimSpace(fmt.Sprintf("%v", raw)))
+		}
+	}
+	for _, f := range detail.FormFields {
+		if !isTimeSemanticField(f) || !isDraftEmptyValue(canonical[f.Key]) {
+			continue
+		}
+		for _, source := range sources {
+			if value := extractLabeledAbsoluteTimeValue(source, f); value != "" {
+				canonical[f.Key] = value
+				break
+			}
+		}
+	}
+	return canonical
+}
+
+func extractLabeledAbsoluteTimeValue(source string, f FormField) string {
+	if source == "" {
+		return ""
+	}
+	absoluteDateTime := `\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}`
+	rangeTail := `(?:\s*(?:~|到|至)\s*` + absoluteDateTime + `)?`
+	valuePattern := `(` + absoluteDateTime + rangeTail + `)`
+	for _, token := range []string{f.Label, f.Key, "访问时段", "时间窗口", "执行窗口", "生效时间"} {
+		if token == "" {
+			continue
+		}
+		re := regexp.MustCompile(regexp.QuoteMeta(token) + `\s*(?:[:：=为是])?\s*` + valuePattern)
+		if match := re.FindStringSubmatch(source); len(match) > 1 {
+			return strings.TrimSpace(match[1])
+		}
+	}
+	return ""
+}
+
+func validateDraftTimeSource(detail *ServiceDetail, summary string, formData map[string]any) ([]DraftWarning, []FieldCollectionItem, bool) {
+	sources := []string{summary}
+	for _, raw := range formData {
+		if raw != nil {
+			sources = append(sources, strings.TrimSpace(fmt.Sprintf("%v", raw)))
+		}
+	}
+
+	for _, f := range detail.FormFields {
+		if !isTimeSemanticField(f) {
+			continue
+		}
+		for _, source := range sources {
+			if !sourceMentionsTimeField(source, f) || !hasAmbiguousRelativeTime(source) {
+				continue
+			}
+			item := FieldCollectionItem{
+				Key:      f.Key,
+				Label:    f.Label,
+				Type:     f.Type,
+				Required: f.Required,
+				Source:   "time_semantics",
+			}
+			return []DraftWarning{{
+				Type:    "ambiguous_time",
+				Field:   f.Key,
+				Message: fmt.Sprintf("%s 只有相对日期和宽泛时段，缺少具体时分，请继续追问具体时间。", f.Label),
+			}}, []FieldCollectionItem{item}, true
+		}
+	}
+	return nil, nil, false
+}
+
+func sourceMentionsTimeField(source string, f FormField) bool {
+	if source == "" {
+		return false
+	}
+	for _, token := range []string{f.Key, f.Label, "访问时段", "时间窗口", "执行窗口", "生效时间", "时间"} {
+		if token != "" && strings.Contains(source, token) {
+			return true
+		}
+	}
+	return false
+}
+
+func hasAmbiguousRelativeTime(value string) bool {
+	text := strings.TrimSpace(value)
+	if text == "" {
+		return false
+	}
+	ambiguousPeriod := regexp.MustCompile(`(今天|明天|后天)?(上午|早上|中午|下午|晚上|晚间|夜间|凌晨)`)
+	if !ambiguousPeriod.MatchString(text) {
+		return false
+	}
+	explicitClock := regexp.MustCompile(`\d{1,2}\s*[:：]\s*\d{1,2}|\d{1,2}\s*(点|时)(\s*\d{1,2}\s*分)?`)
+	return !explicitClock.MatchString(text)
 }
 
 func isDraftEmptyValue(val any) bool {
@@ -1208,6 +1391,7 @@ func serviceLoadHandler(op ServiceDeskOperator, store StateStore) ToolHandler {
 		detail.ResolvedFrom = resolvedFrom
 		detail.PrefillSuggestions = buildPrefillSuggestions(state.RequestText, detail.FormFields)
 		detail.FieldCollection = buildFieldCollection(detail.FormFields, detail.PrefillSuggestions, detail.RoutingFieldHint)
+		syncConversationProgress(state, detail.FieldCollection.MissingRequiredFields)
 
 		if state.LoadedServiceID == resolvedServiceID &&
 			(state.Stage == "service_loaded" || state.Stage == "awaiting_confirmation" || state.Stage == "confirmed") {
@@ -1293,10 +1477,19 @@ func draftPrepareHandler(op ServiceDeskOperator, store StateStore) ToolHandler {
 
 		p.FormData = normalizeFormDataKeys(p.FormData, detail.FormFields)
 		p.FormData = mergePrefillFormData(p.FormData, state.PrefillFormData)
+		p.FormData = canonicalizeTimeSemanticFields(detail, p.Summary, p.FormData)
 
 		warnings, missingRequired, blocking := validateDraftData(detail, p.FormData)
+		timeWarnings, timeMissing, timeBlocking := validateDraftTimeSource(detail, p.Summary, p.FormData)
+		warnings = append(warnings, timeWarnings...)
+		missingRequired = append(missingRequired, timeMissing...)
+		blocking = blocking || timeBlocking
+		syncConversationProgress(state, missingRequired)
 
 		if blocking {
+			if err := store.SaveState(sid, state); err != nil {
+				return nil, fmt.Errorf("save state: %w", err)
+			}
 			return mustMarshal(map[string]any{
 				"ok":                      false,
 				"ready_for_confirmation":  false,
@@ -1321,6 +1514,7 @@ func draftPrepareHandler(op ServiceDeskOperator, store StateStore) ToolHandler {
 		if err := state.TransitionTo("awaiting_confirmation"); err != nil {
 			return nil, err
 		}
+		state.MinDecisionReady = true
 		if err := store.SaveState(sid, state); err != nil {
 			return nil, fmt.Errorf("save state: %w", err)
 		}

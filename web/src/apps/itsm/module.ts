@@ -20,10 +20,10 @@ registerApp({
     {
       label: "serviceManagement",
       items: [
-        "itsm:ticket:list",
         "itsm:service:list",
         "itsm:priority:list",
         "itsm:sla:list",
+        "itsm:ticket:list",
       ],
     },
     { label: "systemConfig", items: ["itsm:smart-staffing:config", "itsm:engine-settings:config"] },

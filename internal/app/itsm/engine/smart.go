@@ -443,7 +443,8 @@ func (e *SmartEngine) handleDecisionFailure(tx *gorm.DB, ticketID uint, reason s
 	tx.Model(&ticketModel{}).Where("id = ?", ticketID).
 		UpdateColumn("ai_failure_count", gorm.Expr("ai_failure_count + 1"))
 
-	e.recordTimeline(tx, ticketID, nil, 0, "ai_decision_failed", reason, "")
+	details := decisionExplanationDetails(buildDecisionExplanationSnapshot(nil, "ai_decision_failed", reason, "等待人工介入或恢复动作", nil))
+	e.recordTimelineWithDetails(tx, ticketID, nil, 0, "ai_decision_failed", reason, details, "")
 
 	// Check if we should disable AI
 	var ticket ticketModel
@@ -503,8 +504,9 @@ func (e *SmartEngine) handleComplete(tx *gorm.DB, ticketID uint, plan *DecisionP
 	}
 
 	slog.Info("decision-cycle: completed", "ticketID", ticketID)
-	return e.recordTimeline(tx, ticketID, &act.ID, 0, "workflow_completed",
-		"智能流程已完结", plan.Reasoning)
+	details := decisionExplanationDetails(buildDecisionExplanationSnapshot(plan, "workflow_completed", "智能流程已完结", completionDecisionLabel(status, outcome), &act.ID))
+	return e.recordTimelineWithDetails(tx, ticketID, &act.ID, 0, "workflow_completed",
+		"智能流程已完结", details, plan.Reasoning)
 }
 
 func (e *SmartEngine) resolveCompletionStatus(tx *gorm.DB, ticketID uint) (string, string) {
@@ -597,9 +599,9 @@ func (e *SmartEngine) executeParallelPlan(tx *gorm.DB, ticketID uint, plan *Deci
 			}
 		}
 
-		e.recordTimeline(tx, ticketID, &act.ID, 0, "ai_decision_executed",
-			fmt.Sprintf("AI 并行处理活动：%s（组 %s，信心 %.0f%%）", decisionActivityName(da), groupID[:8], plan.Confidence*100),
-			plan.Reasoning)
+		msg := fmt.Sprintf("AI 并行处理活动：%s（组 %s，信心 %.0f%%）", decisionActivityName(da), groupID[:8], plan.Confidence*100)
+		details := decisionExplanationDetails(buildDecisionExplanationSnapshot(plan, "ai_decision_executed", msg, decisionActivityName(da), &act.ID))
+		e.recordTimelineWithDetails(tx, ticketID, &act.ID, 0, "ai_decision_executed", msg, details, plan.Reasoning)
 	}
 
 	_ = firstActID
@@ -680,9 +682,9 @@ func (e *SmartEngine) executeSinglePlan(tx *gorm.DB, ticketID uint, plan *Decisi
 		}
 	}
 
-	e.recordTimeline(tx, ticketID, &act.ID, 0, "ai_decision_executed",
-		fmt.Sprintf("AI 自动执行：%s（信心 %.0f%%）", decisionActivityName(da), plan.Confidence*100),
-		plan.Reasoning)
+	msg := fmt.Sprintf("AI 自动执行：%s（信心 %.0f%%）", decisionActivityName(da), plan.Confidence*100)
+	details := decisionExplanationDetails(buildDecisionExplanationSnapshot(plan, "ai_decision_executed", msg, decisionActivityName(da), &act.ID))
+	e.recordTimelineWithDetails(tx, ticketID, &act.ID, 0, "ai_decision_executed", msg, details, plan.Reasoning)
 
 	var assigneeID uint
 	if da.ParticipantID != nil {
@@ -878,9 +880,9 @@ func (e *SmartEngine) pendManualHandlingPlan(tx *gorm.DB, ticketID uint, plan *D
 		}
 	}
 
-	e.recordTimeline(tx, ticketID, &act.ID, 0, "ai_decision_pending",
-		fmt.Sprintf("AI 决策信心不足（%.0f%%），等待人工处置", plan.Confidence*100),
-		plan.Reasoning)
+	msg := fmt.Sprintf("AI 决策信心不足（%.0f%%），等待人工处置", plan.Confidence*100)
+	details := decisionExplanationDetails(buildDecisionExplanationSnapshot(plan, "ai_decision_pending", msg, "等待人工处置", &act.ID))
+	e.recordTimelineWithDetails(tx, ticketID, &act.ID, 0, "ai_decision_pending", msg, details, plan.Reasoning)
 
 	return nil
 }
@@ -1112,15 +1114,83 @@ func (e *SmartEngine) loadServiceForTicket(tx *gorm.DB, ticketID uint) (*service
 }
 
 func (e *SmartEngine) recordTimeline(tx *gorm.DB, ticketID uint, activityID *uint, operatorID uint, eventType, message, reasoning string) error {
+	return e.recordTimelineWithDetails(tx, ticketID, activityID, operatorID, eventType, message, nil, reasoning)
+}
+
+func (e *SmartEngine) recordTimelineWithDetails(tx *gorm.DB, ticketID uint, activityID *uint, operatorID uint, eventType, message string, details map[string]any, reasoning string) error {
+	var detailsJSON string
+	if len(details) > 0 {
+		detailsJSON = mustJSON(details)
+	}
 	tl := &timelineModel{
 		TicketID:   ticketID,
 		ActivityID: activityID,
 		OperatorID: operatorID,
 		EventType:  eventType,
 		Message:    message,
+		Details:    detailsJSON,
 		Reasoning:  e.auditReasoning(reasoning),
 	}
 	return tx.Create(tl).Error
+}
+
+func decisionExplanationDetails(snapshot map[string]any) map[string]any {
+	if len(snapshot) == 0 {
+		return nil
+	}
+	return map[string]any{
+		"decision_explanation": snapshot,
+	}
+}
+
+func buildDecisionExplanationSnapshot(plan *DecisionPlan, trigger, decision, nextStep string, activityID *uint) map[string]any {
+	basis := "协作规范、workflow_json 与 workflow_context"
+	humanOverride := "可执行重试、转人工或撤回"
+	if plan != nil {
+		if reasoning := strings.TrimSpace(plan.Reasoning); reasoning != "" {
+			basis = reasoning
+		}
+		if humanActivity := firstHumanDecisionActivity(plan.Activities); humanActivity != nil {
+			humanOverride = fmt.Sprintf("可通过转人工处理到 %s 节点", decisionActivityName(*humanActivity))
+		}
+	}
+	snapshot := map[string]any{
+		"basis":         basis,
+		"trigger":       strings.TrimSpace(trigger),
+		"decision":      strings.TrimSpace(decision),
+		"nextStep":      strings.TrimSpace(nextStep),
+		"humanOverride": humanOverride,
+	}
+	if activityID != nil && *activityID > 0 {
+		snapshot["activityId"] = *activityID
+	}
+	return snapshot
+}
+
+func firstHumanDecisionActivity(activities []DecisionActivity) *DecisionActivity {
+	for i := range activities {
+		if isHumanActivityType(activities[i].Type) {
+			return &activities[i]
+		}
+	}
+	return nil
+}
+
+func completionDecisionLabel(status, outcome string) string {
+	switch status {
+	case TicketStatusRejected:
+		return "已驳回"
+	case TicketStatusCompleted:
+		if outcome == TicketOutcomeApproved {
+			return "已通过"
+		}
+		if outcome == TicketOutcomeFulfilled {
+			return "已履约"
+		}
+		return "已完成"
+	default:
+		return status
+	}
 }
 
 func (e *SmartEngine) auditReasoning(reasoning string) string {
@@ -1688,9 +1758,9 @@ func (e *SmartEngine) buildInitialSeed(tx *gorm.DB, ticketID uint, svc *serviceM
 
 func decisionTriggerReason(completedActivityID *uint) string {
 	if completedActivityID != nil && *completedActivityID > 0 {
-		return "activity_completed"
+		return TriggerReasonActivityDone
 	}
-	return "initial_decision"
+	return TriggerReasonInitialDecision
 }
 
 func normalizedTriggerReason(completedActivityID *uint, triggerReasons ...string) string {

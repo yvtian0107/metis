@@ -101,7 +101,7 @@ func (s *WorkflowGenerateService) Generate(ctx context.Context, req *GenerateReq
 	// 4. Build prompt and call LLM with retry
 	maxRetries := engineCfg.MaxRetries
 	temp := float32(engineCfg.Temperature)
-	systemPrompt := PathBuilderSystemPrompt
+	systemPrompt := strings.TrimSpace(engineCfg.SystemPrompt)
 
 	var lastWorkflowJSON json.RawMessage
 	var lastErrors []engine.ValidationError

@@ -6,8 +6,8 @@ import { useTranslation } from "react-i18next"
 import { useForm, useWatch } from "react-hook-form"
 import { z } from "zod"
 import { zodResolver } from "@hookform/resolvers/zod"
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
-import { ArrowLeft, Plus, Pencil, Trash2, Zap, Save, Loader2, Sparkles, ShieldCheck, CheckCircle2, AlertTriangle, XCircle } from "lucide-react"
+import { useQuery, useMutation, useQueryClient, useIsMutating } from "@tanstack/react-query"
+import { ArrowLeft, Plus, Pencil, Trash2, Zap, Save, Loader2, Sparkles, ShieldCheck, CheckCircle2, AlertTriangle, XCircle, RefreshCw } from "lucide-react"
 import { usePermission } from "@/hooks/use-permission"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
@@ -44,6 +44,7 @@ import {
   fetchCatalogTree, fetchSLATemplates,
   fetchServiceActions, createServiceAction, updateServiceAction, deleteServiceAction,
   generateWorkflow,
+  fetchServiceHealth,
   type ServiceHealthItem, type ServiceHealthCheck,
 } from "../../../api"
 import { SmartServiceConfig } from "../../../components/smart-service-config"
@@ -53,6 +54,7 @@ import type { FormSchema } from "../../../components/form-engine"
 import { ClassicWorkflowWorkbench } from "./classic-workflow-workbench"
 
 const WorkflowPreview = lazy(() => import("./workflow-preview"))
+const GENERATE_WORKFLOW_MUTATION_KEY = ["itsm-generate-workflow"] as const
 
 // ─── Schema hooks ──────────────────────────────────────
 
@@ -318,6 +320,7 @@ function GenerateWorkflowButton({ serviceId, collaborationSpec }: {
   const queryClient = useQueryClient()
 
   const generateMut = useMutation({
+    mutationKey: [...GENERATE_WORKFLOW_MUTATION_KEY, serviceId],
     mutationFn: () => generateWorkflow({ serviceId, collaborationSpec }),
     onSuccess: (resp) => {
       if (resp.errors && resp.errors.length > 0) {
@@ -407,13 +410,50 @@ function healthItemStatusText(status: ServiceHealthItem["status"]) {
   return "需确认"
 }
 
-function ServiceHealthSection({ health }: { health: ServiceHealthCheck | null }) {
+function healthLocationKindText(kind: ServiceHealthItem["location"]["kind"]) {
+  if (kind === "collaboration_spec") return "协作规范"
+  if (kind === "workflow_node") return "流程节点"
+  if (kind === "workflow_edge") return "流程连线"
+  if (kind === "action") return "服务动作"
+  return "运行配置"
+}
+
+function canLocateWorkflow(item: ServiceHealthItem) {
+  return (item.location.kind === "workflow_node" || item.location.kind === "workflow_edge") && !!item.location.refId
+}
+
+function ServiceHealthSection({
+  serviceId,
+  health,
+  isGenerating,
+  canLocateInWorkflow,
+  onLocateInWorkflow,
+}: {
+  serviceId: number
+  health: ServiceHealthCheck | null
+  isGenerating: boolean
+  canLocateInWorkflow: boolean
+  onLocateInWorkflow: (item: ServiceHealthItem) => void
+}) {
+  const { t } = useTranslation("itsm")
+  const queryClient = useQueryClient()
+  const refreshMut = useMutation({
+    mutationFn: () => fetchServiceHealth(serviceId),
+    onSuccess: (next) => {
+      queryClient.setQueryData<ServiceDefItem | undefined>(["itsm-service", serviceId], (prev) => (
+        prev ? { ...prev, publishHealthCheck: next } : prev
+      ))
+      toast.success(t("publishHealth.refreshSuccess"))
+    },
+    onError: (err) => toast.error(err.message),
+  })
   const displayStatus: ServiceHealthItem["status"] | "empty" = !health ? "empty" : health.status
   const overall = healthTone(displayStatus)
   const OverallIcon = overall.icon
+  const isLoading = isGenerating || refreshMut.isPending
 
   return (
-    <section className="flex min-h-full flex-col">
+    <section className="flex min-h-[500px] flex-col">
       <SectionHeader
         title={(
           <span className="inline-flex items-center gap-2">
@@ -421,9 +461,41 @@ function ServiceHealthSection({ health }: { health: ServiceHealthCheck | null })
             发布健康检查
           </span>
         )}
-        action={<Badge variant={overall.badge}>{healthStatusText(displayStatus)}</Badge>}
+        action={(
+          <div className="inline-flex h-9 items-center rounded-full border border-border/60 bg-gradient-to-r from-white/86 to-white/72 p-1 shadow-[0_14px_32px_-24px_rgba(15,23,42,0.62)]">
+            <span className="inline-flex items-center gap-1.5 rounded-full px-3 text-xs font-medium text-foreground/82">
+              <OverallIcon className={cn("h-3.5 w-3.5", overall.iconClassName)} />
+              {healthStatusText(displayStatus)}
+            </span>
+            <span className="mx-1.5 h-4 w-px bg-border/70" aria-hidden />
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-7 rounded-full px-3 text-xs"
+              disabled={isLoading}
+              onClick={() => refreshMut.mutate()}
+            >
+              {refreshMut.isPending ? (
+                <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
+              )}
+              {refreshMut.isPending ? t("publishHealth.refreshing") : t("publishHealth.refresh")}
+            </Button>
+          </div>
+        )}
       />
-      <div className="workspace-surface flex min-h-0 flex-1 flex-col overflow-hidden rounded-[1.1rem]">
+      <div className="workspace-surface flex min-h-[460px] flex-1 flex-col overflow-hidden rounded-[1.1rem]">
+        {isLoading ? (
+          <div className="flex min-h-[260px] flex-1 items-center justify-center px-4 py-5">
+            <div className="inline-flex items-center gap-2 text-sm text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              <span>{isGenerating ? t("generate.generating") : t("publishHealth.refreshing")}</span>
+            </div>
+          </div>
+        ) : (
+          <>
         <div className="flex items-start gap-3 border-b border-border/45 px-4 py-3 text-sm">
           <OverallIcon className={cn("mt-0.5 h-4 w-4", overall.iconClassName)} />
           <div className="min-w-0 space-y-1">
@@ -443,13 +515,41 @@ function ServiceHealthSection({ health }: { health: ServiceHealthCheck | null })
           {(health?.items ?? []).map((item) => {
             const tone = healthTone(item.status)
             const Icon = tone.icon
+            const location = item.location ?? { kind: "runtime_config", path: "" }
             return (
-              <div key={item.key} className="flex flex-wrap items-start gap-3 px-5 py-3.5">
+              <div key={item.key} className="flex flex-wrap items-start gap-3 px-5 py-4">
                 <Icon className={cn("mt-0.5 h-4 w-4", tone.iconClassName)} />
                 <div className="min-w-0 flex-1">
                   <p className="text-sm font-medium">{item.label}</p>
-                  <p className="text-sm text-muted-foreground">{item.message}</p>
+                  <p className="mt-1 text-sm text-muted-foreground">{item.message}</p>
+                  <div className="mt-2.5 grid gap-1.5 text-xs text-muted-foreground">
+                    <p>
+                      <span className="font-medium text-foreground/80">{t("publishHealth.location")}：</span>
+                      {healthLocationKindText(location.kind)}
+                      {location.refId ? ` · ${location.refId}` : ""}
+                      {location.path ? ` · ${location.path}` : ""}
+                    </p>
+                    <p>
+                      <span className="font-medium text-foreground/80">{t("publishHealth.recommendation")}：</span>
+                      {item.recommendation || "请根据检查结论调整相关配置。"}
+                    </p>
+                    <p>
+                      <span className="font-medium text-foreground/80">{t("publishHealth.evidence")}：</span>
+                      {item.evidence || "未提供"}
+                    </p>
+                  </div>
                 </div>
+                {canLocateInWorkflow && canLocateWorkflow({ ...item, location }) && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-7 px-2.5 text-xs"
+                    onClick={() => onLocateInWorkflow(item)}
+                  >
+                    {t("publishHealth.locate")}
+                  </Button>
+                )}
                 <Badge variant={tone.badge}>{healthItemStatusText(item.status)}</Badge>
               </div>
             )
@@ -460,6 +560,8 @@ function ServiceHealthSection({ health }: { health: ServiceHealthCheck | null })
             </div>
           )}
         </div>
+          </>
+        )}
       </div>
     </section>
   )
@@ -513,20 +615,20 @@ function BasicInfoForm({ service, catalogs, slaTemplates }: {
   return (
     <Form {...form}>
       <form onSubmit={form.handleSubmit((v) => updateMut.mutate(v))} className="space-y-4">
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-[minmax(240px,1.25fr)_minmax(240px,1.15fr)_220px_190px_150px]">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-12">
           <FormField control={form.control} name="name" render={({ field }) => (
-            <FormItem>
+            <FormItem className="xl:col-span-3">
               <FormLabel>{t("itsm:services.name")}</FormLabel>
               <FormControl><Input placeholder={t("itsm:services.namePlaceholder")} {...field} /></FormControl>
               <FormMessage />
             </FormItem>
           )} />
-          <div className="space-y-1.5">
+          <div className="space-y-1.5 xl:col-span-2">
             <label className="text-sm font-medium">{t("itsm:services.code")}</label>
             <Input value={service.code} disabled />
           </div>
           <FormField control={form.control} name="catalogId" render={({ field }) => (
-            <FormItem>
+            <FormItem className="xl:col-span-3">
               <FormLabel>{t("itsm:services.catalog")}</FormLabel>
               <Select onValueChange={(v) => field.onChange(Number(v))} value={String(field.value)}>
                 <FormControl><SelectTrigger className="w-full"><SelectValue placeholder={t("itsm:services.catalogPlaceholder")} /></SelectTrigger></FormControl>
@@ -549,7 +651,7 @@ function BasicInfoForm({ service, catalogs, slaTemplates }: {
             </FormItem>
           )} />
           <FormField control={form.control} name="slaId" render={({ field }) => (
-            <FormItem>
+            <FormItem className="xl:col-span-2">
               <FormLabel>{t("itsm:services.sla")}</FormLabel>
               <Select onValueChange={(v) => field.onChange(v === "0" ? null : Number(v))} value={String(field.value ?? 0)}>
                 <FormControl><SelectTrigger className="w-full"><SelectValue placeholder={t("itsm:services.slaPlaceholder")} /></SelectTrigger></FormControl>
@@ -564,7 +666,7 @@ function BasicInfoForm({ service, catalogs, slaTemplates }: {
             </FormItem>
           )} />
           <FormField control={form.control} name="isActive" render={({ field }) => (
-            <FormItem>
+            <FormItem className="xl:col-span-2">
               <FormLabel>{t("itsm:services.status")}</FormLabel>
               <div className="flex h-9 items-center justify-between gap-2 rounded-md border border-border/70 bg-background/42 px-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.62)]">
                 <Switch checked={field.value} onCheckedChange={field.onChange} />
@@ -686,24 +788,29 @@ function SectionHeader({ title, action }: {
   action?: ReactNode
 }) {
   return (
-    <div className="mb-3 flex items-center justify-between gap-3">
+    <div className="mb-3 flex min-h-10 items-center justify-between gap-3">
       <h3 className="text-sm font-semibold text-foreground/82">{title}</h3>
       {action}
     </div>
   )
 }
 
-function SectionFrame({ title, action, children }: {
+function SectionFrame({ title, action, children, noSurface = false }: {
   title: ReactNode
   action?: ReactNode
   children: ReactNode
+  noSurface?: boolean
 }) {
   return (
     <section>
       <SectionHeader title={title} action={action} />
-      <div className="workspace-surface rounded-[1.25rem] p-5">
-        {children}
-      </div>
+      {noSurface ? (
+        children
+      ) : (
+        <div className="workspace-surface rounded-[1.25rem] p-5">
+          {children}
+        </div>
+      )}
     </section>
   )
 }
@@ -715,6 +822,11 @@ export function Component() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const serviceId = Number(id)
+  const [workflowFocus, setWorkflowFocus] = useState<{
+    kind: "workflow_node" | "workflow_edge"
+    refId: string
+    seq: number
+  } | null>(null)
 
   const { data: service, isLoading } = useQuery({
     queryKey: ["itsm-service", serviceId],
@@ -731,6 +843,7 @@ export function Component() {
     queryKey: ["itsm-sla"],
     queryFn: () => fetchSLATemplates(),
   })
+  const isGeneratingWorkflow = useIsMutating({ mutationKey: [...GENERATE_WORKFLOW_MUTATION_KEY, serviceId] }) > 0
 
   if (isLoading || catalogsLoading || slaLoading) {
     return <div className="flex h-96 items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
@@ -752,6 +865,7 @@ export function Component() {
 
   const workflowSection = (
     <SectionFrame
+      noSurface={service.engineType === "smart"}
       title={service.engineType === "smart" ? "参考路径/策略草图" : t("itsm:services.tabWorkflow")}
       action={service.engineType === "classic" && !!service.workflowJson ? (
         <Button variant="outline" size="sm" onClick={() => navigate(`/itsm/services/${serviceId}/workflow`)}>
@@ -759,7 +873,12 @@ export function Component() {
         </Button>
       ) : undefined}
     >
-      {!service.workflowJson ? (
+      {isGeneratingWorkflow ? (
+        <div className="flex min-h-32 flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-border/70 bg-background/25 px-4 py-7 text-muted-foreground">
+          <Loader2 className="h-5 w-5 animate-spin" />
+          <p className="text-sm">{t("itsm:generate.generating")}</p>
+        </div>
+      ) : !service.workflowJson ? (
         <div className="flex min-h-32 flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-border/70 bg-background/25 px-4 py-7 text-muted-foreground">
           <p className="text-sm">
             {service.engineType === "smart" ? "暂无参考路径" : t("itsm:services.workflowEmpty")}
@@ -774,7 +893,11 @@ export function Component() {
         </div>
       ) : (
         <Suspense fallback={<div className="flex h-80 items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>}>
-          <WorkflowPreview workflowJson={service.workflowJson} />
+          <WorkflowPreview
+            workflowJson={service.workflowJson}
+            embedded
+            focusTarget={workflowFocus}
+          />
         </Suspense>
       )}
     </SectionFrame>
@@ -807,9 +930,28 @@ export function Component() {
       </SectionFrame>
 
       {service.engineType === "smart" ? (
-        <div className="grid items-stretch gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(320px,0.38fr)]">
+        <div className="grid items-stretch gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(280px,340px)]">
           <div className="min-w-0">{workflowSection}</div>
-          <ServiceHealthSection health={service.publishHealthCheck} />
+          <ServiceHealthSection
+            serviceId={serviceId}
+            health={service.publishHealthCheck}
+            isGenerating={isGeneratingWorkflow}
+            canLocateInWorkflow={!!service.workflowJson}
+            onLocateInWorkflow={(item) => {
+              const location = item.location
+              if (!location.refId) {
+                return
+              }
+              if (location.kind !== "workflow_node" && location.kind !== "workflow_edge") {
+                return
+              }
+              setWorkflowFocus({
+                kind: location.kind,
+                refId: location.refId,
+                seq: Date.now(),
+              })
+            }}
+          />
         </div>
       ) : (
         <>

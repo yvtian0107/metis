@@ -15,7 +15,7 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { nodeTypes } from "./nodes"
 import { edgeTypes } from "./custom-edges"
-import { applyDagreLayout } from "./auto-layout"
+import { applyViewerLayout } from "./auto-layout"
 import { getNodeAccent } from "./visual-data"
 import { WorkflowNodeIconGlyph } from "./visual"
 import { type WFNodeData, type WFEdgeData } from "./types"
@@ -148,7 +148,7 @@ export function WorkflowViewer({ workflowJson, activities, tokens = [], currentA
       } satisfies WFEdgeData,
     }))
 
-    return { nodes: applyDagreLayout(nodes, edges), edges }
+    return { nodes: applyViewerLayout(nodes, edges), edges }
   }, [workflowJson, activities, tokens, useTokenMode, currentActivityId])
 
   const onNodeClick = useCallback((_: React.MouseEvent, node: Node) => {
@@ -175,6 +175,7 @@ export function WorkflowViewer({ workflowJson, activities, tokens = [], currentA
           nodesConnectable={false}
           elementsSelectable={false}
           fitView
+          fitViewOptions={{ padding: 0.12 }}
           className="workflow-builder-flow"
         >
           <Background gap={24} size={1.2} />

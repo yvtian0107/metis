@@ -59,6 +59,7 @@ import { WorkspaceSearchField, WorkspaceStatus } from "@/components/workspace/pr
 import {
   assignTicket,
   cancelTicket,
+  fetchDecisionQuality,
   fetchPriorities,
   fetchServiceDefs,
   fetchTicket,
@@ -68,6 +69,7 @@ import {
   fetchUsers,
   progressTicket,
   type ActivityItem,
+  type DecisionQualityItem,
   type TicketMonitorItem,
   type TimelineItem,
 } from "../../api"
@@ -98,6 +100,19 @@ function formatWaiting(minutes: number) {
   const h = Math.floor(minutes / 60)
   const m = minutes % 60
   return m > 0 ? `${h}h ${m}m` : `${h}h`
+}
+
+function formatPercent(value: number) {
+  return `${Math.round(value * 100)}%`
+}
+
+function formatSeconds(seconds: number) {
+  if (!seconds || seconds <= 0) return "-"
+  if (seconds < 60) return `${Math.round(seconds)}s`
+  const mins = Math.round(seconds / 60)
+  if (mins < 60) return `${mins}m`
+  const hours = Math.round(mins / 60)
+  return `${hours}h`
 }
 
 function riskTone(riskLevel: string): "danger" | "warning" | "neutral" {
@@ -155,6 +170,7 @@ export function Component() {
   const [statusFilter, setStatusFilter] = useState("all")
   const [priorityFilter, setPriorityFilter] = useState("all")
   const [serviceFilter, setServiceFilter] = useState("all")
+  const [qualityDimension, setQualityDimension] = useState<"service" | "department">("service")
   const [page, setPage] = useState(1)
   const [selectedTicket, setSelectedTicket] = useState<TicketMonitorItem | null>(null)
 
@@ -192,8 +208,14 @@ export function Component() {
   })
   const services = servicesData?.items ?? []
 
+  const { data: decisionQuality } = useQuery({
+    queryKey: ["itsm-decision-quality", qualityDimension],
+    queryFn: () => fetchDecisionQuality({ dimension: qualityDimension, windowDays: 30 }),
+  })
+
   const items = data?.items ?? []
   const summary = data?.summary
+  const qualityItems = (decisionQuality?.items ?? []).slice(0, 5)
   const total = data?.total ?? 0
   const totalPages = Math.ceil(total / PAGE_SIZE)
 
@@ -227,6 +249,57 @@ export function Component() {
           <MetricStrip label={t("monitor.completedTodayTotal")} value={summary?.completedTodayTotal ?? 0} tone="success" />
           <MetricStrip label={t("monitor.smartActiveTotal")} value={summary?.smartActiveTotal ?? 0} />
           <MetricStrip label={t("monitor.classicActiveTotal")} value={summary?.classicActiveTotal ?? 0} />
+        </div>
+      </section>
+
+      <section className="workspace-surface rounded-[1.25rem] px-4 py-3">
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <div>
+            <p className="text-sm font-semibold">{t("monitor.qualityTitle", { defaultValue: "决策质量 (30 天)" })}</p>
+            <p className="text-xs text-muted-foreground">
+              {decisionQuality?.version ? `${t("monitor.qualityVersion", { defaultValue: "口径版本" })}: ${decisionQuality.version}` : t("monitor.qualityHint", { defaultValue: "按固定口径聚合" })}
+            </p>
+          </div>
+          <ButtonGroup>
+            <Button size="sm" variant={qualityDimension === "service" ? "default" : "outline"} onClick={() => setQualityDimension("service")}>
+              {t("monitor.qualityByService", { defaultValue: "按服务" })}
+            </Button>
+            <Button size="sm" variant={qualityDimension === "department" ? "default" : "outline"} onClick={() => setQualityDimension("department")}>
+              {t("monitor.qualityByDepartment", { defaultValue: "按部门" })}
+            </Button>
+          </ButtonGroup>
+        </div>
+        <div className="overflow-x-auto">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>{t("monitor.qualityDimension", { defaultValue: "维度" })}</TableHead>
+                <TableHead>{t("monitor.qualityApprovalRate", { defaultValue: "通过率" })}</TableHead>
+                <TableHead>{t("monitor.qualityRejectionRate", { defaultValue: "驳回率" })}</TableHead>
+                <TableHead>{t("monitor.qualityRetryRate", { defaultValue: "重试率" })}</TableHead>
+                <TableHead>{t("monitor.qualityLatency", { defaultValue: "平均决策时延" })}</TableHead>
+                <TableHead>{t("monitor.qualityRecoveryRate", { defaultValue: "恢复成功率" })}</TableHead>
+                <TableHead>{t("monitor.qualityDecisionCount", { defaultValue: "决策量" })}</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {qualityItems.length === 0 ? (
+                <DataTableEmptyRow colSpan={7} icon={Ticket} title={t("monitor.qualityEmpty", { defaultValue: "暂无决策质量数据" })} />
+              ) : (
+                qualityItems.map((item: DecisionQualityItem) => (
+                  <TableRow key={`${item.dimensionType}-${item.dimensionId}`}>
+                    <TableCell className="font-medium">{item.dimensionName || "-"}</TableCell>
+                    <TableCell>{formatPercent(item.approvalRate)}</TableCell>
+                    <TableCell>{formatPercent(item.rejectionRate)}</TableCell>
+                    <TableCell>{formatPercent(item.retryRate)}</TableCell>
+                    <TableCell>{formatSeconds(item.avgDecisionLatencySeconds)}</TableCell>
+                    <TableCell>{formatPercent(item.recoverySuccessRate)}</TableCell>
+                    <TableCell>{item.decisionCount}</TableCell>
+                  </TableRow>
+                ))
+              )}
+            </TableBody>
+          </Table>
         </div>
       </section>
 

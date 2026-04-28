@@ -3,10 +3,12 @@ package runtime
 import (
 	"context"
 	"errors"
+	"log/slog"
 
 	"github.com/samber/do/v2"
 	"gorm.io/gorm"
 
+	"metis/internal/app"
 	"metis/internal/model"
 )
 
@@ -16,14 +18,16 @@ var (
 )
 
 type SessionService struct {
-	repo     *SessionRepo
-	agentSvc *AgentService
+	repo           *SessionRepo
+	agentSvc       *AgentService
+	titleProviders []app.SessionTitleProvider
 }
 
 func NewSessionService(i do.Injector) (*SessionService, error) {
 	return &SessionService{
-		repo:     do.MustInvoke[*SessionRepo](i),
-		agentSvc: do.MustInvoke[*AgentService](i),
+		repo:           do.MustInvoke[*SessionRepo](i),
+		agentSvc:       do.MustInvoke[*AgentService](i),
+		titleProviders: collectSessionTitleProviders(),
 	}, nil
 }
 
@@ -102,14 +106,38 @@ func (s *SessionService) StoreMessageContext(ctx context.Context, sessionID uint
 
 	// Auto-generate session title from first user message
 	if seq == 1 && role == MessageRoleUser {
-		title := content
-		if len(title) > 100 {
-			title = title[:100] + "..."
+		title := s.fallbackTitle(content)
+		session, findErr := s.repo.FindByID(sessionID)
+		if findErr == nil {
+			for _, provider := range s.titleProviders {
+				providerTitle, handled, providerErr := provider.GenerateSessionTitle(ctx, sessionID, session.UserID, session.AgentID, content)
+				if providerErr != nil {
+					slog.Warn("session title provider failed", "sessionID", sessionID, "agentID", session.AgentID, "error", providerErr)
+					if handled {
+						break
+					}
+					continue
+				}
+				if handled {
+					if providerTitle != "" {
+						title = providerTitle
+					}
+					break
+				}
+			}
 		}
 		_ = s.repo.db.WithContext(ctx).Model(&AgentSession{}).Where("id = ?", sessionID).Update("title", title).Error
 	}
 
 	return msg, nil
+}
+
+func (s *SessionService) fallbackTitle(content string) string {
+	title := content
+	if len(title) > 100 {
+		title = title[:100] + "..."
+	}
+	return title
 }
 
 func (s *SessionService) nextSequenceContext(ctx context.Context, sessionID uint) (int, error) {

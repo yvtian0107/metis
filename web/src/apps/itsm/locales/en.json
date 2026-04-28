@@ -295,7 +295,7 @@
     "title": "Ticket Monitoring",
     "monitorDesc": "Review Agentic and classic tickets across users, detect stalled work, and manually move it forward.",
     "mine": "My Tickets",
-    "mineDesc": "Shows tickets I submitted, for tracking request progress and historical results.",
+    "mineDesc": "View tickets I submitted and track progress to final outcomes.",
     "approvalPending": "My Tasks",
     "approvalPendingDesc": "Human workflow steps currently waiting for my approval or rejection.",
     "approvalPendingEmpty": "No tasks",
@@ -356,6 +356,10 @@
     "slaResponseDeadline": "Response Deadline",
     "slaResolutionDeadline": "Resolution Deadline",
     "allStatuses": "All Statuses",
+    "groupActive": "In Progress",
+    "groupTerminal": "Closed",
+    "groupAll": "All",
+    "mineEmpty": "You have not submitted any tickets yet",
     "allPriorities": "All Priorities",
     "allServices": "All Services",
     "currentOwner": "Current Owner",
@@ -386,7 +390,24 @@
     "startDate": "Start Date",
     "endDate": "End Date",
     "titlePlaceholder": "Enter ticket title",
-    "descriptionPlaceholder": "Enter ticket description"
+    "descriptionPlaceholder": "Enter ticket description",
+    "fieldLabels": {
+      "vpn_account": "VPN Account",
+      "device_usage": "Device and Usage",
+      "request_kind": "Access Reason"
+    },
+    "fieldValueLabels": {
+      "request_kind": {
+        "online_support": "Online Support",
+        "troubleshooting": "Troubleshooting",
+        "production_emergency": "Production Emergency",
+        "network_access_issue": "Network Access Issue",
+        "external_collaboration": "External Collaboration",
+        "long_term_remote_work": "Long-term Remote Work",
+        "cross_border_access": "Cross-border Access",
+        "security_compliance": "Security Compliance"
+      }
+    }
   },
   "validation": {
     "nameRequired": "Name is required",
@@ -524,6 +545,36 @@
       "actionUnbound": "No action",
       "notifyUnset": "No channel"
     },
+    "edge": {
+      "rawLabel": "Raw",
+      "defaultPath": "Default path",
+      "valueSeparator": " / ",
+      "logic": {
+        "and": "and",
+        "or": "or"
+      },
+      "operator": {
+        "equals": "equals",
+        "not_equals": "not equals",
+        "contains_any": "in",
+        "gt": ">",
+        "lt": "<",
+        "gte": ">=",
+        "lte": "<=",
+        "is_empty": "is empty",
+        "is_not_empty": "is not empty"
+      },
+      "outcome": {
+        "submitted": "Submitted",
+        "completed": "Completed",
+        "approved": "Approved",
+        "rejected": "Rejected",
+        "success": "Success",
+        "failed": "Failed",
+        "timeout": "Timed out",
+        "cancelled": "Cancelled"
+      }
+    },
     "condition": {
       "add": "Add Condition",
       "addGroup": "Add Group"
@@ -546,6 +597,7 @@
       "webhook": "Webhook"
     },
     "autoLayout": "Auto Layout",
+    "fitView": "Fit View",
     "copied": "Copied {{count}} nodes",
     "ctx": {
       "paste": "Paste",
@@ -623,6 +675,10 @@
     "runtimeDesc": "Keeps path generation, retries, timeouts, audit level, and fallback handling below the staffing layer.",
     "pathBuilderTitle": "Reference Path Generation",
     "pathBuilderDesc": "Generates reference paths and strategy sketches from collaboration specs for pre-publish guidance and runtime hints.",
+    "titleBuilderTitle": "Session Title Generation",
+    "titleBuilderDesc": "Generates service desk session titles from the user's first question for faster history scanning.",
+    "healthCheckerTitle": "Publish Health Check",
+    "healthCheckerDesc": "Generates publish risk conclusions from collaboration spec, reference path, and action settings as direct release gates.",
     "guardTitle": "Fallback and Audit",
     "guardDesc": "Controls audit detail and assigns a fallback owner when smart decisions fail or no one takes over.",
     "provider": "Provider",
@@ -641,6 +697,17 @@
     "maxTokens": "Max Tokens",
     "timeoutSeconds": "Timeout",
     "seconds": "sec",
+    "systemPrompt": "System Prompt",
+    "systemPromptPlaceholder": "Enter system prompt",
+    "systemPromptEmpty": "System prompt is not configured",
+    "openPromptEditor": "Edit prompt",
+    "applyPrompt": "Apply",
+    "pathPromptEditorTitle": "Edit Reference Path Prompt",
+    "pathPromptEditorDesc": "Adjust the system prompt for reference path generation. Changes apply immediately after clicking Apply.",
+    "titlePromptEditorTitle": "Edit Session Title Prompt",
+    "titlePromptEditorDesc": "Adjust the system prompt for service desk session title generation. Changes apply immediately after clicking Apply.",
+    "healthPromptEditorTitle": "Edit Publish Health Prompt",
+    "healthPromptEditorDesc": "Adjust the system prompt for publish health checks. Changes apply immediately after clicking Apply.",
     "auditLevel": "Audit Level",
     "fallbackAssignee": "Fallback Assignee",
     "fallbackAssigneePlaceholder": "Select fallback assignee",
@@ -672,6 +739,15 @@
     "specRequired": "Please fill in the collaboration spec first",
     "workflowEmptySmartHint": "Fill in the collaboration spec above, then click \"Generate Reference Path\" to create a strategy sketch",
     "nodeType": "Node Type"
+  },
+  "publishHealth": {
+    "refresh": "Refresh Check",
+    "refreshing": "Checking...",
+    "refreshSuccess": "Publish health check refreshed",
+    "location": "Location",
+    "recommendation": "Recommended Fix",
+    "evidence": "Evidence",
+    "locate": "Locate in Workflow"
   },
   "knowledge": {
     "title": "Knowledge Documents",

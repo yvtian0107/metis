@@ -86,45 +86,61 @@ type Ticket struct {
 func (Ticket) TableName() string { return "itsm_tickets" }
 
 type TicketResponse struct {
-	ID                    uint       `json:"id"`
-	Code                  string     `json:"code"`
-	Title                 string     `json:"title"`
-	Description           string     `json:"description"`
-	ServiceID             uint       `json:"serviceId"`
-	ServiceName           string     `json:"serviceName"`
-	EngineType            string     `json:"engineType"`
-	Status                string     `json:"status"`
-	Outcome               string     `json:"outcome"`
-	StatusLabel           string     `json:"statusLabel"`
-	StatusTone            string     `json:"statusTone"`
-	LastHumanOutcome      string     `json:"lastHumanOutcome"`
-	DecisioningReason     string     `json:"decisioningReason"`
-	PriorityID            uint       `json:"priorityId"`
-	PriorityName          string     `json:"priorityName"`
-	PriorityColor         string     `json:"priorityColor"`
-	RequesterID           uint       `json:"requesterId"`
-	RequesterName         string     `json:"requesterName"`
-	AssigneeID            *uint      `json:"assigneeId"`
-	AssigneeName          string     `json:"assigneeName"`
-	CurrentActivityID     *uint      `json:"currentActivityId"`
-	Source                string     `json:"source"`
-	AgentSessionID        *uint      `json:"agentSessionId"`
-	AIFailureCount        int        `json:"aiFailureCount"`
-	FormData              JSONField  `json:"formData"`
-	WorkflowJSON          JSONField  `json:"workflowJson"`
-	SLAResponseDeadline   *time.Time `json:"slaResponseDeadline"`
-	SLAResolutionDeadline *time.Time `json:"slaResolutionDeadline"`
-	SLAStatus             string     `json:"slaStatus"`
-	SLAPausedAt           *time.Time `json:"slaPausedAt"`
-	FinishedAt            *time.Time `json:"finishedAt"`
-	SmartState            string     `json:"smartState,omitempty"`
-	CurrentOwnerType      string     `json:"currentOwnerType,omitempty"`
-	CurrentOwnerName      string     `json:"currentOwnerName,omitempty"`
-	NextStepSummary       string     `json:"nextStepSummary,omitempty"`
-	CanAct                bool       `json:"canAct"`
-	CanOverride           bool       `json:"canOverride"`
-	CreatedAt             time.Time  `json:"createdAt"`
-	UpdatedAt             time.Time  `json:"updatedAt"`
+	ID                    uint                 `json:"id"`
+	Code                  string               `json:"code"`
+	Title                 string               `json:"title"`
+	Description           string               `json:"description"`
+	ServiceID             uint                 `json:"serviceId"`
+	ServiceName           string               `json:"serviceName"`
+	EngineType            string               `json:"engineType"`
+	Status                string               `json:"status"`
+	Outcome               string               `json:"outcome"`
+	StatusLabel           string               `json:"statusLabel"`
+	StatusTone            string               `json:"statusTone"`
+	LastHumanOutcome      string               `json:"lastHumanOutcome"`
+	DecisioningReason     string               `json:"decisioningReason"`
+	PriorityID            uint                 `json:"priorityId"`
+	PriorityName          string               `json:"priorityName"`
+	PriorityColor         string               `json:"priorityColor"`
+	RequesterID           uint                 `json:"requesterId"`
+	RequesterName         string               `json:"requesterName"`
+	AssigneeID            *uint                `json:"assigneeId"`
+	AssigneeName          string               `json:"assigneeName"`
+	CurrentActivityID     *uint                `json:"currentActivityId"`
+	Source                string               `json:"source"`
+	AgentSessionID        *uint                `json:"agentSessionId"`
+	AIFailureCount        int                  `json:"aiFailureCount"`
+	FormData              JSONField            `json:"formData"`
+	WorkflowJSON          JSONField            `json:"workflowJson"`
+	SLAResponseDeadline   *time.Time           `json:"slaResponseDeadline"`
+	SLAResolutionDeadline *time.Time           `json:"slaResolutionDeadline"`
+	SLAStatus             string               `json:"slaStatus"`
+	SLAPausedAt           *time.Time           `json:"slaPausedAt"`
+	FinishedAt            *time.Time           `json:"finishedAt"`
+	SmartState            string               `json:"smartState,omitempty"`
+	CurrentOwnerType      string               `json:"currentOwnerType,omitempty"`
+	CurrentOwnerName      string               `json:"currentOwnerName,omitempty"`
+	NextStepSummary       string               `json:"nextStepSummary,omitempty"`
+	CanAct                bool                 `json:"canAct"`
+	CanOverride           bool                 `json:"canOverride"`
+	DecisionExplanation   *DecisionExplanation `json:"decisionExplanation,omitempty"`
+	RecoveryActions       []RecoveryAction     `json:"recoveryActions,omitempty"`
+	CreatedAt             time.Time            `json:"createdAt"`
+	UpdatedAt             time.Time            `json:"updatedAt"`
+}
+
+type DecisionExplanation struct {
+	ActivityID    *uint  `json:"activityId,omitempty"`
+	Basis         string `json:"basis"`
+	Trigger       string `json:"trigger"`
+	Decision      string `json:"decision"`
+	NextStep      string `json:"nextStep"`
+	HumanOverride string `json:"humanOverride"`
+}
+
+type RecoveryAction struct {
+	Code  string `json:"code"`
+	Label string `json:"label"`
 }
 
 type TicketMonitorSummary struct {
@@ -152,6 +168,27 @@ type TicketMonitorResponse struct {
 	Summary TicketMonitorSummary `json:"summary"`
 	Items   []TicketMonitorItem  `json:"items"`
 	Total   int64                `json:"total"`
+}
+
+const DecisionQualityMetricVersion = "2026-04-27.v1"
+
+type DecisionQualityItem struct {
+	DimensionType             string  `json:"dimensionType"`
+	DimensionID               uint    `json:"dimensionId"`
+	DimensionName             string  `json:"dimensionName"`
+	ApprovalRate              float64 `json:"approvalRate"`
+	RejectionRate             float64 `json:"rejectionRate"`
+	RetryRate                 float64 `json:"retryRate"`
+	AvgDecisionLatencySeconds float64 `json:"avgDecisionLatencySeconds"`
+	RecoverySuccessRate       float64 `json:"recoverySuccessRate"`
+	DecisionCount             int64   `json:"decisionCount"`
+}
+
+type DecisionQualityResponse struct {
+	Version     string                `json:"version"`
+	WindowDays  int                   `json:"windowDays"`
+	GeneratedAt time.Time             `json:"generatedAt"`
+	Items       []DecisionQualityItem `json:"items"`
 }
 
 func (t *Ticket) ToResponse() TicketResponse {

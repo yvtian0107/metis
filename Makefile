@@ -176,6 +176,9 @@ GOTESTSUM := $(shell command -v gotestsum 2>/dev/null)
 test:
 	go test ./...
 
+test-tdd:
+	go test ./internal/app/itsm/... -run '^Test' -skip 'BDD|LLM' -count=1
+
 test-license:
 	go test ./internal/app/license/...
 
@@ -187,7 +190,7 @@ test-fuzz:
 test-llm:
 	@test -f .env.test || (echo "Missing .env.test — copy .env.test.example and fill in values" && exit 1)
 	@set -a; . ./.env.test; set +a; \
-	go test ./internal/app/itsm/ -run TestLLM -v -timeout 120s
+	go test ./internal/app/itsm/definition -run TestLLM -v -timeout 120s
 
 test-pretty:
 ifdef GOTESTSUM
@@ -217,24 +220,31 @@ test-llm-report:
 	@test -f .env.test || (echo "Missing .env.test — copy .env.test.example and fill in values" && exit 1)
 ifdef GOTESTSUM
 	@set -a; . ./.env.test; set +a; \
-	gotestsum --format testdox --junitfile test-llm-report.xml -- ./internal/app/itsm/ -run TestLLM -v -timeout 120s
+	gotestsum --format testdox --junitfile test-llm-report.xml -- ./internal/app/itsm/definition -run TestLLM -v -timeout 120s
 else
 	@set -a; . ./.env.test; set +a; \
-	go test ./internal/app/itsm/ -run TestLLM -v -timeout 120s
+	go test ./internal/app/itsm/definition -run TestLLM -v -timeout 120s
 endif
 
 test-bdd:
-	@test -f .env.test || (echo "Missing .env.test — copy .env.test.example and fill in values" && exit 1)
-	@set -a; . ./.env.test; set +a; \
-	go test ./internal/app/itsm/ -run TestBDD -v -timeout 30m
+	go test ./internal/app/itsm/bdd -run '^TestBDD$$' -v -timeout 10m
 
 test-bdd-vpn:
 	@test -f .env.test || (echo "Missing .env.test — copy .env.test.example and fill in values" && exit 1)
 	@set -a; . ./.env.test; set +a; \
-	ITSM_BDD_PATHS=features/vpn_classic_flow.feature,features/vpn_dialog_coverage.feature,features/vpn_dialog_validation.feature,features/vpn_draft_recovery.feature,features/vpn_participant_validation.feature,features/vpn_smart_engine_deterministic.feature,features/vpn_smart_flow.feature,features/vpn_ticket_withdraw.feature \
-	go test ./internal/app/itsm/ -run TestBDD -v -timeout 20m
+	ITSM_BDD_PATHS=features/domain/vpn_classic_flow.feature,features/domain/vpn_participant_validation.feature,features/domain/vpn_smart_engine_deterministic.feature,features/domain/vpn_ticket_withdraw.feature \
+	go test ./internal/app/itsm/bdd -run '^TestBDD$$' -v -timeout 10m
 
-.PHONY: web-full-registry web-build web-install web-dev dev dev-sqlite stop-all build run release release-license build-license build-sidecar release-sidecar refer-clone seed seed-dev seed-dev-sqlite reset-pg clean push test test-license test-fuzz test-llm test-pretty test-cover test-report test-llm-report test-bdd test-bdd-vpn
+
+test-bdd-api:
+	go test ./internal/app/itsm/bdd -run '^TestBDDAPI$$' -v -timeout 10m
+
+test-bdd-agentic:
+	@test -f .env.test || (echo "Missing .env.test — copy .env.test.example and fill in values" && exit 1)
+	@set -a; . ./.env.test; set +a; \
+	go test ./internal/app/itsm/bdd -run '^TestBDDAgentic$$' -v -timeout 30m
+
+.PHONY: web-full-registry web-build web-install web-dev dev dev-sqlite stop-all build run release release-license build-license build-sidecar release-sidecar refer-clone seed seed-dev seed-dev-sqlite reset-pg clean push test test-license test-fuzz test-llm test-pretty test-cover test-report test-llm-report test-tdd test-bdd test-bdd-vpn test-bdd-api test-bdd-agentic
 
 # Backward-compat aliases
 license: build-license

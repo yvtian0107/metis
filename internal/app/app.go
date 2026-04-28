@@ -163,6 +163,12 @@ type AgentRuntimeContextProvider interface {
 	BuildAgentRuntimeContext(ctx context.Context, agentCode string, sessionID, userID uint) (string, error)
 }
 
+// SessionTitleProvider is an optional interface that allows domain apps to
+// generate first-message session titles for specific agent sessions.
+type SessionTitleProvider interface {
+	GenerateSessionTitle(ctx context.Context, sessionID, userID, agentID uint, firstUserMessage string) (title string, handled bool, err error)
+}
+
 // AIDecisionExecutor runs AI decision cycles (ReAct tool-calling loops) for smart
 // workflow engines. Implemented by the AI App; the engine provides domain context
 // and tool handlers.

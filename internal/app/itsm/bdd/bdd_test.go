@@ -1,10 +1,11 @@
 package bdd
 
-// bdd_test.go — godog BDD test suite entry point for ITSM.
+// bdd_test.go — godog BDD test suite entry points for ITSM.
 //
-// Run BDD tests (requires LLM_TEST_* env vars):
-//   LLM_TEST_BASE_URL=... LLM_TEST_API_KEY=... LLM_TEST_MODEL=... go test ./internal/app/itsm/ -run TestBDD -v
-//   make test-bdd
+// Test levels:
+//   make test-bdd          -> domain/service BDD, no LLM requirement
+//   make test-bdd-api      -> API BDD with httptest + Actor client
+//   make test-bdd-agentic  -> true LLM Agentic BDD, requires .env.test
 
 import (
 	"context"
@@ -13,30 +14,44 @@ import (
 	"testing"
 
 	"github.com/cucumber/godog"
+
+	bddsteps "metis/internal/app/itsm/bdd/steps"
+	"metis/internal/app/itsm/bdd/support"
 )
 
 func TestBDD(t *testing.T) {
-	if !hasLLMConfig() {
-		t.Skip("BDD tests require LLM: set LLM_TEST_BASE_URL, LLM_TEST_API_KEY, LLM_TEST_MODEL")
-	}
+	runGodogSuite(t, "itsm-bdd-domain", initializeScenario, bddPaths("features/domain/vpn_smart_engine_deterministic.feature", "features/domain/smart_engine_recovery.feature"), bddTags("~@wip && ~@api && ~@agentic && ~@llm"))
+}
 
+func TestBDDAPI(t *testing.T) {
+	runGodogSuite(t, "itsm-bdd-api", initializeAPIScenario, bddPaths("features/api"), bddTags("~@wip"))
+}
+
+func TestBDDAgentic(t *testing.T) {
+	if !hasLLMConfig() {
+		t.Skip("Agentic BDD tests require LLM: set LLM_TEST_BASE_URL, LLM_TEST_API_KEY, LLM_TEST_MODEL")
+	}
+	runGodogSuite(t, "itsm-bdd-agentic", initializeScenario, bddPaths("features/agentic"), bddTags("~@wip"))
+}
+
+func runGodogSuite(t *testing.T, name string, initializer func(*godog.ScenarioContext), paths []string, tags string) {
+	t.Helper()
 	suite := godog.TestSuite{
-		Name:                "itsm-bdd",
-		ScenarioInitializer: initializeScenario,
+		Name:                name,
+		ScenarioInitializer: initializer,
 		Options: &godog.Options{
 			Format:   "pretty",
-			Paths:    bddPaths(),
-			Tags:     bddTags(),
+			Paths:    paths,
+			Tags:     tags,
 			TestingT: t,
 		},
 	}
-
 	if suite.Run() != 0 {
 		t.Fatal("non-zero status returned, failed to run BDD feature tests")
 	}
 }
 
-func bddPaths() []string {
+func bddPaths(defaultPaths ...string) []string {
 	if raw := strings.TrimSpace(os.Getenv("ITSM_BDD_PATHS")); raw != "" {
 		parts := strings.Split(raw, ",")
 		paths := make([]string, 0, len(parts))
@@ -49,14 +64,14 @@ func bddPaths() []string {
 			return paths
 		}
 	}
-	return []string{"features"}
+	return defaultPaths
 }
 
-func bddTags() string {
+func bddTags(defaultTags string) string {
 	if tags := strings.TrimSpace(os.Getenv("ITSM_BDD_TAGS")); tags != "" {
 		return tags
 	}
-	return "~@wip"
+	return defaultTags
 }
 
 func initializeScenario(sc *godog.ScenarioContext) {
@@ -84,4 +99,12 @@ func initializeScenario(sc *godog.ScenarioContext) {
 	registerSessionIsolationSteps(sc, bc)
 	registerKnowledgeRoutingSteps(sc, bc)
 	registerSLAAssuranceSteps(sc, bc)
+}
+
+func initializeAPIScenario(sc *godog.ScenarioContext) {
+	apiCtx := support.NewContext()
+	sc.Before(func(ctx context.Context, scenario *godog.Scenario) (context.Context, error) {
+		return ctx, apiCtx.Reset()
+	})
+	bddsteps.RegisterAPISteps(sc, apiCtx)
 }

@@ -1,16 +1,18 @@
 import { memo, useState } from "react"
-import { Handle, Position, type NodeProps } from "@xyflow/react"
+import { Handle, type NodeProps } from "@xyflow/react"
 import { Minus, Plus } from "lucide-react"
 import type { WFNodeData } from "../types"
 import { WorkflowNodeCard } from "../visual"
+import { workflowHandlePositions } from "./layout-handles"
 
 function SubprocessNodeInner({ data: rawData, selected }: NodeProps) {
   const data = rawData as unknown as WFNodeData
   const [expanded, setExpanded] = useState(data.subprocessExpanded ?? false)
+  const positions = workflowHandlePositions(data)
 
   return (
     <div className="relative">
-      <Handle type="target" position={Position.Left} />
+      <Handle type="target" position={positions.target} />
       <WorkflowNodeCard data={data} selected={selected} className="w-[260px]">
         {expanded && (
           <div className="mt-2 flex h-14 items-center justify-center rounded-lg border border-dashed border-border/70 bg-background/45 text-xs text-muted-foreground">
@@ -29,7 +31,7 @@ function SubprocessNodeInner({ data: rawData, selected }: NodeProps) {
           {expanded ? "收起" : "展开"}
         </button>
       </WorkflowNodeCard>
-      <Handle type="source" position={Position.Right} />
+      <Handle type="source" position={positions.source} />
     </div>
   )
 }

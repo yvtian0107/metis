@@ -22,22 +22,26 @@ import (
 )
 
 var (
-	ErrTicketNotFound          = errors.New("ticket not found")
-	ErrTicketTerminal          = errors.New("ticket is in a terminal state and cannot be modified")
-	ErrServiceNotActive        = errors.New("service is not active")
-	ErrActivityNotOwner        = errors.New("only the assignee or admin can progress this activity")
-	ErrActivityNotWait         = errors.New("signal is only allowed on wait nodes")
-	ErrActivityAlready         = errors.New("activity already completed")
-	ErrSLAAlreadyPaused        = errors.New("SLA is already paused")
-	ErrSLANotPaused            = errors.New("SLA is not paused")
-	ErrAssignmentNotFound      = errors.New("assignment not found")
-	ErrAssignmentNotPending    = errors.New("assignment is not in pending status")
-	ErrNoActiveAssignment      = errors.New("no active pending assignment for this activity")
-	ErrNotRequester            = errors.New("only the ticket requester can withdraw")
-	ErrTicketClaimed           = errors.New("ticket has been claimed and cannot be withdrawn")
-	ErrInvalidProgressOutcome  = errors.New("人工节点只能提交 approved 或 rejected")
-	errSubmissionAlreadyExists = errors.New("service desk submission already exists")
+	ErrTicketNotFound            = errors.New("ticket not found")
+	ErrTicketTerminal            = errors.New("ticket is in a terminal state and cannot be modified")
+	ErrServiceNotActive          = errors.New("service is not active")
+	ErrActivityNotOwner          = errors.New("only the assignee or admin can progress this activity")
+	ErrActivityNotWait           = errors.New("signal is only allowed on wait nodes")
+	ErrActivityAlready           = errors.New("activity already completed")
+	ErrSLAAlreadyPaused          = errors.New("SLA is already paused")
+	ErrSLANotPaused              = errors.New("SLA is not paused")
+	ErrAssignmentNotFound        = errors.New("assignment not found")
+	ErrAssignmentNotPending      = errors.New("assignment is not in pending status")
+	ErrNoActiveAssignment        = errors.New("no active pending assignment for this activity")
+	ErrNotRequester              = errors.New("only the ticket requester can withdraw")
+	ErrTicketClaimed             = errors.New("ticket has been claimed and cannot be withdrawn")
+	ErrInvalidProgressOutcome    = errors.New("人工节点只能提交 approved 或 rejected")
+	ErrInvalidRecoveryAction     = errors.New("invalid recovery action")
+	ErrRecoveryActionTooFrequent = errors.New("recovery action is too frequent")
+	errSubmissionAlreadyExists   = errors.New("service desk submission already exists")
 )
+
+const recoveryDedupWindow = 15 * time.Second
 
 type TicketService struct {
 	ticketRepo    *TicketRepo
@@ -91,7 +95,7 @@ func (s *TicketService) Create(input CreateTicketInput, requesterID uint) (*Tick
 		return nil, err
 	}
 	if ticket.EngineType == "smart" {
-		s.smartEngine.DispatchDecisionAsync(ticket.ID, nil, "ticket_created")
+		s.smartEngine.DispatchDecisionAsync(ticket.ID, nil, engine.TriggerReasonTicketCreated)
 	}
 
 	return s.ticketRepo.FindByID(ticket.ID)
@@ -255,7 +259,7 @@ func (s *TicketService) createAgentTicket(ctx context.Context, input CreateTicke
 			return nil, err
 		}
 		if ticket.EngineType == "smart" {
-			s.smartEngine.DispatchDecisionAsync(ticket.ID, nil, "ticket_created")
+			s.smartEngine.DispatchDecisionAsync(ticket.ID, nil, engine.TriggerReasonTicketCreated)
 		}
 		return s.ticketRepo.FindByID(ticket.ID)
 	}
@@ -340,7 +344,7 @@ func (s *TicketService) createAgentTicket(ctx context.Context, input CreateTicke
 		return nil, err
 	}
 	if created.EngineType == "smart" {
-		s.smartEngine.DispatchDecisionAsync(created.ID, nil, "ticket_created")
+		s.smartEngine.DispatchDecisionAsync(created.ID, nil, engine.TriggerReasonTicketCreated)
 	}
 	return s.ticketRepo.FindByID(created.ID)
 }
@@ -419,11 +423,8 @@ func (s *TicketService) Progress(ticketID uint, activityID uint, outcome string,
 	if t.EngineType == "smart" {
 		updated, findErr := s.ticketRepo.FindByID(ticketID)
 		if findErr == nil && isDecisioningStatus(updated.Status) {
-			triggerReason := "activity_approved"
-			if outcome == "rejected" {
-				triggerReason = "activity_rejected"
-			}
-			s.smartEngine.DispatchDecisionAsync(ticketID, &activityID, triggerReason)
+			event := engine.NewActivityDecidedEvent(ticketID, activityID, outcome, operatorID)
+			s.smartEngine.DispatchDecisionAsync(event.TicketID, event.CompletedActivityID, event.TriggerReason)
 			return updated, nil
 		}
 	}
@@ -618,6 +619,10 @@ func (s *TicketService) BuildResponses(items []Ticket, operatorID uint) ([]Ticke
 	if err != nil {
 		return responses, err
 	}
+	explanationSnapshots, err := s.loadLatestDecisionExplanations(ticketIDs)
+	if err != nil {
+		return responses, err
+	}
 
 	for i := range responses {
 		resp := &responses[i]
@@ -637,20 +642,137 @@ func (s *TicketService) BuildResponses(items []Ticket, operatorID uint) ([]Ticke
 		if resp.EngineType == "smart" {
 			resp.CanOverride = operatorID > 0 && !IsTerminalTicketStatus(resp.Status)
 			s.populateSmartSummary(resp, activities, assignments)
+			var currentActivity *TicketActivity
+			if resp.CurrentActivityID != nil {
+				if activity, ok := activities[*resp.CurrentActivityID]; ok {
+					currentActivity = &activity
+				}
+			}
+			resp.DecisionExplanation = buildDecisionExplanation(resp, currentActivity, explanationSnapshots[resp.ID])
+			resp.RecoveryActions = buildRecoveryActions(resp)
 		}
 	}
 
 	return responses, nil
 }
 
+func buildDecisionExplanation(resp *TicketResponse, activity *TicketActivity, snapshot *DecisionExplanation) *DecisionExplanation {
+	explanation := &DecisionExplanation{
+		Basis:         "协作规范、workflow_json 与 workflow_context",
+		Trigger:       strings.TrimSpace(resp.DecisioningReason),
+		Decision:      strings.TrimSpace(resp.StatusLabel),
+		NextStep:      strings.TrimSpace(resp.NextStepSummary),
+		HumanOverride: "可执行重试、转人工或撤回",
+	}
+	if snapshot != nil {
+		if snapshot.ActivityID != nil && *snapshot.ActivityID > 0 {
+			explanation.ActivityID = snapshot.ActivityID
+		}
+		if value := strings.TrimSpace(snapshot.Basis); value != "" {
+			explanation.Basis = value
+		}
+		if value := strings.TrimSpace(snapshot.Trigger); value != "" {
+			explanation.Trigger = value
+		}
+		if value := strings.TrimSpace(snapshot.Decision); value != "" {
+			explanation.Decision = value
+		}
+		if value := strings.TrimSpace(snapshot.NextStep); value != "" {
+			explanation.NextStep = value
+		}
+		if value := strings.TrimSpace(snapshot.HumanOverride); value != "" {
+			explanation.HumanOverride = value
+		}
+	}
+	if activity != nil {
+		if explanation.ActivityID == nil {
+			explanation.ActivityID = &activity.ID
+		}
+		if reasoning := strings.TrimSpace(activity.AIReasoning); reasoning != "" {
+			if snapshot == nil || strings.TrimSpace(snapshot.Basis) == "" {
+				explanation.Basis = reasoning
+			}
+		}
+		if decisionReasoning := strings.TrimSpace(activity.DecisionReasoning); decisionReasoning != "" {
+			if snapshot == nil || strings.TrimSpace(snapshot.Decision) == "" {
+				explanation.Decision = decisionReasoning
+			}
+		}
+	}
+	if explanation.Trigger == "" {
+		explanation.Trigger = engine.TriggerReasonAIDecision
+	}
+	if explanation.Decision == "" {
+		explanation.Decision = "等待决策引擎输出"
+	}
+	if explanation.NextStep == "" {
+		explanation.NextStep = "等待下一活动推进"
+	}
+	return explanation
+}
+
+func (s *TicketService) loadLatestDecisionExplanations(ticketIDs map[uint]struct{}) (map[uint]*DecisionExplanation, error) {
+	result := map[uint]*DecisionExplanation{}
+	ids := keysOf(ticketIDs)
+	if len(ids) == 0 {
+		return result, nil
+	}
+
+	var rows []TicketTimeline
+	if err := s.ticketRepo.DB().Model(&TicketTimeline{}).
+		Where("ticket_id IN ? AND event_type IN ?", ids, []string{"ai_decision_executed", "ai_decision_pending", "ai_decision_failed", "workflow_completed"}).
+		Order("id DESC").
+		Find(&rows).Error; err != nil {
+		return result, err
+	}
+	for _, row := range rows {
+		if _, exists := result[row.TicketID]; exists {
+			continue
+		}
+		snapshot := parseDecisionExplanationDetail(row.Details)
+		if snapshot != nil {
+			result[row.TicketID] = snapshot
+		}
+	}
+	return result, nil
+}
+
+func parseDecisionExplanationDetail(details JSONField) *DecisionExplanation {
+	if len(details) == 0 {
+		return nil
+	}
+	var payload struct {
+		DecisionExplanation *DecisionExplanation `json:"decision_explanation"`
+	}
+	if err := json.Unmarshal(details, &payload); err != nil {
+		return nil
+	}
+	return payload.DecisionExplanation
+}
+
+func buildRecoveryActions(resp *TicketResponse) []RecoveryAction {
+	if resp == nil || resp.EngineType != "smart" {
+		return nil
+	}
+	actions := []RecoveryAction{}
+	if resp.Status == TicketStatusFailed || resp.AIFailureCount > 0 {
+		actions = append(actions, RecoveryAction{Code: "retry", Label: "重试决策"})
+		actions = append(actions, RecoveryAction{Code: "handoff_human", Label: "转人工处理"})
+	}
+	if !IsTerminalTicketStatus(resp.Status) {
+		actions = append(actions, RecoveryAction{Code: "withdraw", Label: "撤回工单"})
+	}
+	return actions
+}
+
 func decisioningReason(status string) string {
 	switch status {
 	case TicketStatusApprovedDecisioning:
-		return "activity_approved"
+		return engine.TriggerReasonActivityApprove
 	case TicketStatusRejectedDecisioning:
-		return "activity_rejected"
+		return engine.TriggerReasonActivityReject
 	case TicketStatusDecisioning:
-		return "ai_decision"
+		return engine.TriggerReasonAIDecision
 	default:
 		return ""
 	}
@@ -905,6 +1027,276 @@ func (s *TicketService) Monitor(params TicketMonitorParams, operatorID uint) (*T
 	}
 
 	return &TicketMonitorResponse{Summary: summary, Items: items, Total: total}, nil
+}
+
+type decisionQualityTicketDim struct {
+	TicketID      uint
+	Status        string
+	DimensionID   uint
+	DimensionName string
+}
+
+type decisionQualityAccumulator struct {
+	DimensionType      string
+	DimensionID        uint
+	DimensionName      string
+	ApprovedCount      int64
+	RejectedCount      int64
+	RetryCount         int64
+	LatencyTotalSecond float64
+	LatencyCount       int64
+	RecoveryAttempt    int64
+	RecoverySuccess    int64
+}
+
+func (s *TicketService) DecisionQuality(windowDays int, dimension string, serviceID *uint, departmentID *uint) (*DecisionQualityResponse, error) {
+	if windowDays <= 0 || windowDays > 180 {
+		windowDays = 30
+	}
+	dimension = strings.TrimSpace(strings.ToLower(dimension))
+	if dimension != "department" {
+		dimension = "service"
+	}
+
+	windowStart := time.Now().Add(-time.Duration(windowDays) * 24 * time.Hour)
+	tickets, err := s.loadDecisionQualityTicketDimensions(windowStart, dimension, serviceID, departmentID)
+	if err != nil {
+		return nil, err
+	}
+	if len(tickets) == 0 {
+		return &DecisionQualityResponse{
+			Version:     DecisionQualityMetricVersion,
+			WindowDays:  windowDays,
+			GeneratedAt: time.Now(),
+			Items:       []DecisionQualityItem{},
+		}, nil
+	}
+
+	ticketIDs := make([]uint, 0, len(tickets))
+	ticketToDim := make(map[uint]decisionQualityTicketDim, len(tickets))
+	for _, ticket := range tickets {
+		ticketIDs = append(ticketIDs, ticket.TicketID)
+		ticketToDim[ticket.TicketID] = ticket
+	}
+
+	accByDim := make(map[string]*decisionQualityAccumulator)
+	getAcc := func(dim decisionQualityTicketDim) *decisionQualityAccumulator {
+		key := fmt.Sprintf("%s:%d", dimension, dim.DimensionID)
+		if existing, ok := accByDim[key]; ok {
+			return existing
+		}
+		created := &decisionQualityAccumulator{
+			DimensionType: dimension,
+			DimensionID:   dim.DimensionID,
+			DimensionName: dim.DimensionName,
+		}
+		accByDim[key] = created
+		return created
+	}
+
+	var activityRows []struct {
+		TicketID          uint
+		TransitionOutcome string
+	}
+	if err := s.ticketRepo.DB().Model(&TicketActivity{}).
+		Where("ticket_id IN ?", ticketIDs).
+		Where("activity_type IN ?", []string{engine.NodeApprove, engine.NodeForm, engine.NodeProcess}).
+		Where("transition_outcome IN ?", []string{TicketOutcomeApproved, TicketOutcomeRejected}).
+		Where("finished_at >= ?", windowStart).
+		Select("ticket_id, transition_outcome").
+		Find(&activityRows).Error; err != nil {
+		return nil, err
+	}
+	for _, row := range activityRows {
+		dim, ok := ticketToDim[row.TicketID]
+		if !ok {
+			continue
+		}
+		acc := getAcc(dim)
+		switch row.TransitionOutcome {
+		case TicketOutcomeApproved:
+			acc.ApprovedCount++
+		case TicketOutcomeRejected:
+			acc.RejectedCount++
+		}
+	}
+
+	var timelineRows []TicketTimeline
+	if err := s.ticketRepo.DB().Model(&TicketTimeline{}).
+		Where("ticket_id IN ? AND created_at >= ?", ticketIDs, windowStart).
+		Order("ticket_id ASC, created_at ASC, id ASC").
+		Find(&timelineRows).Error; err != nil {
+		return nil, err
+	}
+
+	type ticketRuntimeStat struct {
+		LastTriggerAt *time.Time
+		HasRecovery   bool
+	}
+	runtimeByTicket := make(map[uint]*ticketRuntimeStat, len(ticketIDs))
+	for _, row := range timelineRows {
+		dim, ok := ticketToDim[row.TicketID]
+		if !ok {
+			continue
+		}
+		acc := getAcc(dim)
+		rt := runtimeByTicket[row.TicketID]
+		if rt == nil {
+			rt = &ticketRuntimeStat{}
+			runtimeByTicket[row.TicketID] = rt
+		}
+
+		switch row.EventType {
+		case "activity_completed", "ai_retry", "recovery_retry", "recovery_handoff_human":
+			t := row.CreatedAt
+			rt.LastTriggerAt = &t
+		}
+
+		switch row.EventType {
+		case "ai_retry", "recovery_retry":
+			acc.RetryCount++
+		}
+		switch row.EventType {
+		case "recovery_retry", "recovery_handoff_human":
+			rt.HasRecovery = true
+		}
+
+		switch row.EventType {
+		case "ai_decision_executed", "ai_decision_pending", "workflow_completed", "ai_decision_failed":
+			if rt.LastTriggerAt != nil && row.CreatedAt.After(*rt.LastTriggerAt) {
+				acc.LatencyTotalSecond += row.CreatedAt.Sub(*rt.LastTriggerAt).Seconds()
+				acc.LatencyCount++
+			}
+		}
+	}
+
+	for ticketID, rt := range runtimeByTicket {
+		if !rt.HasRecovery {
+			continue
+		}
+		dim := ticketToDim[ticketID]
+		acc := getAcc(dim)
+		acc.RecoveryAttempt++
+		switch dim.Status {
+		case TicketStatusCompleted, TicketStatusRejected, TicketStatusWithdrawn, TicketStatusCancelled:
+			acc.RecoverySuccess++
+		}
+	}
+
+	items := make([]DecisionQualityItem, 0, len(accByDim))
+	for _, acc := range accByDim {
+		decisionTotal := acc.ApprovedCount + acc.RejectedCount
+		approvalRate := 0.0
+		rejectionRate := 0.0
+		retryRate := 0.0
+		if decisionTotal > 0 {
+			approvalRate = float64(acc.ApprovedCount) / float64(decisionTotal)
+			rejectionRate = float64(acc.RejectedCount) / float64(decisionTotal)
+			retryRate = float64(acc.RetryCount) / float64(decisionTotal)
+		}
+		avgLatency := 0.0
+		if acc.LatencyCount > 0 {
+			avgLatency = acc.LatencyTotalSecond / float64(acc.LatencyCount)
+		}
+		recoveryRate := 0.0
+		if acc.RecoveryAttempt > 0 {
+			recoveryRate = float64(acc.RecoverySuccess) / float64(acc.RecoveryAttempt)
+		}
+		items = append(items, DecisionQualityItem{
+			DimensionType:             acc.DimensionType,
+			DimensionID:               acc.DimensionID,
+			DimensionName:             acc.DimensionName,
+			ApprovalRate:              approvalRate,
+			RejectionRate:             rejectionRate,
+			RetryRate:                 retryRate,
+			AvgDecisionLatencySeconds: avgLatency,
+			RecoverySuccessRate:       recoveryRate,
+			DecisionCount:             decisionTotal,
+		})
+	}
+
+	sort.SliceStable(items, func(i, j int) bool {
+		if items[i].DecisionCount != items[j].DecisionCount {
+			return items[i].DecisionCount > items[j].DecisionCount
+		}
+		return items[i].DimensionID < items[j].DimensionID
+	})
+
+	return &DecisionQualityResponse{
+		Version:     DecisionQualityMetricVersion,
+		WindowDays:  windowDays,
+		GeneratedAt: time.Now(),
+		Items:       items,
+	}, nil
+}
+
+func (s *TicketService) loadDecisionQualityTicketDimensions(windowStart time.Time, dimension string, serviceID *uint, departmentID *uint) ([]decisionQualityTicketDim, error) {
+	switch dimension {
+	case "department":
+		return s.loadDecisionQualityByDepartment(windowStart, departmentID)
+	default:
+		return s.loadDecisionQualityByService(windowStart, serviceID)
+	}
+}
+
+func (s *TicketService) loadDecisionQualityByService(windowStart time.Time, serviceID *uint) ([]decisionQualityTicketDim, error) {
+	query := s.ticketRepo.DB().Table("itsm_tickets AS t").
+		Joins("LEFT JOIN itsm_service_definitions AS svc ON svc.id = t.service_id").
+		Where("t.deleted_at IS NULL").
+		Where("(t.created_at >= ? OR t.updated_at >= ?)", windowStart, windowStart)
+	if serviceID != nil && *serviceID > 0 {
+		query = query.Where("t.service_id = ?", *serviceID)
+	}
+	rows := make([]decisionQualityTicketDim, 0)
+	if err := query.Select(`
+		t.id AS ticket_id,
+		t.status AS status,
+		t.service_id AS dimension_id,
+		COALESCE(svc.name, '服务#' || t.service_id) AS dimension_name
+	`).Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	return rows, nil
+}
+
+func (s *TicketService) loadDecisionQualityByDepartment(windowStart time.Time, departmentID *uint) ([]decisionQualityTicketDim, error) {
+	db := s.ticketRepo.DB()
+	query := db.Table("itsm_tickets AS t").
+		Where("t.deleted_at IS NULL").
+		Where("(t.created_at >= ? OR t.updated_at >= ?)", windowStart, windowStart)
+	selectSQL := `
+		t.id AS ticket_id,
+		t.status AS status,
+		0 AS dimension_id,
+		'未分配部门' AS dimension_name
+	`
+
+	if db.Migrator().HasTable("user_positions") && db.Migrator().HasTable("departments") {
+		query = query.Joins(`
+			LEFT JOIN (
+				SELECT user_id, MIN(department_id) AS department_id
+				FROM user_positions
+				WHERE department_id IS NOT NULL
+				GROUP BY user_id
+			) AS ud ON ud.user_id = t.requester_id
+		`).
+			Joins("LEFT JOIN departments AS dept ON dept.id = ud.department_id")
+		selectSQL = `
+			t.id AS ticket_id,
+			t.status AS status,
+			COALESCE(ud.department_id, 0) AS dimension_id,
+			COALESCE(dept.name, '未分配部门') AS dimension_name
+		`
+		if departmentID != nil && *departmentID > 0 {
+			query = query.Where("ud.department_id = ?", *departmentID)
+		}
+	}
+
+	rows := make([]decisionQualityTicketDim, 0)
+	if err := query.Select(selectSQL).Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	return rows, nil
 }
 
 func (s *TicketService) Mine(requesterID uint, keyword, status string, startDate, endDate *time.Time, page, pageSize int) ([]Ticket, int64, error) {
@@ -1244,6 +1636,24 @@ func (s *TicketService) OverrideReassign(ticketID uint, activityID uint, newAssi
 
 // RetryAI resets ai_failure_count and triggers a new decision cycle.
 func (s *TicketService) RetryAI(ticketID uint, reason string, operatorID uint) (*Ticket, error) {
+	return s.retryAI(ticketID, reason, operatorID, true)
+}
+
+func (s *TicketService) Recover(ticketID uint, action string, reason string, operatorID uint) (*Ticket, error) {
+	action = strings.TrimSpace(strings.ToLower(action))
+	switch action {
+	case "retry":
+		return s.retryAI(ticketID, reason, operatorID, false)
+	case "handoff_human":
+		return s.handoffHuman(ticketID, reason, operatorID)
+	case "withdraw":
+		return s.Withdraw(ticketID, reason, operatorID)
+	default:
+		return nil, ErrInvalidRecoveryAction
+	}
+}
+
+func (s *TicketService) retryAI(ticketID uint, reason string, operatorID uint, legacyTimeline bool) (*Ticket, error) {
 	t, err := s.ticketRepo.FindByID(ticketID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -1257,8 +1667,16 @@ func (s *TicketService) RetryAI(ticketID uint, reason string, operatorID uint) (
 	if t.EngineType != "smart" {
 		return nil, errors.New("retry-ai is only available for smart engine tickets")
 	}
+	if operatorID == 0 {
+		return nil, errors.New("operator is required")
+	}
 
 	if err := s.ticketRepo.DB().Transaction(func(tx *gorm.DB) error {
+		if blocked, blockErr := s.recentRecoveryActionExists(tx, ticketID, "recovery_retry", recoveryDedupWindow); blockErr != nil {
+			return blockErr
+		} else if blocked {
+			return ErrRecoveryActionTooFrequent
+		}
 		// Reset failure count
 		if err := tx.Model(&Ticket{}).Where("id = ?", ticketID).Updates(map[string]any{
 			"ai_failure_count":    0,
@@ -1269,18 +1687,33 @@ func (s *TicketService) RetryAI(ticketID uint, reason string, operatorID uint) (
 			return err
 		}
 
-		details, _ := json.Marshal(map[string]string{"reason": reason})
-		tl := &TicketTimeline{
+		if legacyTimeline {
+			details, _ := json.Marshal(map[string]string{"reason": reason})
+			tl := &TicketTimeline{
+				TicketID:   ticketID,
+				OperatorID: operatorID,
+				EventType:  "ai_retry",
+				Message:    "重新启用 AI 决策",
+				Details:    JSONField(details),
+			}
+			if reason != "" {
+				tl.Message = "重新启用 AI 决策：" + reason
+			}
+			if err := tx.Create(tl).Error; err != nil {
+				return err
+			}
+		}
+		actionDetails, _ := json.Marshal(map[string]any{
+			"action": "retry",
+			"reason": reason,
+		})
+		if err := tx.Create(&TicketTimeline{
 			TicketID:   ticketID,
 			OperatorID: operatorID,
-			EventType:  "ai_retry",
-			Message:    "重新启用 AI 决策",
-			Details:    JSONField(details),
-		}
-		if reason != "" {
-			tl.Message = "重新启用 AI 决策：" + reason
-		}
-		if err := tx.Create(tl).Error; err != nil {
+			EventType:  "recovery_retry",
+			Message:    "恢复动作：重试决策",
+			Details:    JSONField(actionDetails),
+		}).Error; err != nil {
 			return err
 		}
 
@@ -1288,8 +1721,63 @@ func (s *TicketService) RetryAI(ticketID uint, reason string, operatorID uint) (
 	}); err != nil {
 		return nil, err
 	}
-	s.smartEngine.DispatchDecisionAsync(ticketID, nil, "manual_retry")
+	s.smartEngine.DispatchDecisionAsync(ticketID, nil, engine.TriggerReasonManualRetry)
 	return s.ticketRepo.FindByID(ticketID)
+}
+
+func (s *TicketService) handoffHuman(ticketID uint, reason string, operatorID uint) (*Ticket, error) {
+	t, err := s.ticketRepo.FindByID(ticketID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrTicketNotFound
+		}
+		return nil, err
+	}
+	if t.IsTerminal() {
+		return nil, ErrTicketTerminal
+	}
+	if t.EngineType != "smart" {
+		return nil, errors.New("handoff-human is only available for smart engine tickets")
+	}
+	if operatorID == 0 {
+		return nil, errors.New("operator is required")
+	}
+
+	if blocked, err := s.recentRecoveryActionExists(s.ticketRepo.DB(), ticketID, "recovery_handoff_human", recoveryDedupWindow); err != nil {
+		return nil, err
+	} else if blocked {
+		return nil, ErrRecoveryActionTooFrequent
+	}
+
+	ticket, err := s.OverrideJump(ticketID, engine.NodeProcess, nil, reason, operatorID)
+	if err != nil {
+		return nil, err
+	}
+
+	actionDetails, _ := json.Marshal(map[string]any{
+		"action": "handoff_human",
+		"reason": reason,
+	})
+	if err := s.ticketRepo.DB().Create(&TicketTimeline{
+		TicketID:   ticketID,
+		OperatorID: operatorID,
+		EventType:  "recovery_handoff_human",
+		Message:    "恢复动作：转人工处理",
+		Details:    JSONField(actionDetails),
+	}).Error; err != nil {
+		return nil, err
+	}
+	return ticket, nil
+}
+
+func (s *TicketService) recentRecoveryActionExists(db *gorm.DB, ticketID uint, eventType string, window time.Duration) (bool, error) {
+	var count int64
+	if err := db.Model(&TicketTimeline{}).
+		Where("ticket_id = ? AND event_type = ? AND created_at >= ?", ticketID, eventType, time.Now().Add(-window)).
+		Count(&count).Error; err != nil {
+		return false, err
+	}
+	return count > 0, nil
 }
 
 func ticketStatusForManualActivity(activityType string) string {

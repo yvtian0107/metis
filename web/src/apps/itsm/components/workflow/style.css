@@ -7,8 +7,8 @@
   --xy-background-pattern-dots-color-default: color-mix(in oklab, var(--color-muted-foreground) 22%, transparent);
   --xy-minimap-background-color-default: color-mix(in oklab, var(--color-background) 88%, white);
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.58), rgba(247, 249, 252, 0.72)),
-    radial-gradient(circle at 18% 12%, color-mix(in oklab, var(--color-primary) 10%, transparent), transparent 28%);
+    linear-gradient(180deg, rgba(255, 255, 255, 0.38), rgba(247, 249, 252, 0.48)),
+    radial-gradient(circle at 18% 12%, color-mix(in oklab, var(--color-primary) 6%, transparent), transparent 30%);
 }
 
 .workflow-builder-flow .react-flow__node {
@@ -43,12 +43,20 @@
   right: -7px;
 }
 
+.workflow-builder-flow .react-flow__handle-top {
+  top: -7px;
+}
+
+.workflow-builder-flow .react-flow__handle-bottom {
+  bottom: -7px;
+}
+
 .workflow-builder-flow .react-flow__controls {
   overflow: hidden;
   border: 1px solid color-mix(in oklab, var(--color-border) 76%, transparent);
   border-radius: 0.75rem;
-  background: rgba(255, 255, 255, 0.82);
-  box-shadow: 0 18px 42px -34px rgba(15, 23, 42, 0.45);
+  background: color-mix(in oklab, var(--color-background) 84%, white);
+  box-shadow: 0 10px 28px -26px rgba(15, 23, 42, 0.36);
 }
 
 .workflow-builder-flow .react-flow__controls-button {
@@ -62,8 +70,8 @@
   overflow: hidden;
   border: 1px solid color-mix(in oklab, var(--color-border) 72%, transparent);
   border-radius: 0.85rem;
-  background: rgba(255, 255, 255, 0.84);
-  box-shadow: 0 18px 46px -34px rgba(15, 23, 42, 0.45);
+  background: color-mix(in oklab, var(--color-background) 86%, white);
+  box-shadow: 0 10px 30px -26px rgba(15, 23, 42, 0.34);
 }
 
 .workflow-builder-flow .react-flow__attribution {

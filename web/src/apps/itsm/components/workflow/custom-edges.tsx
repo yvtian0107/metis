@@ -21,7 +21,11 @@ import {
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import type { NodeType, WFEdgeData } from "./types"
-import { conditionSummary } from "./types"
+import {
+  buildEdgeLabelDisplay,
+  buildConditionDisplayDictFromNodes,
+  createEmptyConditionDisplayDict,
+} from "./types"
 import { WORKFLOW_NODE_GROUPS, getNodeAccent } from "./visual-data"
 import { WorkflowNodeIconGlyph } from "./visual"
 import { defaultNodeData } from "./workflow-contract"
@@ -52,26 +56,61 @@ function WorkflowEdgeInner({
   target,
   sourceHandleId,
   targetHandleId,
+  sourcePosition,
+  targetPosition,
 }: EdgeProps & { data?: WFEdgeData }) {
   const { t } = useTranslation("itsm")
-  const { setNodes, setEdges } = useReactFlow()
+  const { setNodes, setEdges, getNodes } = useReactFlow()
+  const resolvedSourcePosition = sourcePosition ?? Position.Right
+  const resolvedTargetPosition = targetPosition ?? Position.Left
+  const sourcePoint = offsetEdgePoint(sourceX, sourceY, resolvedSourcePosition, EDGE_HANDLE_GAP)
+  const targetPoint = offsetEdgePoint(targetX, targetY, resolvedTargetPosition, EDGE_HANDLE_GAP)
   const [edgePath, labelX, labelY] = getBezierPath({
-    sourceX: sourceX + EDGE_HANDLE_GAP,
-    sourceY,
-    sourcePosition: Position.Right,
-    targetX: targetX - EDGE_HANDLE_GAP,
-    targetY,
-    targetPosition: Position.Left,
+    sourceX: sourcePoint.x,
+    sourceY: sourcePoint.y,
+    sourcePosition: resolvedSourcePosition,
+    targetX: targetPoint.x,
+    targetY: targetPoint.y,
+    targetPosition: resolvedTargetPosition,
     curvature: 0.16,
   })
 
   const edgeData = data as WFEdgeData | undefined
-  const outcome = edgeData?.outcome
-  const isDefault = edgeData?.default ?? edgeData?.isDefault
-  const condition = edgeData?.condition
-  const condText = conditionSummary(condition)
-
-  const isCompleted = outcome === "completed" || outcome === "submitted"
+  const displayDict = buildConditionDisplayDictFromNodes(getNodes()) || createEmptyConditionDisplayDict()
+  const labelDisplay = buildEdgeLabelDisplay(edgeData, displayDict, {
+    operatorLabels: {
+      equals: t("workflow.edge.operator.equals"),
+      not_equals: t("workflow.edge.operator.not_equals"),
+      contains_any: t("workflow.edge.operator.contains_any"),
+      gt: t("workflow.edge.operator.gt"),
+      lt: t("workflow.edge.operator.lt"),
+      gte: t("workflow.edge.operator.gte"),
+      lte: t("workflow.edge.operator.lte"),
+      is_empty: t("workflow.edge.operator.is_empty"),
+      is_not_empty: t("workflow.edge.operator.is_not_empty"),
+    },
+    logicLabels: {
+      and: t("workflow.edge.logic.and"),
+      or: t("workflow.edge.logic.or"),
+    },
+    valueSeparator: t("workflow.edge.valueSeparator"),
+  }, {
+    defaultLabel: t("workflow.edge.defaultPath"),
+    outcomeLabels: {
+      submitted: t("workflow.edge.outcome.submitted"),
+      completed: t("workflow.edge.outcome.completed"),
+      approved: t("workflow.edge.outcome.approved"),
+      rejected: t("workflow.edge.outcome.rejected"),
+      success: t("workflow.edge.outcome.success"),
+      failed: t("workflow.edge.outcome.failed"),
+      timeout: t("workflow.edge.outcome.timeout"),
+      cancelled: t("workflow.edge.outcome.cancelled"),
+    },
+  })
+  const isCompleted = labelDisplay.isCompleted
+  const primaryLabel = labelDisplay.primary
+  const rawLabel = labelDisplay.raw
+  const hasLabel = !!primaryLabel || !!rawLabel
 
   const strokeColor = selected
     ? "var(--color-primary)"
@@ -141,17 +180,20 @@ function WorkflowEdgeInner({
             transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`,
           }}
         >
-          {(outcome || condText || isDefault) && (
-            <span
-              className={cn(
-                "pointer-events-none max-w-[160px] truncate rounded-full border bg-white/90 px-2 py-0.5 text-[10px] font-medium shadow-[0_8px_22px_-18px_rgba(15,23,42,0.42)]",
-                isCompleted && "border-emerald-500/20 text-emerald-700",
-                condText && !outcome && "border-amber-500/20 text-amber-700",
-                isDefault && !outcome && !condText && "border-border/70 text-muted-foreground",
-              )}
-            >
-              {outcome || condText || "/"}
-            </span>
+          {hasLabel && (
+            <div className="pointer-events-none max-w-[180px]">
+              <div
+                className={cn(
+                  "truncate rounded-full border bg-white/90 px-2 py-0.5 text-[10px] font-medium shadow-[0_8px_22px_-18px_rgba(15,23,42,0.42)]",
+                  isCompleted && "border-emerald-500/20 text-emerald-700",
+                  labelDisplay.kind === "condition" && "border-amber-500/20 text-amber-700",
+                  labelDisplay.kind === "default" && "border-border/70 text-muted-foreground",
+                )}
+                title={rawLabel}
+              >
+                {primaryLabel}
+              </div>
+            </div>
           )}
           {!edgeData?.readonly && (
             <DropdownMenu>
@@ -193,4 +235,11 @@ export const WorkflowEdge = memo(WorkflowEdgeInner)
 
 export const edgeTypes = {
   workflow: WorkflowEdge,
+}
+
+function offsetEdgePoint(x: number, y: number, position: Position, gap: number) {
+  if (position === Position.Left) return { x: x - gap, y }
+  if (position === Position.Right) return { x: x + gap, y }
+  if (position === Position.Top) return { x, y: y - gap }
+  return { x, y: y + gap }
 }

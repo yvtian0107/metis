@@ -136,7 +136,13 @@ function EditableRow({
   )
 }
 
-export function VariablesPanel({ ticketId }: { ticketId: number }) {
+export function VariablesPanel({
+  ticketId,
+  variant = "card",
+}: {
+  ticketId: number
+  variant?: "card" | "flat"
+}) {
   const { t } = useTranslation("itsm")
   const queryClient = useQueryClient()
   const canEdit = usePermission("itsm:variables:edit")
@@ -222,41 +228,50 @@ export function VariablesPanel({ ticketId }: { ticketId: number }) {
     )
   }
 
+  const content = variables.length === 0 ? (
+    <p className="text-sm text-muted-foreground">{t("variables.empty")}</p>
+  ) : hasMultipleScopes ? (
+    <div className="space-y-3">
+      {scopes.map((scope) => {
+        const vars = grouped.get(scope) ?? []
+        const isCollapsed = collapsedScopes.has(scope)
+        const isRoot = scope === "root"
+        return (
+          <div key={scope}>
+            {!isRoot && (
+              <button
+                className="mb-1 flex items-center gap-1 text-sm font-medium text-muted-foreground"
+                onClick={() => toggleScope(scope)}
+              >
+                {isCollapsed ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+                {t("variables.scope")}: {scope}
+                <Badge variant="outline" className="ml-1 text-xs">{vars.length}</Badge>
+              </button>
+            )}
+            {(isRoot || !isCollapsed) && renderTable(vars)}
+          </div>
+        )
+      })}
+    </div>
+  ) : (
+    renderTable(variables)
+  )
+
+  if (variant === "flat") {
+    return (
+      <div className="space-y-3">
+        <h4 className="text-sm font-semibold">{t("variables.title")}</h4>
+        {content}
+      </div>
+    )
+  }
+
   return (
     <Card>
       <CardHeader>
         <CardTitle className="text-base">{t("variables.title")}</CardTitle>
       </CardHeader>
-      <CardContent>
-        {variables.length === 0 ? (
-          <p className="text-sm text-muted-foreground">{t("variables.empty")}</p>
-        ) : hasMultipleScopes ? (
-          <div className="space-y-3">
-            {scopes.map((scope) => {
-              const vars = grouped.get(scope) ?? []
-              const isCollapsed = collapsedScopes.has(scope)
-              const isRoot = scope === "root"
-              return (
-                <div key={scope}>
-                  {!isRoot && (
-                    <button
-                      className="flex items-center gap-1 text-sm font-medium text-muted-foreground mb-1"
-                      onClick={() => toggleScope(scope)}
-                    >
-                      {isCollapsed ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
-                      {t("variables.scope")}: {scope}
-                      <Badge variant="outline" className="ml-1 text-xs">{vars.length}</Badge>
-                    </button>
-                  )}
-                  {(isRoot || !isCollapsed) && renderTable(vars)}
-                </div>
-              )
-            })}
-          </div>
-        ) : (
-          renderTable(variables)
-        )}
-      </CardContent>
+      <CardContent>{content}</CardContent>
     </Card>
   )
 }

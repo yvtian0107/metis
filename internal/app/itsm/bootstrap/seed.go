@@ -4,6 +4,7 @@ import (
 	"log/slog"
 	. "metis/internal/app/itsm/config"
 	. "metis/internal/app/itsm/domain"
+	"metis/internal/app/itsm/prompts"
 	"strconv"
 	"strings"
 	"time"
@@ -137,7 +138,7 @@ func deriveTicketStatusOutcome(db *gorm.DB, ticket Ticket) (string, string) {
 		status = TicketStatusSubmitted
 	}
 	if isNewTicketStatus(status) {
-		return status, outcome
+		return normalizeNewTicketStatusOutcome(db, ticket.ID, status, outcome)
 	}
 
 	switch status {
@@ -161,6 +162,53 @@ func deriveTicketStatusOutcome(db *gorm.DB, ticket Ticket) (string, string) {
 			return TicketStatusCompleted, TicketOutcomeApproved
 		}
 		return TicketStatusCompleted, TicketOutcomeFulfilled
+	default:
+		return TicketStatusSubmitted, ""
+	}
+}
+
+func normalizeNewTicketStatusOutcome(db *gorm.DB, ticketID uint, status string, outcome string) (string, string) {
+	switch status {
+	case TicketStatusSubmitted, TicketStatusWaitingHuman, TicketStatusApprovedDecisioning, TicketStatusRejectedDecisioning, TicketStatusDecisioning, TicketStatusExecutingAction:
+		return status, ""
+	case TicketStatusCompleted:
+		if outcome == TicketOutcomeApproved || outcome == TicketOutcomeFulfilled {
+			return TicketStatusCompleted, outcome
+		}
+		if outcome == TicketOutcomeRejected {
+			return TicketStatusRejected, TicketOutcomeRejected
+		}
+		lastOutcome := lastHumanOutcome(db, ticketID)
+		if lastOutcome == TicketOutcomeRejected {
+			return TicketStatusRejected, TicketOutcomeRejected
+		}
+		if lastOutcome == TicketOutcomeApproved {
+			return TicketStatusCompleted, TicketOutcomeApproved
+		}
+		return TicketStatusCompleted, TicketOutcomeFulfilled
+	case TicketStatusRejected:
+		if outcome == "" {
+			outcome = TicketOutcomeRejected
+		}
+		return TicketStatusRejected, outcome
+	case TicketStatusWithdrawn:
+		if outcome == "" {
+			outcome = TicketOutcomeWithdrawn
+		}
+		return TicketStatusWithdrawn, outcome
+	case TicketStatusCancelled:
+		if outcome == TicketOutcomeWithdrawn || hasTimelineEvent(db, ticketID, "withdrawn") {
+			return TicketStatusWithdrawn, TicketOutcomeWithdrawn
+		}
+		if outcome == "" {
+			outcome = TicketOutcomeCancelled
+		}
+		return TicketStatusCancelled, outcome
+	case TicketStatusFailed:
+		if outcome == "" {
+			outcome = TicketOutcomeFailed
+		}
+		return TicketStatusFailed, outcome
 	default:
 		return TicketStatusSubmitted, ""
 	}
@@ -487,16 +535,8 @@ func seedMenus(db *gorm.DB) error {
 	seedMenu(db, &itsmDir.ID, "我的待办", model.MenuTypeMenu, "/itsm/tickets/approvals/pending", "ClipboardCheck", "itsm:ticket:approval:pending", 2)
 	seedMenu(db, &itsmDir.ID, "历史工单", model.MenuTypeMenu, "/itsm/tickets/approvals/history", "History", "itsm:ticket:approval:history", 3)
 
-	// 工单监控
-	allTicketMenu := seedMenu(db, &itsmDir.ID, "工单监控", model.MenuTypeMenu, "/itsm/tickets", "List", "itsm:ticket:list", 4)
-	seedButtons(db, allTicketMenu, []model.Menu{
-		{Name: "指派工单", Type: model.MenuTypeButton, Permission: "itsm:ticket:assign", Sort: 1},
-		{Name: "取消工单", Type: model.MenuTypeButton, Permission: "itsm:ticket:cancel", Sort: 3},
-		{Name: "工单覆写", Type: model.MenuTypeButton, Permission: "itsm:ticket:override", Sort: 4},
-	})
-
 	// 服务目录 (unified workspace: catalogs + services)
-	serviceMenu := seedMenu(db, &itsmDir.ID, "服务目录", model.MenuTypeMenu, "/itsm/services", "Cog", "itsm:service:list", 5)
+	serviceMenu := seedMenu(db, &itsmDir.ID, "服务目录", model.MenuTypeMenu, "/itsm/services", "Cog", "itsm:service:list", 4)
 	seedButtons(db, serviceMenu, []model.Menu{
 		{Name: "新增服务", Type: model.MenuTypeButton, Permission: "itsm:service:create", Sort: 0},
 		{Name: "编辑服务", Type: model.MenuTypeButton, Permission: "itsm:service:update", Sort: 1},
@@ -507,7 +547,7 @@ func seedMenus(db *gorm.DB) error {
 	})
 
 	// SLA 管理
-	slaMenu := seedMenu(db, &itsmDir.ID, "SLA 管理", model.MenuTypeMenu, "/itsm/sla", "Timer", "itsm:sla:list", 9)
+	slaMenu := seedMenu(db, &itsmDir.ID, "SLA 管理", model.MenuTypeMenu, "/itsm/sla", "Timer", "itsm:sla:list", 6)
 	seedButtons(db, slaMenu, []model.Menu{
 		{Name: "新增SLA", Type: model.MenuTypeButton, Permission: "itsm:sla:create", Sort: 0},
 		{Name: "编辑SLA", Type: model.MenuTypeButton, Permission: "itsm:sla:update", Sort: 1},
@@ -515,11 +555,19 @@ func seedMenus(db *gorm.DB) error {
 	})
 
 	// 优先级管理
-	priorityMenu := seedMenu(db, &itsmDir.ID, "优先级管理", model.MenuTypeMenu, "/itsm/priorities", "Flag", "itsm:priority:list", 8)
+	priorityMenu := seedMenu(db, &itsmDir.ID, "优先级管理", model.MenuTypeMenu, "/itsm/priorities", "Flag", "itsm:priority:list", 5)
 	seedButtons(db, priorityMenu, []model.Menu{
 		{Name: "新增优先级", Type: model.MenuTypeButton, Permission: "itsm:priority:create", Sort: 0},
 		{Name: "编辑优先级", Type: model.MenuTypeButton, Permission: "itsm:priority:update", Sort: 1},
 		{Name: "删除优先级", Type: model.MenuTypeButton, Permission: "itsm:priority:delete", Sort: 2},
+	})
+
+	// 工单监控
+	allTicketMenu := seedMenu(db, &itsmDir.ID, "工单监控", model.MenuTypeMenu, "/itsm/tickets", "List", "itsm:ticket:list", 7)
+	seedButtons(db, allTicketMenu, []model.Menu{
+		{Name: "指派工单", Type: model.MenuTypeButton, Permission: "itsm:ticket:assign", Sort: 1},
+		{Name: "取消工单", Type: model.MenuTypeButton, Permission: "itsm:ticket:cancel", Sort: 3},
+		{Name: "工单覆写", Type: model.MenuTypeButton, Permission: "itsm:ticket:override", Sort: 4},
 	})
 
 	// 智能岗位
@@ -626,6 +674,7 @@ func seedPolicies(enforcer *casbin.Enforcer) error {
 		{"admin", "/api/v1/itsm/services/:id", "GET"},
 		{"admin", "/api/v1/itsm/services/:id", "PUT"},
 		{"admin", "/api/v1/itsm/services/:id", "DELETE"},
+		{"admin", "/api/v1/itsm/services/:id/health", "GET"},
 		// Service Actions
 		{"admin", "/api/v1/itsm/services/:id/actions", "POST"},
 		{"admin", "/api/v1/itsm/services/:id/actions", "GET"},
@@ -667,6 +716,7 @@ func seedPolicies(enforcer *casbin.Enforcer) error {
 		{"admin", "/api/v1/itsm/tickets/approvals/pending", "GET"},
 		{"admin", "/api/v1/itsm/tickets/approvals/history", "GET"},
 		{"admin", "/api/v1/itsm/tickets/monitor", "GET"},
+		{"admin", "/api/v1/itsm/tickets/decision-quality", "GET"},
 		{"admin", "/api/v1/itsm/tickets/:id", "GET"},
 		{"admin", "/api/v1/itsm/tickets/:id/assign", "PUT"},
 		{"admin", "/api/v1/itsm/tickets/:id/cancel", "PUT"},
@@ -680,6 +730,7 @@ func seedPolicies(enforcer *casbin.Enforcer) error {
 		{"admin", "/api/v1/itsm/tickets/:id/override/jump", "POST"},
 		{"admin", "/api/v1/itsm/tickets/:id/override/reassign", "POST"},
 		{"admin", "/api/v1/itsm/tickets/:id/override/retry-ai", "POST"},
+		{"admin", "/api/v1/itsm/tickets/:id/recovery", "POST"},
 	}
 
 	menuPerms := [][]string{
@@ -985,13 +1036,24 @@ func SeedEngineConfig(db *gorm.DB) error {
 	seedServiceMatchToolRuntime(db)
 
 	defaults := map[string]string{
-		SmartTicketDecisionModeKey:    "direct_first",
-		SmartTicketPathModelKey:       "0",
-		SmartTicketPathTemperatureKey: "0.3",
-		SmartTicketPathMaxRetriesKey:  "1",
-		SmartTicketPathTimeoutKey:     "60",
-		SmartTicketGuardAuditLevelKey: "full",
-		SmartTicketGuardFallbackKey:   "0",
+		SmartTicketDecisionModeKey:             "direct_first",
+		SmartTicketPathModelKey:                "0",
+		SmartTicketPathTemperatureKey:          "0.3",
+		SmartTicketPathMaxRetriesKey:           "1",
+		SmartTicketPathTimeoutKey:              "60",
+		SmartTicketPathSystemPromptKey:         prompts.PathBuilderSystemPromptDefault,
+		SmartTicketSessionTitleModelKey:        "0",
+		SmartTicketSessionTitleTemperatureKey:  "0.2",
+		SmartTicketSessionTitleMaxRetriesKey:   "1",
+		SmartTicketSessionTitleTimeoutKey:      "30",
+		SmartTicketSessionTitlePromptKey:       SessionTitleSystemPromptDefault,
+		SmartTicketPublishHealthModelKey:       "0",
+		SmartTicketPublishHealthTemperatureKey: "0.2",
+		SmartTicketPublishHealthMaxRetriesKey:  "1",
+		SmartTicketPublishHealthTimeoutKey:     "45",
+		SmartTicketPublishHealthPromptKey:      prompts.PublishHealthSystemPromptDefault,
+		SmartTicketGuardAuditLevelKey:          "full",
+		SmartTicketGuardFallbackKey:            "0",
 	}
 
 	for key, value := range defaults {

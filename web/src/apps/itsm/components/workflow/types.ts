@@ -46,6 +46,7 @@ export interface ScriptAssignment {
 export interface WFNodeData {
   label: string
   nodeType: NodeType
+  _layoutDirection?: "TB" | "LR"
   _workflowState?: "active" | "completed" | "failed" | "cancelled" | "idle"
   // form / process
   participants?: Participant[]
@@ -158,4 +159,159 @@ export function conditionSummary(c: GatewayCondition | ConditionGroup | undefine
   return c.conditions
     .map((item) => isConditionGroup(item) ? `(${conditionSummary(item)})` : formatSingleCondition(item))
     .join(c.logic === "and" ? " 且 " : " 或 ")
+}
+
+export interface ConditionDisplayDict {
+  fieldLabels: Record<string, string>
+  valueLabels: Record<string, string>
+}
+
+export interface ConditionDisplayLocale {
+  operatorLabels: Record<GatewayCondition["operator"], string>
+  logicLabels: { and: string; or: string }
+  valueSeparator: string
+}
+
+export interface EdgeLabelLocale {
+  defaultLabel: string
+  outcomeLabels: Record<string, string>
+}
+
+export interface EdgeLabelDisplay {
+  primary: string
+  raw: string
+  isCompleted: boolean
+  kind: "outcome" | "condition" | "default" | "empty"
+}
+
+type WorkflowNodeLike = { data?: Record<string, unknown> }
+
+type FormFieldLike = {
+  key?: unknown
+  label?: unknown
+  options?: unknown
+}
+
+function asString(value: unknown): string {
+  return String(value ?? "")
+}
+
+function normalizeFieldKey(field: string): string {
+  return field.replace(/^form\./, "")
+}
+
+function toValueList(value: unknown): string[] {
+  if (Array.isArray(value)) return value.map((item) => asString(item))
+  return [asString(value)]
+}
+
+function normalizeOption(option: unknown): { label: string; value: string } | null {
+  if (option && typeof option === "object") {
+    const typed = option as { label?: unknown; value?: unknown }
+    if (typed.label !== undefined && typed.value !== undefined) {
+      return { label: asString(typed.label), value: asString(typed.value) }
+    }
+  }
+  if (typeof option === "string" || typeof option === "number" || typeof option === "boolean") {
+    const text = asString(option)
+    return { label: text, value: text }
+  }
+  return null
+}
+
+function mapSingleConditionForDisplay(
+  condition: { field: string; operator: GatewayCondition["operator"]; value: unknown },
+  dict: ConditionDisplayDict,
+  locale: ConditionDisplayLocale,
+): string {
+  const normalizedField = normalizeFieldKey(condition.field)
+  const fieldLabel = dict.fieldLabels[normalizedField] ?? normalizedField
+  const operatorLabel = locale.operatorLabels[condition.operator] ?? condition.operator
+  if (condition.operator === "is_empty" || condition.operator === "is_not_empty") {
+    return `${fieldLabel} ${operatorLabel}`
+  }
+  const mappedValues = toValueList(condition.value).map((value) => dict.valueLabels[value] ?? value)
+  const joinedValue = mappedValues.join(locale.valueSeparator)
+  return `${fieldLabel} ${operatorLabel} ${joinedValue}`
+}
+
+export function createEmptyConditionDisplayDict(): ConditionDisplayDict {
+  return { fieldLabels: {}, valueLabels: {} }
+}
+
+export function buildConditionDisplayDictFromNodes(nodes: WorkflowNodeLike[]): ConditionDisplayDict {
+  const fieldLabels: Record<string, string> = {}
+  const valueLabels: Record<string, string> = {}
+  for (const node of nodes) {
+    const nodeData = node.data as WFNodeData | undefined
+    const rawSchema = nodeData?.formSchema
+    if (!rawSchema || typeof rawSchema !== "object") continue
+    const fields = (rawSchema as { fields?: unknown }).fields
+    if (!Array.isArray(fields)) continue
+    for (const field of fields as FormFieldLike[]) {
+      if (!field || typeof field !== "object") continue
+      const key = asString(field.key)
+      if (!key) continue
+      const label = asString(field.label)
+      if (label) fieldLabels[key] = label
+      if (!Array.isArray(field.options)) continue
+      for (const option of field.options) {
+        const normalized = normalizeOption(option)
+        if (!normalized) continue
+        if (normalized.label) valueLabels[normalized.value] = normalized.label
+      }
+    }
+  }
+  return { fieldLabels, valueLabels }
+}
+
+export function formatConditionForDisplay(
+  condition: GatewayCondition | ConditionGroup | undefined,
+  dict: ConditionDisplayDict,
+  locale: ConditionDisplayLocale,
+): string {
+  if (!condition) return ""
+  if (!isConditionGroup(condition)) {
+    return mapSingleConditionForDisplay(condition, dict, locale)
+  }
+  const logicLabel = condition.logic === "and" ? locale.logicLabels.and : locale.logicLabels.or
+  return condition.conditions
+    .map((item) => (isConditionGroup(item)
+      ? `(${formatConditionForDisplay(item, dict, locale)})`
+      : mapSingleConditionForDisplay(item, dict, locale)))
+    .join(` ${logicLabel} `)
+}
+
+export function buildEdgeLabelDisplay(
+  edgeData: WFEdgeData | undefined,
+  dict: ConditionDisplayDict,
+  conditionLocale: ConditionDisplayLocale,
+  edgeLocale: EdgeLabelLocale,
+): EdgeLabelDisplay {
+  const outcome = edgeData?.outcome
+  if (outcome) {
+    return {
+      primary: edgeLocale.outcomeLabels[outcome] ?? outcome,
+      raw: outcome,
+      isCompleted: outcome === "completed" || outcome === "submitted",
+      kind: "outcome",
+    }
+  }
+  if (edgeData?.condition) {
+    return {
+      primary: formatConditionForDisplay(edgeData.condition, dict, conditionLocale),
+      raw: conditionSummary(edgeData.condition),
+      isCompleted: false,
+      kind: "condition",
+    }
+  }
+  if (edgeData?.default ?? edgeData?.isDefault) {
+    return {
+      primary: edgeLocale.defaultLabel,
+      raw: "/",
+      isCompleted: false,
+      kind: "default",
+    }
+  }
+  return { primary: "", raw: "", isCompleted: false, kind: "empty" }
 }
