@@ -806,21 +806,6 @@ func isTimeSemanticField(f FormField) bool {
 		strings.Contains(text, "生效")
 }
 
-func normalizeDateTimeSemanticFieldValue(f FormField, raw any, requestText string) (any, bool) {
-	if !isTimeSemanticField(f) || raw == nil {
-		return raw, false
-	}
-	value := strings.TrimSpace(fmt.Sprintf("%v", raw))
-	if value == "" || !hasAmbiguousRelativeTime(value) {
-		return raw, false
-	}
-	source := buildValidationContext(requestText, value)
-	if normalized := extractLabeledAbsoluteTimeValue(source, f); normalized != "" {
-		return normalized, true
-	}
-	return raw, false
-}
-
 func canonicalizeTimeSemanticFields(detail *ServiceDetail, summary string, formData map[string]any) map[string]any {
 	if len(formData) == 0 {
 		return formData
