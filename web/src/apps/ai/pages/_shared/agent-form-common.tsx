@@ -69,7 +69,7 @@ function capabilitySetsToGroups(
 }
 
 
-const agentSchema = z.object({
+const baseAgentSchema = z.object({
   name: z.string().min(1).max(128),
   description: z.string().optional(),
   visibility: z.enum(["private", "team", "public"]),
@@ -96,7 +96,7 @@ const agentSchema = z.object({
   })),
 })
 
-export type AgentFormValues = z.infer<typeof agentSchema>
+export type AgentFormValues = z.infer<typeof baseAgentSchema>
 
 interface AgentFormProps {
   agentType: "assistant" | "coding"
@@ -130,6 +130,17 @@ const defaultValues: AgentFormValues = {
 
 export function AgentForm({ agentType, agent, onSubmit }: AgentFormProps) {
   const { t } = useTranslation(["ai", "common"])
+  const agentSchema = useMemo(() => (
+    baseAgentSchema.superRefine((data, ctx) => {
+      if (agentType === "assistant" && (data.modelId == null || Number.isNaN(data.modelId))) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["modelId"],
+          message: t("ai:validation.modelIdRequired"),
+        })
+      }
+    })
+  ), [agentType, t])
 
   // For edit mode: resolve providerId from the agent's modelId
   const agentModelId = agent?.type === "assistant" ? agent.modelId : undefined
@@ -147,7 +158,7 @@ export function AgentForm({ agentType, agent, onSubmit }: AgentFormProps) {
       description: agent.description || "",
       visibility: agent.visibility,
       strategy: agent.type === "assistant" ? (agent.strategy || "react") : undefined,
-      providerId: "",
+      providerId: agent.type === "assistant" ? editProviderId : "",
       modelId: agent.type === "assistant" ? (agent.modelId ?? undefined) : undefined,
       systemPrompt: agent.type === "assistant" ? (agent.systemPrompt || "") : "",
       temperature: agent.temperature,
@@ -165,7 +176,7 @@ export function AgentForm({ agentType, agent, onSubmit }: AgentFormProps) {
       knowledgeGraphIds: agent.knowledgeGraphIds ?? [],
       capabilitySetBindings: agent.capabilitySetBindings ?? [],
     }
-  }, [agent])
+  }, [agent, editProviderId])
 
   const form = useForm<AgentFormValues>({
     resolver: zodResolver(agentSchema),
@@ -175,12 +186,6 @@ export function AgentForm({ agentType, agent, onSubmit }: AgentFormProps) {
   useEffect(() => {
     form.reset(resetValues)
   }, [resetValues, form])
-
-  useEffect(() => {
-    if (!agentModelId || !editProviderId) return
-    if (form.getValues("providerId") !== "") return
-    form.setValue("providerId", editProviderId, { shouldDirty: false, shouldTouch: false })
-  }, [agentModelId, editProviderId, form])
 
   const watchExecMode = useWatch({ control: form.control, name: "execMode" })
   const selectedProviderId = useWatch({ control: form.control, name: "providerId" }) ?? ""

@@ -163,7 +163,9 @@ func (h *AssistantAgentHandler) Update(c *gin.Context) {
 		a.IsActive = *req.IsActive
 	}
 	a.Strategy = req.Strategy
-	a.ModelID = req.ModelID
+	if req.ModelID != nil {
+		a.ModelID = req.ModelID
+	}
 	a.SystemPrompt = req.SystemPrompt
 	a.Temperature = req.Temperature
 	a.MaxTokens = req.MaxTokens

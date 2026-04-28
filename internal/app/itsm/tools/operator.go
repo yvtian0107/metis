@@ -89,7 +89,9 @@ func (o *Operator) LoadService(serviceID uint) (*ServiceDetail, error) {
 
 	// Extract routing field hint from workflow_json.
 	if svc.WorkflowJSON != "" {
-		detail.RoutingFieldHint = extractRoutingHint(svc.WorkflowJSON)
+		if hint := extractRoutingHint(svc.WorkflowJSON); routingHintSupported(detail.FormFields, hint) {
+			detail.RoutingFieldHint = hint
+		}
 	}
 
 	// Compute fields hash.
@@ -361,6 +363,24 @@ func computeFieldsHash(fields []FormField) string {
 	b, _ := json.Marshal(fields)
 	h := sha256.Sum256(b)
 	return fmt.Sprintf("%x", h[:8])
+}
+
+func routingHintSupported(fields []FormField, hint *RoutingFieldHint) bool {
+	if hint == nil || hint.FieldKey == "" || len(hint.OptionRouteMap) == 0 {
+		return false
+	}
+	for _, field := range fields {
+		if field.Key != hint.FieldKey {
+			continue
+		}
+		switch field.Type {
+		case "select", "radio", "multi_select", "checkbox":
+			return true
+		default:
+			return false
+		}
+	}
+	return false
 }
 
 func extractRoutingHint(workflowJSON string) *RoutingFieldHint {

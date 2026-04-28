@@ -297,7 +297,7 @@ function ITSMDraftFormSurfaceCard({
   if (!isFormSchema(currentPayload.schema)) {
     return (
       <div data-testid="itsm-draft-form-surface" className="mb-5 max-w-[720px] rounded-2xl border border-destructive/25 bg-destructive/5 px-4 py-3 text-sm text-destructive">
-        表单定义不可用，请重新整理草稿。
+        申请确认表单未生成，请联系管理员先生成参考路径后再提交。
       </div>
     )
   }

@@ -1,7 +1,9 @@
 package bootstrap
 
 import (
+	"encoding/json"
 	. "metis/internal/app/itsm/domain"
+	itsmtools "metis/internal/app/itsm/tools"
 	"testing"
 
 	"metis/internal/model"
@@ -28,6 +30,74 @@ func TestSeedCatalogs_CreatesExpectedRootsAndChildren(t *testing.T) {
 	}
 	if roots != 6 {
 		t.Fatalf("expected 6 roots, got %d", roots)
+	}
+}
+
+func TestSeedServiceDefinitions_ServerAccessHasIntakeFormSchema(t *testing.T) {
+	db := newTestDB(t)
+
+	if err := seedCatalogs(db); err != nil {
+		t.Fatalf("seed catalogs: %v", err)
+	}
+	if err := seedSLATemplates(db); err != nil {
+		t.Fatalf("seed SLA templates: %v", err)
+	}
+	if err := seedServiceDefinitions(db); err != nil {
+		t.Fatalf("seed service definitions: %v", err)
+	}
+
+	var service ServiceDefinition
+	if err := db.Where("code = ?", "prod-server-temporary-access").First(&service).Error; err != nil {
+		t.Fatalf("find server access service: %v", err)
+	}
+
+	var schema struct {
+		Fields []struct {
+			Key  string `json:"key"`
+			Type string `json:"type"`
+		} `json:"fields"`
+	}
+	if err := json.Unmarshal([]byte(service.IntakeFormSchema), &schema); err != nil {
+		t.Fatalf("unmarshal intake form schema: %v", err)
+	}
+	got := make([]string, 0, len(schema.Fields))
+	for _, field := range schema.Fields {
+		got = append(got, field.Key)
+		if field.Key == "access_reason" && field.Type != "textarea" {
+			t.Fatalf("expected access_reason to remain free text textarea, got %q", field.Type)
+		}
+	}
+	want := []string{"target_servers", "access_window", "operation_purpose", "access_reason"}
+	if len(got) != len(want) {
+		t.Fatalf("expected field keys %v, got %v", want, got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("expected field keys %v, got %v", want, got)
+		}
+	}
+
+	operator := itsmtools.NewOperator(db, nil, nil, nil, nil, nil)
+	detail, err := operator.LoadService(service.ID)
+	if err != nil {
+		t.Fatalf("load service through operator: %v", err)
+	}
+	if len(service.WorkflowJSON) == 0 {
+		t.Fatal("expected seeded server access workflow json")
+	}
+	if detail.FormSchema == nil {
+		t.Fatal("expected operator detail to include form schema")
+	}
+	if len(detail.FormFields) != len(want) {
+		t.Fatalf("expected %d operator form fields, got %d", len(want), len(detail.FormFields))
+	}
+	for i, key := range want {
+		if detail.FormFields[i].Key != key {
+			t.Fatalf("expected operator field keys %v, got %+v", want, detail.FormFields)
+		}
+	}
+	if detail.RoutingFieldHint != nil {
+		t.Fatalf("expected textarea routing field to be ignored, got %+v", detail.RoutingFieldHint)
 	}
 }
 

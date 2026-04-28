@@ -271,23 +271,51 @@ function renderDatetime({ field, value, onChange, onBlur, disabled, readOnly }: 
   )
 }
 
-function renderDateRange({ value, onChange, disabled, readOnly }: FieldProps) {
+function usesDateTimeRange(field: FormField, range: { start?: string; end?: string }) {
+  if (field.props?.withTime === true || field.props?.mode === "datetime") return true
+  return hasTimeComponent(range.start) || hasTimeComponent(range.end)
+}
+
+function hasTimeComponent(value?: string) {
+  return Boolean(value && /\d{2}:\d{2}/.test(value))
+}
+
+function toDateInputValue(value?: string) {
+  if (!value) return ""
+  return value.replace(" ", "T").slice(0, 10)
+}
+
+function toDateTimeLocalValue(value?: string) {
+  if (!value) return ""
+  const normalized = value.replace(" ", "T")
+  const match = normalized.match(/^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})/)
+  if (!match) return ""
+  return `${match[1]}T${match[2]}`
+}
+
+function fromDateTimeLocalValue(value: string) {
+  if (!value) return ""
+  return `${value}:00+08:00`
+}
+
+function renderDateRange({ field, value, onChange, disabled, readOnly }: FieldProps) {
   const range = (value as { start?: string; end?: string }) ?? {}
+  const useDateTime = usesDateTimeRange(field, range)
   return (
     <div className="flex items-center gap-2">
       <Input
-        type="date"
-        value={range.start ?? ""}
-        onChange={(e) => onChange({ ...range, start: e.target.value })}
+        type={useDateTime ? "datetime-local" : "date"}
+        value={useDateTime ? toDateTimeLocalValue(range.start) : toDateInputValue(range.start)}
+        onChange={(e) => onChange({ ...range, start: useDateTime ? fromDateTimeLocalValue(e.target.value) : e.target.value })}
         disabled={disabled}
         readOnly={readOnly}
         placeholder="开始日期"
       />
       <span className="text-muted-foreground">—</span>
       <Input
-        type="date"
-        value={range.end ?? ""}
-        onChange={(e) => onChange({ ...range, end: e.target.value })}
+        type={useDateTime ? "datetime-local" : "date"}
+        value={useDateTime ? toDateTimeLocalValue(range.end) : toDateInputValue(range.end)}
+        onChange={(e) => onChange({ ...range, end: useDateTime ? fromDateTimeLocalValue(e.target.value) : e.target.value })}
         disabled={disabled}
         readOnly={readOnly}
         placeholder="结束日期"

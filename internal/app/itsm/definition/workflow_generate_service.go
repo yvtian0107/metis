@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	. "metis/internal/app/itsm/config"
 	. "metis/internal/app/itsm/domain"
+	"metis/internal/app/itsm/form"
 	"strings"
 	"time"
 
@@ -148,11 +149,13 @@ func (s *WorkflowGenerateService) Generate(ctx context.Context, req *GenerateReq
 
 		// 7. Validate workflow
 		validationErrors := engine.ValidateWorkflow(workflowJSON)
+		intakeFormSchema, formErrors := extractGeneratedIntakeFormSchema(workflowJSON)
+		validationErrors = append(validationErrors, formErrors...)
 		lastWorkflowJSON = workflowJSON
 
 		if len(validationErrors) == 0 || !hasBlockingErrors(validationErrors) {
 			// No errors, or only warnings — save and return
-			return s.buildGenerateResponse(req, workflowJSON, attempt, validationErrors)
+			return s.buildGenerateResponse(req, workflowJSON, intakeFormSchema, attempt, validationErrors)
 		}
 
 		slog.Warn("workflow generate: validation failed",
@@ -167,9 +170,13 @@ func (s *WorkflowGenerateService) Generate(ctx context.Context, req *GenerateReq
 			continue
 		}
 
+		if len(formErrors) > 0 {
+			return nil, fmt.Errorf("%w: å‚è€ƒè·¯å¾„æœªç”Ÿæˆå¯ç”¨çš„ç”³è¯·ç¡®è®¤è¡¨å•", ErrWorkflowGeneration)
+		}
+
 		// Return the last parsable draft with validation issues. The draft is
 		// still useful as an agentic reference path; publish health carries risk.
-		return s.buildGenerateResponse(req, lastWorkflowJSON, attempt, validationErrors)
+		return s.buildGenerateResponse(req, lastWorkflowJSON, intakeFormSchema, attempt, validationErrors)
 	}
 
 	// Should not reach here
@@ -219,7 +226,7 @@ func workflowValidationErrorsLogValue(validationErrors []engine.ValidationError)
 	return sb.String()
 }
 
-func (s *WorkflowGenerateService) buildGenerateResponse(req *GenerateRequest, workflowJSON json.RawMessage, retries int, validationErrors []engine.ValidationError) (*GenerateResponse, error) {
+func (s *WorkflowGenerateService) buildGenerateResponse(req *GenerateRequest, workflowJSON json.RawMessage, intakeFormSchema json.RawMessage, retries int, validationErrors []engine.ValidationError) (*GenerateResponse, error) {
 	resp := &GenerateResponse{
 		WorkflowJSON: workflowJSON,
 		Retries:      retries,
@@ -231,9 +238,18 @@ func (s *WorkflowGenerateService) buildGenerateResponse(req *GenerateRequest, wo
 		return resp, nil
 	}
 
+	if len(intakeFormSchema) == 0 {
+		var formErrors []engine.ValidationError
+		intakeFormSchema, formErrors = extractGeneratedIntakeFormSchema(workflowJSON)
+		if len(formErrors) > 0 {
+			return nil, fmt.Errorf("%w: å‚è€ƒè·¯å¾„æœªç”Ÿæˆå¯ç”¨çš„ç”³è¯·ç¡®è®¤è¡¨å•", ErrWorkflowGeneration)
+		}
+	}
+
 	updated, err := s.serviceDefSvc.Update(req.ServiceID, map[string]any{
 		"workflow_json":      JSONField(workflowJSON),
 		"collaboration_spec": req.CollaborationSpec,
+		"intake_form_schema": JSONField(intakeFormSchema),
 	})
 	if err != nil {
 		return nil, err
@@ -251,6 +267,110 @@ func (s *WorkflowGenerateService) buildGenerateResponse(req *GenerateRequest, wo
 	resp.HealthCheck = health
 	resp.Saved = true
 	return resp, nil
+}
+
+func extractGeneratedIntakeFormSchema(workflowJSON json.RawMessage) (json.RawMessage, []engine.ValidationError) {
+	var workflow struct {
+		Nodes []struct {
+			ID   string          `json:"id"`
+			Type string          `json:"type"`
+			Data json.RawMessage `json:"data"`
+		} `json:"nodes"`
+	}
+	if err := json.Unmarshal(workflowJSON, &workflow); err != nil {
+		return nil, []engine.ValidationError{{Level: "blocking", Message: fmt.Sprintf("å‚è€ƒè·¯å¾„ JSON è§£æžå¤±è´¥ï¼š%v", err)}}
+	}
+
+	for _, node := range workflow.Nodes {
+		if node.Type != "form" {
+			continue
+		}
+		var data struct {
+			FormSchema json.RawMessage `json:"formSchema"`
+		}
+		if err := json.Unmarshal(node.Data, &data); err != nil {
+			return nil, []engine.ValidationError{{Level: "blocking", NodeID: node.ID, Message: fmt.Sprintf("è¡¨å•èŠ‚ç‚¹æ— æ³•è§£æžï¼š%v", err)}}
+		}
+		if len(data.FormSchema) == 0 || string(data.FormSchema) == "null" {
+			continue
+		}
+		return normalizeGeneratedFormSchema(node.ID, data.FormSchema)
+	}
+
+	return nil, []engine.ValidationError{{Level: "blocking", Message: "å‚è€ƒè·¯å¾„ç¼ºå°‘ requester è¡¨å•èŠ‚ç‚¹çš„ formSchemaï¼Œæ— æ³•ç”Ÿæˆç”³è¯·ç¡®è®¤è¡¨å•"}}
+}
+
+func normalizeGeneratedFormSchema(nodeID string, raw json.RawMessage) (json.RawMessage, []engine.ValidationError) {
+	var schemaMap map[string]any
+	if err := json.Unmarshal(raw, &schemaMap); err != nil {
+		return nil, []engine.ValidationError{{Level: "blocking", NodeID: nodeID, Message: fmt.Sprintf("formSchema ä¸æ˜¯æœ‰æ•ˆ JSONï¼š%v", err)}}
+	}
+	if schemaMap["version"] == nil {
+		schemaMap["version"] = float64(1)
+	}
+	fields, ok := schemaMap["fields"].([]any)
+	if !ok || len(fields) == 0 {
+		return nil, []engine.ValidationError{{Level: "blocking", NodeID: nodeID, Message: "formSchema.fields ä¸èƒ½ä¸ºç©º"}}
+	}
+	for _, rawField := range fields {
+		field, ok := rawField.(map[string]any)
+		if !ok {
+			continue
+		}
+		if required, ok := field["required"].(bool); !ok || !required {
+			field["required"] = true
+		}
+		if normalized := normalizeGeneratedOptions(field["options"]); normalized != nil {
+			field["options"] = normalized
+		}
+	}
+
+	normalized, err := json.Marshal(schemaMap)
+	if err != nil {
+		return nil, []engine.ValidationError{{Level: "blocking", NodeID: nodeID, Message: fmt.Sprintf("formSchema è§„èŒƒåŒ–å¤±è´¥ï¼š%v", err)}}
+	}
+	var schema form.FormSchema
+	if err := json.Unmarshal(normalized, &schema); err != nil {
+		return nil, []engine.ValidationError{{Level: "blocking", NodeID: nodeID, Message: fmt.Sprintf("formSchema ç»“æž„æ— æ•ˆï¼š%v", err)}}
+	}
+	if errs := form.ValidateSchema(schema); len(errs) > 0 {
+		validationErrors := make([]engine.ValidationError, 0, len(errs))
+		for _, err := range errs {
+			validationErrors = append(validationErrors, engine.ValidationError{Level: "blocking", NodeID: nodeID, Message: "formSchema " + err.Error()})
+		}
+		return nil, validationErrors
+	}
+	canonical, err := json.Marshal(schema)
+	if err != nil {
+		return nil, []engine.ValidationError{{Level: "blocking", NodeID: nodeID, Message: fmt.Sprintf("formSchema åºåˆ—åŒ–å¤±è´¥ï¼š%v", err)}}
+	}
+	return canonical, nil
+}
+
+func normalizeGeneratedOptions(raw any) any {
+	options, ok := raw.([]any)
+	if !ok || len(options) == 0 {
+		return raw
+	}
+	normalized := make([]any, 0, len(options))
+	for _, option := range options {
+		switch value := option.(type) {
+		case string:
+			normalized = append(normalized, map[string]any{"label": value, "value": value})
+		case map[string]any:
+			if value["value"] == nil && value["label"] != nil {
+				value["value"] = value["label"]
+			}
+			if value["label"] == nil && value["value"] != nil {
+				value["label"] = fmt.Sprintf("%v", value["value"])
+			}
+			normalized = append(normalized, value)
+		default:
+			label := fmt.Sprintf("%v", value)
+			normalized = append(normalized, map[string]any{"label": label, "value": label})
+		}
+	}
+	return normalized
 }
 
 // hasBlockingErrors returns true if any validation error has Level "blocking".

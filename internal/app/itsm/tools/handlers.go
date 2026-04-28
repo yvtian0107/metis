@@ -317,7 +317,13 @@ func SubmitDraft(op ServiceDeskOperator, store StateStore, sessionID uint, userI
 	if summary == "" {
 		summary = state.DraftSummary
 	}
-	warnings, missingRequired, blocking := validateDraftData(detail, formData)
+	validationContext := buildValidationContext(state.RequestText, summary)
+	formData = canonicalizeTimeSemanticFields(detail, validationContext, formData)
+	warnings, missingRequired, blocking := validateDraftData(detail, formData, validationContext)
+	timeWarnings, timeMissing, timeBlocking := validateDraftTimeSource(detail, validationContext, formData)
+	warnings = append(warnings, timeWarnings...)
+	missingRequired = append(missingRequired, timeMissing...)
+	blocking = blocking || timeBlocking
 	if blocking {
 		return &DraftSubmitResult{
 			OK:            false,
@@ -436,9 +442,6 @@ func currentRequestContextHandler(store StateStore) ToolHandler {
 			"draft_form_data":         state.DraftFormData,
 			"draft_version":           state.DraftVersion,
 			"confirmed_draft_version": state.ConfirmedDraftVersion,
-			"missing_fields":          state.MissingFields,
-			"asked_fields":            state.AskedFields,
-			"min_decision_ready":      state.MinDecisionReady,
 			"next_expected_action":    NextExpectedAction(state),
 		}), nil
 	}
@@ -648,7 +651,7 @@ func mergePrefillFormData(data map[string]any, prefill map[string]any) map[strin
 	return merged
 }
 
-func validateDraftData(detail *ServiceDetail, formData map[string]any) ([]DraftWarning, []FieldCollectionItem, bool) {
+func validateDraftData(detail *ServiceDetail, formData map[string]any, requestText string) ([]DraftWarning, []FieldCollectionItem, bool) {
 	var warnings []DraftWarning
 	var missingRequired []FieldCollectionItem
 	blocking := false
@@ -673,6 +676,10 @@ func validateDraftData(detail *ServiceDetail, formData map[string]any) ([]DraftW
 				Message: fmt.Sprintf("缺少必填字段：%s", f.Label),
 			})
 			continue
+		}
+		if normalizedRaw, normalized := normalizeDateTimeSemanticFieldValue(f, raw, requestText); normalized {
+			raw = normalizedRaw
+			formData[f.Key] = normalizedRaw
 		}
 		value := ""
 		if s, ok := raw.(string); ok {
@@ -905,6 +912,17 @@ func hasAmbiguousRelativeTime(value string) bool {
 	return !explicitClock.MatchString(text)
 }
 
+func buildValidationContext(requestText, summary string) string {
+	parts := make([]string, 0, 2)
+	if text := strings.TrimSpace(requestText); text != "" {
+		parts = append(parts, text)
+	}
+	if text := strings.TrimSpace(summary); text != "" {
+		parts = append(parts, text)
+	}
+	return strings.TrimSpace(strings.Join(parts, "\n"))
+}
+
 func isDraftEmptyValue(val any) bool {
 	if val == nil {
 		return true
@@ -1010,6 +1028,12 @@ func buildPrefillSuggestions(requestText string, fields []FormField) map[string]
 func buildFieldCollection(fields []FormField, prefill map[string]any, routing *RoutingFieldHint) *FieldCollection {
 	summary := &FieldCollection{
 		RecommendedNextStep: "prepare_draft",
+	}
+	if len(fields) == 0 {
+		summary.ReadyForDraft = false
+		summary.NextRequiredTool = "generate_reference_path"
+		summary.RecommendedNextStep = "generate_reference_path"
+		return summary
 	}
 	if routing != nil {
 		summary.RoutingFieldKey = routing.FieldKey
@@ -1474,13 +1498,30 @@ func draftPrepareHandler(op ServiceDeskOperator, store StateStore) ToolHandler {
 		if err != nil {
 			return nil, fmt.Errorf("load service for validation: %w", err)
 		}
+		if detail.EngineType == "smart" && len(detail.FormFields) == 0 {
+			return mustMarshal(map[string]any{
+				"ok":                      false,
+				"ready_for_confirmation":  false,
+				"next_required_tool":      "generate_reference_path",
+				"recommended_next_step":   "generate_reference_path",
+				"missing_required_fields": []FieldCollectionItem{},
+				"summary":                 p.Summary,
+				"form_data":               map[string]any{},
+				"warnings": []DraftWarning{{
+					Type:    "missing_form_schema",
+					Field:   "intake_form_schema",
+					Message: "ç”³è¯·ç¡®è®¤è¡¨å•æœªç”Ÿæˆï¼Œè¯·ç”±ç®¡ç†å‘˜å…ˆç”Ÿæˆå‚è€ƒè·¯å¾„",
+				}},
+			}), nil
+		}
 
 		p.FormData = normalizeFormDataKeys(p.FormData, detail.FormFields)
 		p.FormData = mergePrefillFormData(p.FormData, state.PrefillFormData)
-		p.FormData = canonicalizeTimeSemanticFields(detail, p.Summary, p.FormData)
+		validationContext := buildValidationContext(state.RequestText, p.Summary)
+		p.FormData = canonicalizeTimeSemanticFields(detail, validationContext, p.FormData)
 
-		warnings, missingRequired, blocking := validateDraftData(detail, p.FormData)
-		timeWarnings, timeMissing, timeBlocking := validateDraftTimeSource(detail, p.Summary, p.FormData)
+		warnings, missingRequired, blocking := validateDraftData(detail, p.FormData, validationContext)
+		timeWarnings, timeMissing, timeBlocking := validateDraftTimeSource(detail, validationContext, p.FormData)
 		warnings = append(warnings, timeWarnings...)
 		missingRequired = append(missingRequired, timeMissing...)
 		blocking = blocking || timeBlocking
@@ -1514,7 +1555,6 @@ func draftPrepareHandler(op ServiceDeskOperator, store StateStore) ToolHandler {
 		if err := state.TransitionTo("awaiting_confirmation"); err != nil {
 			return nil, err
 		}
-		state.MinDecisionReady = true
 		if err := store.SaveState(sid, state); err != nil {
 			return nil, fmt.Errorf("save state: %w", err)
 		}
@@ -1561,7 +1601,12 @@ func draftConfirmHandler(op ServiceDeskOperator, store StateStore) ToolHandler {
 			if detail.FieldsHash != state.FieldsHash {
 				return nil, fmt.Errorf("服务表单字段已变更，请重新调用 service_load")
 			}
-			warnings, _, blocking := validateDraftData(detail, state.DraftFormData)
+			validationContext := buildValidationContext(state.RequestText, state.DraftSummary)
+			state.DraftFormData = canonicalizeTimeSemanticFields(detail, validationContext, state.DraftFormData)
+			warnings, _, blocking := validateDraftData(detail, state.DraftFormData, validationContext)
+			timeWarnings, _, timeBlocking := validateDraftTimeSource(detail, validationContext, state.DraftFormData)
+			warnings = append(warnings, timeWarnings...)
+			blocking = blocking || timeBlocking
 			if blocking {
 				if len(warnings) > 0 {
 					return nil, fmt.Errorf("草稿表单校验失败：%s", warnings[0].Message)

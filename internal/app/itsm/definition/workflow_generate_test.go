@@ -76,19 +76,20 @@ func newWorkflowGenerateServiceForRetryTest(client *fakeWorkflowLLMClient, maxRe
 }
 
 func validWorkflowJSONForGenerateTest() string {
-	return `{"nodes":[{"id":"start","type":"start","data":{"label":"开始"}},{"id":"end","type":"end","data":{"label":"结束"}}],"edges":[{"id":"e1","source":"start","target":"end","data":{}}]}`
+	return `{"nodes":[{"id":"start","type":"start","data":{"label":"start"}},{"id":"request","type":"form","data":{"label":"request form","participants":[{"type":"requester"}],"formSchema":{"fields":[{"key":"summary","type":"textarea","label":"Summary"}]}}},{"id":"end","type":"end","data":{"label":"end"}}],"edges":[{"id":"e1","source":"start","target":"request","data":{}},{"id":"e2","source":"request","target":"end","data":{"outcome":"submitted"}}]}`
 }
-
 func workflowWithBlockingIssueForGenerateTest(userID uint) string {
 	return fmt.Sprintf(`{
 		"nodes": [
-			{"id":"start","type":"start","data":{"label":"开始"}},
-			{"id":"process","type":"process","data":{"label":"处理","participants":[{"type":"user","value":"%d"}]}},
-			{"id":"end","type":"end","data":{"label":"结束"}}
+			{"id":"start","type":"start","data":{"label":"start"}},
+			{"id":"request","type":"form","data":{"label":"request form","participants":[{"type":"requester"}],"formSchema":{"fields":[{"key":"summary","type":"textarea","label":"Summary"}]}}},
+			{"id":"process","type":"process","data":{"label":"process","participants":[{"type":"user","value":"%d"}]}},
+			{"id":"end","type":"end","data":{"label":"end"}}
 		],
 		"edges": [
-			{"id":"e1","source":"start","target":"process","data":{}},
-			{"id":"e2","source":"process","target":"end","data":{"outcome":"approved"}}
+			{"id":"e1","source":"start","target":"request","data":{}},
+			{"id":"e2","source":"request","target":"process","data":{"outcome":"submitted"}},
+			{"id":"e3","source":"process","target":"end","data":{"outcome":"approved"}}
 		]
 	}`, userID)
 }
@@ -170,6 +171,41 @@ func TestExtractJSON_Invalid(t *testing.T) {
 	_, err := extractJSON(input)
 	if err == nil {
 		t.Fatal("expected error for invalid input, got nil")
+	}
+}
+
+func TestExtractGeneratedIntakeFormSchema_NormalizesStringOptions(t *testing.T) {
+	workflow := json.RawMessage(`{"nodes":[{"id":"form1","type":"form","data":{"formSchema":{"fields":[{"key":"reason","type":"select","label":"Reason","options":["ops","security"]}]}}}],"edges":[]}`)
+
+	schemaJSON, errs := extractGeneratedIntakeFormSchema(workflow)
+	if len(errs) > 0 {
+		t.Fatalf("expected schema extraction to pass, got %+v", errs)
+	}
+	var schema struct {
+		Fields []struct {
+			Key      string `json:"key"`
+			Required bool   `json:"required"`
+			Options  []struct {
+				Label string `json:"label"`
+				Value string `json:"value"`
+			} `json:"options"`
+		} `json:"fields"`
+	}
+	if err := json.Unmarshal(schemaJSON, &schema); err != nil {
+		t.Fatalf("unmarshal schema: %v", err)
+	}
+	if len(schema.Fields) != 1 || schema.Fields[0].Key != "reason" || !schema.Fields[0].Required {
+		t.Fatalf("unexpected normalized schema: %s", schemaJSON)
+	}
+	if len(schema.Fields[0].Options) != 2 || schema.Fields[0].Options[0].Value != "ops" {
+		t.Fatalf("expected string options to be normalized, got %s", schemaJSON)
+	}
+}
+
+func TestExtractGeneratedIntakeFormSchema_RequiresFormSchema(t *testing.T) {
+	_, errs := extractGeneratedIntakeFormSchema(json.RawMessage(`{"nodes":[{"id":"start","type":"start","data":{}}],"edges":[]}`))
+	if len(errs) == 0 || errs[0].Level != "blocking" {
+		t.Fatalf("expected missing form schema blocking error, got %+v", errs)
 	}
 }
 
@@ -430,7 +466,7 @@ func TestGenerate_RetriesValidationFailure(t *testing.T) {
 
 func TestWorkflowGenerateHandlerReturnsOKForParsableWorkflowWithBlockingIssues(t *testing.T) {
 	client := &fakeWorkflowLLMClient{
-		responses: []llm.ChatResponse{{Content: `{"nodes":[],"edges":[]}`}},
+		responses: []llm.ChatResponse{{Content: workflowWithBlockingIssueForGenerateTest(42)}},
 	}
 	h := &WorkflowGenerateHandler{svc: newWorkflowGenerateServiceForRetryTest(client, 0)}
 	c, rec := newGinContext(http.MethodPost, "/api/v1/itsm/workflows/generate")
@@ -513,7 +549,7 @@ func TestBuildGenerateResponse_PersistsWorkflowAndHealthSnapshot(t *testing.T) {
 	resp, err := svc.buildGenerateResponse(&GenerateRequest{
 		ServiceID:         service.ID,
 		CollaborationSpec: "用户提交申请后直属经理处理",
-	}, workflowJSON, 0, nil)
+	}, workflowJSON, nil, 0, nil)
 	if err != nil {
 		t.Fatalf("build response: %v", err)
 	}
@@ -522,6 +558,9 @@ func TestBuildGenerateResponse_PersistsWorkflowAndHealthSnapshot(t *testing.T) {
 	}
 	if string(resp.Service.WorkflowJSON) != string(workflowJSON) {
 		t.Fatalf("expected workflow json to be saved, got %s", resp.Service.WorkflowJSON)
+	}
+	if len(resp.Service.IntakeFormSchema) == 0 {
+		t.Fatal("expected generated intake form schema to be saved")
 	}
 	if resp.Service.CollaborationSpec != "用户提交申请后直属经理处理" {
 		t.Fatalf("expected collaboration spec to be saved, got %q", resp.Service.CollaborationSpec)
@@ -564,7 +603,7 @@ func TestBuildGenerateResponse_PersistsBlockingDraftAndHealthFailure(t *testing.
 	resp, err := svc.buildGenerateResponse(&GenerateRequest{
 		ServiceID:         service.ID,
 		CollaborationSpec: "用户提交申请后由处理人处理",
-	}, workflowJSON, 0, validationErrors)
+	}, workflowJSON, nil, 0, validationErrors)
 	if err != nil {
 		t.Fatalf("build response: %v", err)
 	}

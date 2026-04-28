@@ -8,6 +8,7 @@ import (
 	. "metis/internal/app/itsm/catalog"
 	. "metis/internal/app/itsm/config"
 	. "metis/internal/app/itsm/domain"
+	"strconv"
 	"strings"
 	"time"
 
@@ -224,6 +225,12 @@ func (s *ServiceDefService) computePublishHealthCheckWithAI(ctx context.Context,
 	if s.engineConfigSvc == nil {
 		return nil, fmt.Errorf("发布健康检查引擎未初始化")
 	}
+
+	baseCheck := s.computePublishHealthCheckBase(svc)
+	if svc.EngineType == "classic" || baseCheck.Status != "pass" {
+		return baseCheck, nil
+	}
+
 	engineCfg, err := s.engineConfigSvc.HealthCheckRuntimeConfig()
 	if err != nil {
 		return nil, err
@@ -279,14 +286,252 @@ func (s *ServiceDefService) computePublishHealthCheckWithAI(ctx context.Context,
 	if err := json.Unmarshal(raw, &parsed); err != nil {
 		return nil, fmt.Errorf("发布健康检查输出格式无效: %w", err)
 	}
-	return normalizePublishHealthCheck(svc.ID, parsed.Status, parsed.Items, validationCtx), nil
+	return mergePublishHealthChecks(baseCheck, normalizePublishHealthCheck(svc.ID, parsed.Status, parsed.Items, validationCtx)), nil
+}
+
+func (s *ServiceDefService) computePublishHealthCheckBase(svc *ServiceDefinition) *ServiceHealthCheck {
+	check := &ServiceHealthCheck{ServiceID: svc.ID, Status: "pass", Items: []ServiceHealthItem{}}
+	add := func(item *ServiceHealthItem) {
+		if item == nil {
+			return
+		}
+		check.Items = append(check.Items, *item)
+		if healthLevel(item.Status) > healthLevel(check.Status) {
+			check.Status = normalizePublishHealthStatus(item.Status)
+		}
+	}
+
+	if svc.EngineType == "classic" {
+		if len(svc.WorkflowJSON) == 0 {
+			add(&ServiceHealthItem{Key: "workflow", Label: "流程定义", Status: "fail", Message: "经典引擎必须配置可执行工作流"})
+		} else if err := validateWorkflowJSON(json.RawMessage(svc.WorkflowJSON)); err != nil {
+			add(&ServiceHealthItem{Key: "workflow", Label: "流程定义", Status: "fail", Message: err.Error()})
+		}
+		return check
+	}
+
+	if strings.TrimSpace(svc.CollaborationSpec) == "" {
+		add(&ServiceHealthItem{Key: "collaboration_spec", Label: "协作规范", Status: "fail", Message: "协作规范为空，智能引擎缺少决策策略"})
+	}
+	if !hasUsableIntakeFormSchema(svc.IntakeFormSchema) {
+		add(&ServiceHealthItem{Key: "intake_form", Label: "申请表单", Status: "warn", Message: "尚未生成申请确认表单，请先生成参考路径后再在服务台使用"})
+	}
+	if svc.AgentID == nil || *svc.AgentID == 0 {
+		add(&ServiceHealthItem{Key: "service_agent", Label: "服务 Agent", Status: "fail", Message: "智能服务未绑定 Agent"})
+	} else if err := s.validateAgent(svc.AgentID); err != nil {
+		add(&ServiceHealthItem{Key: "service_agent", Label: "服务 Agent", Status: "fail", Message: "绑定的 Agent 不存在或未启用"})
+	}
+
+	decisionAgentID := strings.TrimSpace(s.systemConfigValue(SmartTicketDecisionAgentKey))
+	switch {
+	case decisionAgentID == "", decisionAgentID == "0":
+		add(&ServiceHealthItem{Key: "decision_agent", Label: "流程决策岗", Status: "fail", Message: "流程决策岗未上岗"})
+	default:
+		id, err := strconv.ParseUint(decisionAgentID, 10, 64)
+		if err != nil {
+			add(&ServiceHealthItem{Key: "decision_agent", Label: "流程决策岗", Status: "fail", Message: "流程决策岗配置值不是有效智能体 ID"})
+		} else if agentID := uint(id); agentID == 0 || s.validateAgent(&agentID) != nil {
+			add(&ServiceHealthItem{Key: "decision_agent", Label: "流程决策岗", Status: "fail", Message: "流程决策岗上岗智能体不存在或未启用"})
+		}
+	}
+
+	decisionMode := normalizedHealthDecisionMode(s.systemConfigValue(SmartTicketDecisionModeKey))
+	add(s.checkPathEngineRisk())
+	add(s.checkReferencePathRisk(svc, decisionMode))
+	add(s.checkFallbackRisk())
+	return check
+}
+
+func mergePublishHealthChecks(base, extra *ServiceHealthCheck) *ServiceHealthCheck {
+	if base == nil {
+		return extra
+	}
+	if extra == nil {
+		return base
+	}
+	items := make([]ServiceHealthItem, 0, len(base.Items)+len(extra.Items))
+	items = append(items, base.Items...)
+	items = append(items, extra.Items...)
+	status := base.Status
+	if healthLevel(extra.Status) > healthLevel(status) {
+		status = extra.Status
+	}
+	return &ServiceHealthCheck{ServiceID: base.ServiceID, Status: normalizePublishHealthStatus(status), Items: items}
+}
+
+func hasUsableIntakeFormSchema(raw JSONField) bool {
+	if len(raw) == 0 {
+		return false
+	}
+	var schema struct {
+		Fields []json.RawMessage `json:"fields"`
+	}
+	if err := json.Unmarshal([]byte(raw), &schema); err != nil {
+		return false
+	}
+	return len(schema.Fields) > 0
+}
+
+func (s *ServiceDefService) checkPathEngineRisk() *ServiceHealthItem {
+	modelID := strings.TrimSpace(s.systemConfigValue(SmartTicketPathModelKey))
+	if modelID == "" || modelID == "0" {
+		return &ServiceHealthItem{Key: "path_engine", Label: "参考路径生成", Status: "fail", Message: "参考路径生成未配置模型，无法生成协作路径"}
+	}
+	id, err := strconv.ParseUint(modelID, 10, 64)
+	if err != nil || id == 0 || s.validateEngineModel(uint(id)) != nil {
+		return &ServiceHealthItem{Key: "path_engine", Label: "参考路径生成", Status: "fail", Message: "参考路径生成模型不存在或未启用，无法生成协作路径"}
+	}
+	return nil
+}
+
+func (s *ServiceDefService) validateEngineModel(modelID uint) error {
+	var modelRow struct {
+		ID             uint
+		Status         string
+		ProviderStatus string
+	}
+	if err := s.db.Table("ai_models").
+		Select("ai_models.id, ai_models.status, ai_providers.status AS provider_status").
+		Joins("JOIN ai_providers ON ai_providers.id = ai_models.provider_id").
+		Where("ai_models.id = ?", modelID).
+		First(&modelRow).Error; err != nil {
+		return err
+	}
+	if modelRow.Status != ai.ModelStatusActive || modelRow.ProviderStatus != ai.ProviderStatusActive {
+		return ErrModelNotFound
+	}
+	return nil
+}
+
+func (s *ServiceDefService) systemConfigValue(key string) string {
+	var value string
+	_ = s.db.Table("system_configs").Where("\"key\" = ?", key).Select("value").Scan(&value).Error
+	return value
+}
+
+func normalizedHealthDecisionMode(decisionMode string) string {
+	if strings.TrimSpace(decisionMode) == "" {
+		return "direct_first"
+	}
+	return strings.TrimSpace(decisionMode)
+}
+
+func (s *ServiceDefService) checkReferencePathRisk(svc *ServiceDefinition, decisionMode string) *ServiceHealthItem {
+	if len(svc.WorkflowJSON) == 0 {
+		if decisionMode == "direct_first" {
+			return &ServiceHealthItem{Key: "reference_path", Label: "参考路径", Status: "warn", Message: "当前为 direct_first 模式，但未生成参考路径；运行时会退化为纯 AI 推理"}
+		}
+		return nil
+	}
+
+	validationErrors := engine.ValidateWorkflow(json.RawMessage(svc.WorkflowJSON))
+	for _, err := range validationErrors {
+		if !err.IsWarning() {
+			return &ServiceHealthItem{Key: "reference_path", Label: "参考路径", Status: "fail", Message: fmt.Sprintf("参考路径结构错误：%s", err.Message)}
+		}
+	}
+	for _, err := range validationErrors {
+		if err.IsWarning() {
+			return &ServiceHealthItem{Key: "reference_path", Label: "参考路径", Status: "warn", Message: err.Message}
+		}
+	}
+
+	def, err := engine.ParseWorkflowDef(json.RawMessage(svc.WorkflowJSON))
+	if err != nil {
+		return &ServiceHealthItem{Key: "reference_path", Label: "参考路径", Status: "fail", Message: fmt.Sprintf("参考路径 JSON 解析失败：%v", err)}
+	}
+	if decisionMode == "direct_first" && !workflowHasExtractableHints(def) {
+		return &ServiceHealthItem{Key: "reference_path", Label: "参考路径", Status: "warn", Message: "当前为 direct_first 模式，但参考路径无法提取有效运行提示；运行时会退化为纯 AI 推理"}
+	}
+	if issue := s.checkWorkflowActionRisk(svc.ID, def); issue != nil {
+		return issue
+	}
+	if issue := s.checkWorkflowParticipantRisk(def); issue != nil {
+		return issue
+	}
+	return nil
+}
+
+func workflowHasExtractableHints(def *engine.WorkflowDef) bool {
+	if def == nil {
+		return false
+	}
+	for _, node := range def.Nodes {
+		switch node.Type {
+		case engine.NodeStart, engine.NodeEnd:
+			continue
+		default:
+			return true
+		}
+	}
+	return len(def.Edges) > 0
+}
+
+func (s *ServiceDefService) checkWorkflowActionRisk(serviceID uint, def *engine.WorkflowDef) *ServiceHealthItem {
+	if def == nil {
+		return nil
+	}
+	for _, node := range def.Nodes {
+		if node.Type != engine.NodeAction {
+			continue
+		}
+		data, err := engine.ParseNodeData(node.Data)
+		if err != nil {
+			return &ServiceHealthItem{Key: "reference_path_action", Label: "参考路径动作", Status: "warn", Message: fmt.Sprintf("动作节点 %s 配置无法解析：%v", node.ID, err)}
+		}
+		if data.ActionID == 0 {
+			return &ServiceHealthItem{Key: "reference_path_action", Label: "参考路径动作", Status: "warn", Message: fmt.Sprintf("动作节点 %s 未绑定可执行动作", node.ID)}
+		}
+		var count int64
+		s.db.Model(&ServiceAction{}).Where("id = ? AND service_id = ? AND is_active = ?", data.ActionID, serviceID, true).Count(&count)
+		if count == 0 {
+			return &ServiceHealthItem{Key: "reference_path_action", Label: "参考路径动作", Status: "warn", Message: fmt.Sprintf("动作节点 %s 引用的动作 ID=%d 不存在或未启用", node.ID, data.ActionID)}
+		}
+	}
+	return nil
+}
+
+func (s *ServiceDefService) checkWorkflowParticipantRisk(def *engine.WorkflowDef) *ServiceHealthItem {
+	if def == nil {
+		return nil
+	}
+	for _, node := range def.Nodes {
+		if node.Type != engine.NodeForm && node.Type != engine.NodeApprove && node.Type != engine.NodeProcess {
+			continue
+		}
+		data, err := engine.ParseNodeData(node.Data)
+		if err != nil {
+			return &ServiceHealthItem{Key: "reference_path_participant", Label: "参考路径参与者", Status: "warn", Message: fmt.Sprintf("人工节点 %s 参与者配置无法解析：%v", node.ID, err)}
+		}
+		if len(data.Participants) == 0 {
+			return &ServiceHealthItem{Key: "reference_path_participant", Label: "参考路径参与者", Status: "warn", Message: fmt.Sprintf("人工节点 %s 未配置参与者，运行时需要 AI 额外判断处理人", node.ID)}
+		}
+	}
+	return nil
+}
+
+func (s *ServiceDefService) checkFallbackRisk() *ServiceHealthItem {
+	if s.engineConfigSvc == nil {
+		return nil
+	}
+	fallbackID := s.engineConfigSvc.FallbackAssigneeID()
+	if fallbackID == 0 {
+		return nil
+	}
+	var user struct {
+		IsActive bool
+	}
+	if err := s.db.Table("users").Where("id = ? AND deleted_at IS NULL", fallbackID).Select("is_active").First(&user).Error; err != nil || !user.IsActive {
+		return &ServiceHealthItem{Key: "fallback_assignee", Label: "兜底处理人", Status: "warn", Message: "兜底处理人不存在或未启用，参与者无法解析时将无法自动兜底"}
+	}
+	return nil
 }
 
 func (s *ServiceDefService) buildPublishHealthPayload(svc *ServiceDefinition) (map[string]any, publishHealthValidationContext, error) {
 	actions := make([]map[string]any, 0)
 	var actionRows []ServiceAction
 	if err := s.db.DB.Where("service_id = ? AND deleted_at IS NULL", svc.ID).Order("id asc").Find(&actionRows).Error; err != nil {
-		return nil, publishHealthValidationContext{}, fmt.Errorf("读取服务动作失败: %w", err)
+		return nil, publishHealthValidationContext{}, fmt.Errorf("璇诲彇鏈嶅姟鍔ㄤ綔澶辫触: %w", err)
 	}
 	for _, action := range actionRows {
 		actions = append(actions, map[string]any{
