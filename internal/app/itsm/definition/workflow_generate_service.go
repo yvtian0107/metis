@@ -438,6 +438,20 @@ func (s *WorkflowGenerateService) buildUserMessage(spec string, actionsCtx strin
 			sb.WriteString("- 如果没有可用动作 id，或动作应由智能体运行时通过工具调用完成，不要生成 action 节点；请改用 process/notify/end 表达参考路径。\n")
 			sb.WriteString("- 保留人工处理语义：人工处理、并行处理、部门岗位处理必须使用 type=\"process\"，不能写成 action。\n")
 		}
+		if validationErrorsRequireRejectedEdgeRepair(prevErrors) {
+			sb.WriteString("\n## 人工节点出边修正要求\n\n")
+			sb.WriteString("- 每个 type=\"process\" 节点都必须有且仅有两条决策出边：一条 data.outcome=\"approved\"，一条 data.outcome=\"rejected\"。\n")
+			sb.WriteString("- rejected 出边不能省略，且不能和 approved 指向同一个目标节点。\n")
+			sb.WriteString("- 如果协作规范没有明确写驳回后补充、返工或恢复路径，rejected 出边必须指向统一的驳回结束终态 end_rejected。\n")
+			sb.WriteString("- 不要凭空生成“退回申请人补充”或 form 返工节点；只有协作规范明确写了补充/返工路径时才允许这样生成。\n")
+			sb.WriteString("- 多个 process 节点如果驳回后都是关闭，应复用同一个 end_rejected；通过后都是完成，应复用同一个 end_completed。\n")
+		}
+		if validationErrorsRequireGatewayRepair(prevErrors) {
+			sb.WriteString("\n## 网关修正要求\n\n")
+			sb.WriteString("- exclusive 只表示条件分支，必须至少两条出边；不要用 exclusive 表示并行汇聚或单出边汇聚。\n")
+			sb.WriteString("- 并行拆分必须使用 type=\"parallel\" 且 data.gateway_direction=\"fork\"；并行汇聚必须使用 type=\"parallel\" 且 data.gateway_direction=\"join\"。\n")
+			sb.WriteString("- parallel fork 至少两条出边；parallel join 至少两条入边且有且仅有一条出边。\n")
+		}
 	}
 
 	sb.WriteString("\n\n请仅输出合法的 JSON，不要包含任何额外文字或 markdown 代码块标记。")
@@ -467,6 +481,35 @@ func validationErrorsRequireActionRepair(validationErrors []engine.ValidationErr
 		msg := validationErr.Message
 		if strings.Contains(msg, "action_id") ||
 			strings.Contains(msg, "动作节点") {
+			return true
+		}
+	}
+	return false
+}
+
+func validationErrorsRequireRejectedEdgeRepair(validationErrors []engine.ValidationError) bool {
+	for _, validationErr := range validationErrors {
+		msg := validationErr.Message
+		if strings.Contains(msg, `outcome="approved"`) ||
+			strings.Contains(msg, `outcome="rejected"`) ||
+			strings.Contains(msg, "驳回路径") ||
+			strings.Contains(msg, "end_rejected") ||
+			strings.Contains(msg, "approved 和 rejected") {
+			return true
+		}
+	}
+	return false
+}
+
+func validationErrorsRequireGatewayRepair(validationErrors []engine.ValidationError) bool {
+	for _, validationErr := range validationErrors {
+		msg := validationErr.Message
+		if strings.Contains(msg, "排他网关") ||
+			strings.Contains(msg, "并行网关") ||
+			strings.Contains(msg, "包含网关") ||
+			strings.Contains(msg, "gateway_direction") ||
+			strings.Contains(msg, "fork") ||
+			strings.Contains(msg, "join") {
 			return true
 		}
 	}

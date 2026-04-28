@@ -25,6 +25,7 @@ const dbBackupCollaborationSpec = `这是一个数据库备份白名单临时放
 预检使用后，交给信息部的数据库管理员岗位处理，处理参与者类型必须使用 position_department，部门编码使用 it，岗位编码使用 db_admin。
 处理完成后，你需要调用放行动作（apply）完成实际的白名单配置。放行动作执行成功后，流程立即结束，不再创建任何新的处理、处理或通知活动。
 注意：预检动作和放行动作由流程决策智能体在运行时通过 decision.execute_action 工具调用完成，workflow_json 只表达参考路径，禁止在 workflow_json 中生成 type="action" 的动作节点。
+协作规范没有定义驳回后补充或返工路径；每个人工 process 节点的 rejected 出边都应指向统一的驳回结束终态 end_rejected，不能退回申请人补充。
 不要让申请人在表单里自己选择处理类别，流程决策智能体应根据上下文在运行时决定。
 不需要额外生成取消分支。`
 

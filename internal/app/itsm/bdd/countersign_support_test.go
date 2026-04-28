@@ -22,6 +22,8 @@ const countersignCollaborationSpec = `这是一个多角色并行处理申请服
 你必须使用 execution_mode: "parallel"，在 activities 数组中同时列出两个处理人，participant_type 使用 position_department。
 只有当全部并行处理处理都完成后，工单才可以汇聚到信息部运维管理员（position_department: it/ops_admin）的最终单签处理节点。
 所有人工处理节点都必须使用 type="process"，禁止把并行处理或最终处理写成 type="action"；本服务没有任何系统动作节点。
+参考路径中需要表达并行拆分与汇聚时，必须使用 type="parallel" 且 data.gateway_direction 分别为 "fork" 和 "join"；不要使用 exclusive 作为汇聚节点。
+协作规范没有定义驳回后补充或返工路径；每个人工 process 节点的 rejected 出边都应指向统一的驳回结束终态 end_rejected，不能退回申请人补充。
 最终单签处理完成后直接结束流程，不需要额外生成取消分支。`
 
 // countersignCasePayload defines test data for a single countersign BDD scenario.

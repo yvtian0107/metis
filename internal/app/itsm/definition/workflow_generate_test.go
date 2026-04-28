@@ -279,6 +279,48 @@ func TestBuildUserMessage_WithPrevErrors(t *testing.T) {
 	}
 }
 
+func TestBuildUserMessage_GuidesRejectedEdgeRepair(t *testing.T) {
+	svc := &WorkflowGenerateService{}
+	prevErrors := []engine.ValidationError{
+		{NodeID: "node-process", Level: "blocking", Message: `process 节点 node-process 缺少 outcome="rejected" 的出边；协作规范未定义驳回路径时 rejected 应指向统一的驳回结束终态 end_rejected`},
+	}
+	msg := svc.buildUserMessage("处理流程", "", prevErrors)
+
+	requiredSnippets := []string{
+		"人工节点出边修正要求",
+		`data.outcome="approved"`,
+		`data.outcome="rejected"`,
+		"统一的驳回结束终态 end_rejected",
+		"不要凭空生成“退回申请人补充”",
+	}
+	for _, snippet := range requiredSnippets {
+		if !strings.Contains(msg, snippet) {
+			t.Fatalf("message missing rejected edge repair guidance: %s", snippet)
+		}
+	}
+}
+
+func TestBuildUserMessage_GuidesGatewayRepair(t *testing.T) {
+	svc := &WorkflowGenerateService{}
+	prevErrors := []engine.ValidationError{
+		{NodeID: "node-converge", Level: "blocking", Message: "排他网关节点 node-converge 至少需要两条出边"},
+	}
+	msg := svc.buildUserMessage("并行处理流程", "", prevErrors)
+
+	requiredSnippets := []string{
+		"网关修正要求",
+		"exclusive 只表示条件分支",
+		`type="parallel"`,
+		`data.gateway_direction="fork"`,
+		`data.gateway_direction="join"`,
+	}
+	for _, snippet := range requiredSnippets {
+		if !strings.Contains(msg, snippet) {
+			t.Fatalf("message missing gateway repair guidance: %s", snippet)
+		}
+	}
+}
+
 func TestPathBuilderSystemPromptRequiresHumanNodeParticipants(t *testing.T) {
 	requiredSnippets := []string{
 		"所有 form/process 等人工节点必须在 data 中配置非空 participants 数组",
@@ -292,6 +334,20 @@ func TestPathBuilderSystemPromptRequiresHumanNodeParticipants(t *testing.T) {
 	for _, snippet := range requiredSnippets {
 		if !strings.Contains(PathBuilderSystemPrompt, snippet) {
 			t.Fatalf("system prompt missing required participant guidance: %s", snippet)
+		}
+	}
+}
+
+func TestPathBuilderSystemPromptGuidesParallelGateway(t *testing.T) {
+	requiredSnippets := []string{
+		"| parallel | 并行网关（拆分/汇聚） | label, nodeType, gateway_direction |",
+		`data.gateway_direction="fork"`,
+		`data.gateway_direction="join"`,
+		"不要用 exclusive 网关做并行汇聚",
+	}
+	for _, snippet := range requiredSnippets {
+		if !strings.Contains(PathBuilderSystemPrompt, snippet) {
+			t.Fatalf("system prompt missing parallel gateway guidance: %s", snippet)
 		}
 	}
 }
