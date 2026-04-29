@@ -657,6 +657,90 @@ func TestServiceDefServiceRefreshPublishHealthCheck_ServerAccessRolesPassWithVal
 	}
 }
 
+func TestServiceDefServiceRefreshPublishHealthCheck_FiltersLLMParticipantValidationGuess(t *testing.T) {
+	db := newTestDB(t)
+	svc := newServiceDefServiceForTest(t, db)
+	catSvc := newCatalogServiceForTest(t, db)
+
+	root, _ := catSvc.Create("Root", "root", "", "", nil, 10)
+	serviceAgent := createServiceHealthAgent(t, db, "service-agent", true)
+	decisionAgent := createServiceHealthAgent(t, db, "decision-agent", true)
+	setServiceHealthDecisionAgent(t, db, decisionAgent.ID)
+	seedServiceHealthPathEngine(t, db)
+	seedServerAccessParticipantOrgData(t, db)
+	service, err := svc.Create(&ServiceDefinition{
+		Name:              "生产服务器临时访问申请",
+		Code:              "server-access-participant-guess",
+		CatalogID:         root.ID,
+		EngineType:        "smart",
+		IntakeFormSchema:  serverAccessIntakeFormSchema(),
+		CollaborationSpec: "参与者类型必须使用 position_department，部门编码使用 it，岗位编码使用 ops_admin/network_admin/security_admin。",
+		AgentID:           &serviceAgent.ID,
+		WorkflowJSON:      JSONField(serverAccessRolesWorkflow()),
+	})
+	if err != nil {
+		t.Fatalf("create service: %v", err)
+	}
+
+	svc.engineConfigSvc = fakePublishHealthConfigProvider{cfg: testPublishHealthRuntimeConfig()}
+	svc.llmClientFactory = func(string, string, string) (llm.Client, error) {
+		return fakePublishHealthLLMClient{resp: &llm.ChatResponse{Content: `{"status":"fail","items":[{"key":"participant_validation_missing","label":"参与者验证缺失","status":"fail","message":"未验证参与者配置是否符合协作规范要求。","location":{"kind":"collaboration_spec","path":"service.collaborationSpec"},"recommendation":"确保所有流程节点的参与者配置与协作规范一致，例如部门编码和岗位编码是否正确。","evidence":"协作规范要求参与者类型为 position_department，且部门编码为 it，但未验证配置是否正确。"}]}`}}, nil
+	}
+
+	check, err := svc.RefreshPublishHealthCheck(service.ID)
+	if err != nil {
+		t.Fatalf("refresh health check: %v", err)
+	}
+	if check.Status != "pass" {
+		t.Fatalf("expected participant validation guess to be filtered, got %+v", check)
+	}
+	if serviceHealthHasItem(check, "participant_validation_missing", "fail") || serviceHealthHasItem(check, "health_engine", "fail") {
+		t.Fatalf("expected no participant validation false positive or health engine failure, got %+v", check.Items)
+	}
+}
+
+func TestServiceDefServiceRefreshPublishHealthCheck_KeepsConcreteParticipantMismatch(t *testing.T) {
+	db := newTestDB(t)
+	svc := newServiceDefServiceForTest(t, db)
+	catSvc := newCatalogServiceForTest(t, db)
+
+	root, _ := catSvc.Create("Root", "root", "", "", nil, 10)
+	serviceAgent := createServiceHealthAgent(t, db, "service-agent", true)
+	decisionAgent := createServiceHealthAgent(t, db, "decision-agent", true)
+	setServiceHealthDecisionAgent(t, db, decisionAgent.ID)
+	seedServiceHealthPathEngine(t, db)
+	seedServerAccessParticipantOrgData(t, db)
+	service, err := svc.Create(&ServiceDefinition{
+		Name:              "生产服务器临时访问申请",
+		Code:              "server-access-participant-mismatch",
+		CatalogID:         root.ID,
+		EngineType:        "smart",
+		IntakeFormSchema:  serverAccessIntakeFormSchema(),
+		CollaborationSpec: "网络抓包、连通性诊断、ACL 调整、负载均衡变更或防火墙策略调整交给 it/network_admin。",
+		AgentID:           &serviceAgent.ID,
+		WorkflowJSON:      JSONField(serverAccessRolesWorkflow()),
+	})
+	if err != nil {
+		t.Fatalf("create service: %v", err)
+	}
+
+	svc.engineConfigSvc = fakePublishHealthConfigProvider{cfg: testPublishHealthRuntimeConfig()}
+	svc.llmClientFactory = func(string, string, string) (llm.Client, error) {
+		return fakePublishHealthLLMClient{resp: &llm.ChatResponse{Content: `{"status":"warn","items":[{"key":"participant_mismatch","label":"参与者配置不一致","status":"warn","message":"network_process 的参与者配置与协作规范不一致。","location":{"kind":"workflow_node","path":"service.workflowJson.nodes[id=network_process].data.participants","refId":"network_process"},"recommendation":"将 network_process 的 position_code 调整为 network_admin，department_code 保持 it。","evidence":"实际 participant 为 {\"type\":\"position_department\",\"department_code\":\"it\",\"position_code\":\"ops_admin\"}；协作规范要求网络分支期望 participant 为 {\"type\":\"position_department\",\"department_code\":\"it\",\"position_code\":\"network_admin\"}。"}]}`}}, nil
+	}
+
+	check, err := svc.RefreshPublishHealthCheck(service.ID)
+	if err != nil {
+		t.Fatalf("refresh health check: %v", err)
+	}
+	if check.Status != "warn" {
+		t.Fatalf("expected concrete participant mismatch to remain warn, got %+v", check)
+	}
+	if !serviceHealthHasItem(check, "participant_mismatch", "warn") {
+		t.Fatalf("expected concrete participant mismatch item, got %+v", check.Items)
+	}
+}
+
 func TestServiceDefServiceHealthCheck_RefreshesLatestSnapshot(t *testing.T) {
 	db := newTestDB(t)
 	svc := newServiceDefServiceForTest(t, db)

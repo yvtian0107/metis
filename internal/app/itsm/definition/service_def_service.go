@@ -652,11 +652,11 @@ func normalizePublishHealthCheck(serviceID uint, status string, items []ServiceH
 	normalizedItems := make([]ServiceHealthItem, 0, len(items))
 	declaredStatus := normalizePublishHealthStatus(status)
 	maxLevel := healthLevel(declaredStatus)
-	skippedFallbackAssigneeIssue := false
-	invalidNonFallbackIssue := false
+	skippedNonActionableIssue := false
+	invalidActionableIssue := false
 	for idx, item := range items {
-		if isLLMFallbackAssigneeIssue(item) {
-			skippedFallbackAssigneeIssue = true
+		if isNonActionableLLMHealthIssue(item) {
+			skippedNonActionableIssue = true
 			continue
 		}
 		itemStatus := normalizePublishHealthStatus(item.Status)
@@ -683,7 +683,7 @@ func normalizePublishHealthCheck(serviceID uint, status string, items []ServiceH
 			RefID: strings.TrimSpace(item.Location.RefID),
 		}
 		if !isValidHealthLocation(location, ctx) || recommendation == "" || evidence == "" {
-			invalidNonFallbackIssue = true
+			invalidActionableIssue = true
 			continue
 		}
 		if itemLevel := healthLevel(itemStatus); itemLevel > maxLevel {
@@ -702,7 +702,7 @@ func normalizePublishHealthCheck(serviceID uint, status string, items []ServiceH
 
 	finalStatus := levelStatus(maxLevel)
 	if len(normalizedItems) == 0 && declaredStatus != "pass" {
-		if skippedFallbackAssigneeIssue && !invalidNonFallbackIssue && len(items) > 0 {
+		if skippedNonActionableIssue && !invalidActionableIssue && len(items) > 0 {
 			return &ServiceHealthCheck{
 				ServiceID: serviceID,
 				Status:    "pass",
@@ -717,6 +717,10 @@ func normalizePublishHealthCheck(serviceID uint, status string, items []ServiceH
 		Status:    finalStatus,
 		Items:     normalizedItems,
 	}
+}
+
+func isNonActionableLLMHealthIssue(item ServiceHealthItem) bool {
+	return isLLMFallbackAssigneeIssue(item) || isLLMParticipantValidationGuess(item)
 }
 
 func isLLMFallbackAssigneeIssue(item ServiceHealthItem) bool {
@@ -735,6 +739,63 @@ func isLLMFallbackAssigneeIssue(item ServiceHealthItem) bool {
 	}
 	text := label + " " + message + " " + evidence + " " + recommendation
 	return strings.Contains(text, "兜底处理人") && (strings.Contains(text, "校验") || strings.Contains(text, "验证"))
+}
+
+func isLLMParticipantValidationGuess(item ServiceHealthItem) bool {
+	key := strings.ToLower(strings.TrimSpace(item.Key))
+	path := strings.ToLower(strings.TrimSpace(item.Location.Path))
+	locationKind := strings.ToLower(strings.TrimSpace(item.Location.Kind))
+	refID := strings.TrimSpace(item.Location.RefID)
+	label := strings.ToLower(strings.TrimSpace(item.Label))
+	message := strings.ToLower(strings.TrimSpace(item.Message))
+	evidence := strings.ToLower(strings.TrimSpace(item.Evidence))
+	recommendation := strings.ToLower(strings.TrimSpace(item.Recommendation))
+	text := key + " " + label + " " + message + " " + evidence + " " + recommendation
+
+	if !isParticipantHealthText(key, path, text) || !isValidationGuessText(text) {
+		return false
+	}
+	if locationKind == "workflow_node" && refID != "" && hasConcreteParticipantConflictEvidence(text) {
+		return false
+	}
+	return true
+}
+
+func isParticipantHealthText(key string, path string, text string) bool {
+	if strings.Contains(key, "participant") || strings.Contains(key, "assignee") {
+		return true
+	}
+	if strings.Contains(path, "participant") || strings.Contains(path, "assignee") {
+		return true
+	}
+	keywords := []string{"参与者", "处理人", "单人", "岗位编码", "部门编码", "position_department", "position_code", "department_code"}
+	for _, keyword := range keywords {
+		if strings.Contains(text, strings.ToLower(keyword)) {
+			return true
+		}
+	}
+	return false
+}
+
+func isValidationGuessText(text string) bool {
+	keywords := []string{
+		"未验证", "未校验", "没有验证", "没有校验", "未明确验证", "未明确校验",
+		"缺少验证", "缺少校验", "验证缺失", "校验缺失", "验证不足", "校验不足",
+		"未提供校验", "未提供验证", "是否符合协作规范", "确保所有流程节点", "确保参与者",
+	}
+	for _, keyword := range keywords {
+		if strings.Contains(text, strings.ToLower(keyword)) {
+			return true
+		}
+	}
+	return false
+}
+
+func hasConcreteParticipantConflictEvidence(text string) bool {
+	hasActual := strings.Contains(text, "实际") || strings.Contains(text, "当前") || strings.Contains(text, "配置为") || strings.Contains(text, "实际值")
+	hasExpected := strings.Contains(text, "期望") || strings.Contains(text, "应为") || strings.Contains(text, "要求") || strings.Contains(text, "协作规范")
+	hasCode := strings.Contains(text, "position_code") || strings.Contains(text, "department_code") || strings.Contains(text, "ops_admin") || strings.Contains(text, "network_admin") || strings.Contains(text, "security_admin")
+	return hasActual && hasExpected && hasCode
 }
 
 func newPublishHealthEngineFailureCheck(serviceID uint, message string) *ServiceHealthCheck {
