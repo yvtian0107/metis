@@ -1064,7 +1064,7 @@ func SeedEngineConfig(db *gorm.DB) error {
 	for key, value := range defaults {
 		var existing model.SystemConfig
 		if err := db.Where("\"key\" = ?", key).First(&existing).Error; err == nil {
-			if key == SmartTicketPathSystemPromptKey && existing.Value != value {
+			if (key == SmartTicketPathSystemPromptKey || key == SmartTicketPublishHealthPromptKey) && existing.Value != value {
 				if err := db.Model(&model.SystemConfig{}).Where("\"key\" = ?", key).Update("value", value).Error; err != nil {
 					slog.Error("seed: failed to sync system config", "key", key, "error", err)
 				} else {

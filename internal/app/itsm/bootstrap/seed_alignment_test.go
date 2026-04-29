@@ -463,3 +463,34 @@ func TestSeedEngineConfigSyncsPathBuilderPromptDefault(t *testing.T) {
 		}
 	}
 }
+
+func TestSeedEngineConfigSyncsPublishHealthPromptDefault(t *testing.T) {
+	db := newSeedAlignmentDB(t)
+	if err := db.Create(&coremodel.SystemConfig{
+		Key:   SmartTicketPublishHealthPromptKey,
+		Value: "stale health prompt",
+	}).Error; err != nil {
+		t.Fatalf("create stale publish health prompt config: %v", err)
+	}
+
+	if err := SeedEngineConfig(db); err != nil {
+		t.Fatalf("seed engine config: %v", err)
+	}
+
+	var cfg coremodel.SystemConfig
+	if err := db.Where("\"key\" = ?", SmartTicketPublishHealthPromptKey).First(&cfg).Error; err != nil {
+		t.Fatalf("load publish health prompt config: %v", err)
+	}
+	if cfg.Value != prompts.PublishHealthSystemPromptDefault {
+		t.Fatalf("expected publish health prompt default to be synced")
+	}
+	for _, snippet := range []string{
+		"不要输出 runtime_config 类问题",
+		"不要检查审计日志存储",
+		"不要因为输入里未出现校验代码、校验逻辑、用户表数据、存储路径或基础设施说明",
+	} {
+		if !strings.Contains(cfg.Value, snippet) {
+			t.Fatalf("synced publish health prompt missing expected guidance: %s", snippet)
+		}
+	}
+}

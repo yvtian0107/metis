@@ -446,9 +446,23 @@ function ServiceHealthSection({
     onError: (err) => toast.error(err.message),
   })
   const displayStatus: ServiceHealthItem["status"] | "empty" = !health ? "empty" : health.status
+  const healthItems = health?.items ?? []
+  const hasNoIssues = !!health && displayStatus === "pass" && healthItems.length === 0
   const overall = healthTone(displayStatus)
   const OverallIcon = overall.icon
   const isLoading = isGenerating || refreshMut.isPending
+  const summaryTitle = displayStatus === "empty"
+    ? "暂无检查结果"
+    : hasNoIssues
+      ? "未发现运行前阻塞项"
+      : displayStatus === "pass"
+        ? "未发现运行风险"
+        : displayStatus === "warn"
+          ? "存在歧义，需确认"
+          : "请处理运行阻塞项"
+  const summaryDescription = hasNoIssues
+    ? "流程结构、参与者解析和服务引用已通过发布前检查。"
+    : "仅检查智能引擎运行前的阻塞项、歧义和失效引用。"
 
   return (
     <section className="flex min-h-[500px] flex-col">
@@ -497,20 +511,12 @@ function ServiceHealthSection({
         <div className="flex items-start gap-3 border-b border-border/45 px-4 py-3 text-sm">
           <OverallIcon className={cn("mt-0.5 h-4 w-4", overall.iconClassName)} />
           <div className="min-w-0 space-y-1">
-            <p className="font-medium">
-              {displayStatus === "empty"
-                  ? "暂无检查结果"
-                  : displayStatus === "pass"
-                    ? "未发现运行风险"
-                    : displayStatus === "warn"
-                      ? "存在歧义，需确认"
-                      : "请处理运行阻塞项"}
-            </p>
-            <p className="text-xs leading-5 text-muted-foreground">仅检查智能引擎运行前的阻塞项、歧义和失效引用。</p>
+            <p className="font-medium">{summaryTitle}</p>
+            <p className="text-xs leading-5 text-muted-foreground">{summaryDescription}</p>
           </div>
         </div>
         <div className="divide-y divide-border/45">
-          {(health?.items ?? []).map((item) => {
+          {healthItems.map((item) => {
             const tone = healthTone(item.status)
             const Icon = tone.icon
             const location = item.location ?? { kind: "runtime_config", path: "" }
@@ -552,9 +558,17 @@ function ServiceHealthSection({
               </div>
             )
           })}
-          {!health?.items?.length && (
-            <div className="px-4 py-5 text-sm text-muted-foreground">
-              {health ? "未发现需要处理的运行风险。" : "暂无检查结果。"}
+          {!healthItems.length && (
+            <div className="flex min-h-[180px] items-center justify-center px-5 py-8 text-center">
+              {hasNoIssues ? (
+                <div className="max-w-[260px] space-y-2">
+                  <CheckCircle2 className="mx-auto h-5 w-5 text-emerald-600" />
+                  <p className="text-sm font-medium text-foreground">未发现运行前阻塞项</p>
+                  <p className="text-xs leading-5 text-muted-foreground">没有需要处理的歧义、失效引用或参与者解析问题。</p>
+                </div>
+              ) : (
+                <p className="text-sm text-muted-foreground">暂无检查结果。</p>
+              )}
             </div>
           )}
         </div>

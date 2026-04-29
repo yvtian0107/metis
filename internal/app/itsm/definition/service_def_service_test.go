@@ -281,7 +281,7 @@ func TestServiceDefServiceRefreshPublishHealthCheck_SavesAISnapshot(t *testing.T
 	}
 }
 
-func TestServiceDefServiceRefreshPublishHealthCheck_FailureBlocks(t *testing.T) {
+func TestServiceDefServiceRefreshPublishHealthCheck_LLMFailureFallsBackToBasePass(t *testing.T) {
 	db := newTestDB(t)
 	svc := newServiceDefServiceForTest(t, db)
 	catSvc := newCatalogServiceForTest(t, db)
@@ -311,11 +311,11 @@ func TestServiceDefServiceRefreshPublishHealthCheck_FailureBlocks(t *testing.T) 
 	if err != nil {
 		t.Fatalf("refresh health check should not return error when llm fails: %v", err)
 	}
-	if check.Status != "fail" {
-		t.Fatalf("expected fail status, got %+v", check)
+	if check.Status != "pass" {
+		t.Fatalf("expected base pass status when llm fails, got %+v", check)
 	}
-	if len(check.Items) != 1 || check.Items[0].Key != "health_engine" || check.Items[0].Status != "fail" {
-		t.Fatalf("expected health_engine fail item, got %+v", check.Items)
+	if len(check.Items) != 0 || serviceHealthHasItem(check, "health_engine", "fail") {
+		t.Fatalf("expected no service-level health_engine failure, got %+v", check.Items)
 	}
 }
 
@@ -364,6 +364,46 @@ func TestServiceDefServiceRefreshPublishHealthCheck_WarnsOnMissingSmartIntakeFor
 	}
 	if serviceHealthHasItem(check, "intake_form", "warn") {
 		t.Fatalf("expected intake_form warning to clear, got %+v", check.Items)
+	}
+}
+
+func TestServiceDefServiceRefreshPublishHealthCheck_LLMFailureKeepsBaseWarning(t *testing.T) {
+	db := newTestDB(t)
+	svc := newServiceDefServiceForTest(t, db)
+	svc.engineConfigSvc = fakePublishHealthConfigProvider{err: ErrEngineNotConfigured}
+	catSvc := newCatalogServiceForTest(t, db)
+
+	root, _ := catSvc.Create("Root", "root", "", "", nil, 10)
+	user := createServiceHealthUser(t, db, "operator", true)
+	serviceAgent := createServiceHealthAgent(t, db, "service-agent", true)
+	decisionAgent := createServiceHealthAgent(t, db, "decision-agent", true)
+	setServiceHealthDecisionAgent(t, db, decisionAgent.ID)
+	seedServiceHealthPathEngine(t, db)
+	service, err := svc.Create(&ServiceDefinition{
+		Name:              "Smart",
+		Code:              "smart-health-base-warning",
+		CatalogID:         root.ID,
+		EngineType:        "smart",
+		CollaborationSpec: "collect request details and route them",
+		AgentID:           &serviceAgent.ID,
+		WorkflowJSON:      JSONField(validServiceHealthWorkflow(user.ID)),
+	})
+	if err != nil {
+		t.Fatalf("create service: %v", err)
+	}
+
+	check, err := svc.RefreshPublishHealthCheck(service.ID)
+	if err != nil {
+		t.Fatalf("refresh health check: %v", err)
+	}
+	if check.Status != "warn" {
+		t.Fatalf("expected base warning status when llm fails, got %+v", check)
+	}
+	if !serviceHealthHasItem(check, "intake_form", "warn") {
+		t.Fatalf("expected intake_form warning to remain, got %+v", check.Items)
+	}
+	if serviceHealthHasItem(check, "health_engine", "fail") {
+		t.Fatalf("llm failure should not overwrite base warning: %+v", check.Items)
 	}
 }
 
@@ -656,6 +696,112 @@ func TestServiceDefServiceRefreshPublishHealthCheck_ServerAccessRolesPassWithVal
 	if serviceHealthHasItem(check, "fallback_assignee", "warn") || serviceHealthHasItem(check, "reference_path_participant", "fail") {
 		t.Fatalf("expected no fallback or participant issue, got %+v", check.Items)
 	}
+
+	payload, _, err := svc.buildPublishHealthPayload(service)
+	if err != nil {
+		t.Fatalf("build publish health payload: %v", err)
+	}
+	runtimePayload, ok := payload["runtime"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected runtime payload map, got %+v", payload["runtime"])
+	}
+	if _, ok := runtimePayload["auditLevel"]; ok {
+		t.Fatalf("publish health llm payload should not expose raw auditLevel: %+v", runtimePayload)
+	}
+}
+
+func TestServiceDefServiceRefreshPublishHealthCheck_ServerAccessIgnoresInvalidLLMDiagnostics(t *testing.T) {
+	db := newTestDB(t)
+	svc := newServiceDefServiceForTest(t, db)
+	catSvc := newCatalogServiceForTest(t, db)
+
+	root, _ := catSvc.Create("Root", "root", "", "", nil, 10)
+	fallback := createServiceHealthUser(t, db, "fallback_owner", true)
+	serviceAgent := createServiceHealthAgent(t, db, "service-agent", true)
+	decisionAgent := createServiceHealthAgent(t, db, "decision-agent", true)
+	setServiceHealthDecisionAgent(t, db, decisionAgent.ID)
+	seedServiceHealthPathEngine(t, db)
+	seedServerAccessParticipantOrgData(t, db)
+	service, err := svc.Create(&ServiceDefinition{
+		Name:              "生产服务器临时访问申请",
+		Code:              "server-access-invalid-health-diagnostic",
+		CatalogID:         root.ID,
+		EngineType:        "smart",
+		IntakeFormSchema:  serverAccessIntakeFormSchema(),
+		CollaborationSpec: "用户在 IT 服务台提交生产服务器临时访问申请。服务台需要收集访问服务器、访问时段、操作目的和访问原因。应用发布、进程排障、日志排查、磁盘清理、主机巡检或生产运维操作交给 it/ops_admin；网络抓包、连通性诊断、ACL 调整、负载均衡变更或防火墙策略调整交给 it/network_admin；安全审计、入侵排查、漏洞修复验证、取证分析或合规检查交给 it/security_admin。参与者类型必须使用 position_department。",
+		AgentID:           &serviceAgent.ID,
+		WorkflowJSON:      JSONField(serverAccessRolesWorkflow()),
+	})
+	if err != nil {
+		t.Fatalf("create service: %v", err)
+	}
+
+	svc.engineConfigSvc = fakePublishHealthConfigProvider{cfg: testPublishHealthRuntimeConfig(), fallbackAssigneeID: fallback.ID}
+	svc.llmClientFactory = func(string, string, string) (llm.Client, error) {
+		return fakePublishHealthLLMClient{
+			resp: &llm.ChatResponse{
+				Content: `{"status":"fail","items":[{"key":"participant_validation_missing","label":"参与者验证缺失","status":"fail","message":"未验证参与者配置是否符合协作规范要求。","location":{"kind":"collaboration_spec","path":"service.collaborationSpec"},"recommendation":"确保所有流程节点的参与者配置与协作规范一致。","evidence":"未看到参与者校验逻辑。"}]}`,
+			},
+		}, nil
+	}
+
+	check, err := svc.RefreshPublishHealthCheck(service.ID)
+	if err != nil {
+		t.Fatalf("refresh health check: %v", err)
+	}
+	if check.Status != "pass" {
+		t.Fatalf("expected valid server access workflow to pass after discarding invalid llm diagnostics, got %+v", check)
+	}
+	if len(check.Items) != 0 || serviceHealthHasItem(check, "health_engine", "fail") {
+		t.Fatalf("expected no health_engine or llm diagnostic issue, got %+v", check.Items)
+	}
+}
+
+func TestServiceDefServiceRefreshPublishHealthCheck_FiltersLLMAuditRuntimeConfigGuess(t *testing.T) {
+	db := newTestDB(t)
+	svc := newServiceDefServiceForTest(t, db)
+	catSvc := newCatalogServiceForTest(t, db)
+
+	root, _ := catSvc.Create("Root", "root", "", "", nil, 10)
+	fallback := createServiceHealthUser(t, db, "fallback_owner", true)
+	serviceAgent := createServiceHealthAgent(t, db, "service-agent", true)
+	decisionAgent := createServiceHealthAgent(t, db, "decision-agent", true)
+	setServiceHealthDecisionAgent(t, db, decisionAgent.ID)
+	seedServiceHealthPathEngine(t, db)
+	seedServerAccessParticipantOrgData(t, db)
+	service, err := svc.Create(&ServiceDefinition{
+		Name:              "生产服务器临时访问申请",
+		Code:              "server-access-audit-runtime-guess",
+		CatalogID:         root.ID,
+		EngineType:        "smart",
+		IntakeFormSchema:  serverAccessIntakeFormSchema(),
+		CollaborationSpec: "用户在 IT 服务台提交生产服务器临时访问申请。服务台需要收集访问服务器、访问时段、操作目的和访问原因。应用发布、进程排障、日志排查、磁盘清理、主机巡检或生产运维操作交给 it/ops_admin；网络抓包、连通性诊断、ACL 调整、负载均衡变更或防火墙策略调整交给 it/network_admin；安全审计、入侵排查、漏洞修复验证、取证分析或合规检查交给 it/security_admin。参与者类型必须使用 position_department。",
+		AgentID:           &serviceAgent.ID,
+		WorkflowJSON:      JSONField(serverAccessRolesWorkflow()),
+	})
+	if err != nil {
+		t.Fatalf("create service: %v", err)
+	}
+
+	svc.engineConfigSvc = fakePublishHealthConfigProvider{cfg: testPublishHealthRuntimeConfig(), fallbackAssigneeID: fallback.ID}
+	svc.llmClientFactory = func(string, string, string) (llm.Client, error) {
+		return fakePublishHealthLLMClient{
+			resp: &llm.ChatResponse{
+				Content: `{"status":"warn","items":[{"key":"audit_config_missing","label":"缺少审计配置","status":"warn","message":"服务运行时配置未明确审计日志存储位置，可能影响后续审计追踪。","location":{"kind":"runtime_config","path":"runtime.auditLevel"},"recommendation":"确保审计日志存储位置已配置并可用，例如指定日志存储路径或服务。","evidence":"runtime.auditLevel 配置为 full，但未提供具体存储位置或相关说明。"}]}`,
+			},
+		}, nil
+	}
+
+	check, err := svc.RefreshPublishHealthCheck(service.ID)
+	if err != nil {
+		t.Fatalf("refresh health check: %v", err)
+	}
+	if check.Status != "pass" {
+		t.Fatalf("expected audit runtime guess to be discarded, got %+v", check)
+	}
+	if len(check.Items) != 0 || serviceHealthHasLocationKind(check, "runtime_config") {
+		t.Fatalf("expected no runtime_config llm issue, got %+v", check.Items)
+	}
 }
 
 func TestServiceDefServiceRefreshPublishHealthCheck_FiltersLLMParticipantValidationGuess(t *testing.T) {
@@ -800,7 +946,7 @@ func TestServiceDefServiceHealthCheck_RefreshesLatestSnapshot(t *testing.T) {
 	svc.llmClientFactory = func(string, string, string) (llm.Client, error) {
 		return fakePublishHealthLLMClient{
 			resp: &llm.ChatResponse{
-				Content: `{"status":"fail","items":[{"key":"workflow","label":"参考路径","status":"fail","message":"存在阻塞节点","location":{"kind":"runtime_config","path":"runtime.decisionMode"},"recommendation":"修复阻塞节点后重新检查。","evidence":"流程验证存在阻塞风险。"}]}`,
+				Content: `{"status":"fail","items":[{"key":"workflow","label":"参考路径","status":"fail","message":"存在阻塞节点","location":{"kind":"workflow_node","path":"service.workflowJson.nodes[id=form]","refId":"form"},"recommendation":"修复阻塞节点后重新检查。","evidence":"流程验证存在阻塞风险。"}]}`,
 			},
 		}, nil
 	}
@@ -846,11 +992,11 @@ func TestServiceDefServiceRefreshPublishHealthCheck_FiltersIncompleteItems(t *te
 	if err != nil {
 		t.Fatalf("refresh health check: %v", err)
 	}
-	if check.Status != "fail" {
-		t.Fatalf("expected fail status after filtering invalid items, got %+v", check)
+	if check.Status != "pass" {
+		t.Fatalf("expected pass status after discarding invalid llm diagnostics, got %+v", check)
 	}
-	if len(check.Items) != 1 || check.Items[0].Key != "health_engine" {
-		t.Fatalf("expected health_engine fail item, got %+v", check.Items)
+	if len(check.Items) != 0 || serviceHealthHasItem(check, "health_engine", "fail") {
+		t.Fatalf("expected no service-level health_engine failure, got %+v", check.Items)
 	}
 }
 
@@ -883,11 +1029,11 @@ func TestServiceDefServiceRefreshPublishHealthCheck_RejectsUnknownLocationPath(t
 	if err != nil {
 		t.Fatalf("refresh health check: %v", err)
 	}
-	if check.Status != "fail" {
-		t.Fatalf("expected fail status after filtering unmapped location, got %+v", check)
+	if check.Status != "pass" {
+		t.Fatalf("expected pass status after discarding unmapped llm location, got %+v", check)
 	}
-	if len(check.Items) != 1 || check.Items[0].Key != "health_engine" {
-		t.Fatalf("expected health_engine fail item, got %+v", check.Items)
+	if len(check.Items) != 0 || serviceHealthHasItem(check, "health_engine", "fail") {
+		t.Fatalf("expected no service-level health_engine failure, got %+v", check.Items)
 	}
 }
 
@@ -916,11 +1062,11 @@ func TestServiceDefServiceRefreshPublishHealthCheck_ActionIssuesNeedEvidence(t *
 	if err != nil {
 		t.Fatalf("refresh health check: %v", err)
 	}
-	if check.Status != "fail" {
-		t.Fatalf("expected fail status after filtering action issue without evidence, got %+v", check)
+	if check.Status != "pass" {
+		t.Fatalf("expected pass status after discarding invalid action diagnostic, got %+v", check)
 	}
-	if len(check.Items) != 1 || check.Items[0].Key != "health_engine" {
-		t.Fatalf("expected health_engine fail item, got %+v", check.Items)
+	if len(check.Items) != 0 || serviceHealthHasItem(check, "health_engine", "fail") {
+		t.Fatalf("expected no service-level health_engine failure, got %+v", check.Items)
 	}
 }
 
@@ -1123,6 +1269,15 @@ func serverAccessIntakeFormSchema() JSONField {
 func serviceHealthHasItem(check *ServiceHealthCheck, key string, status string) bool {
 	for _, item := range check.Items {
 		if item.Key == key && item.Status == status {
+			return true
+		}
+	}
+	return false
+}
+
+func serviceHealthHasLocationKind(check *ServiceHealthCheck, kind string) bool {
+	for _, item := range check.Items {
+		if item.Location.Kind == kind {
 			return true
 		}
 	}
