@@ -254,9 +254,17 @@ func (s *WorkflowGenerateService) buildGenerateResponse(req *GenerateRequest, wo
 	if err != nil {
 		return nil, err
 	}
-	health, err := s.serviceDefSvc.RefreshPublishHealthCheck(req.ServiceID)
-	if err != nil {
-		return nil, err
+	var health *ServiceHealthCheck
+	if blocking := workflowBlockingValidationErrors(validationErrors); len(blocking) > 0 {
+		health, err = s.serviceDefSvc.savePublishHealthCheck(req.ServiceID, publishHealthCheckFromValidationErrors(req.ServiceID, blocking))
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		health, err = s.serviceDefSvc.RefreshPublishHealthCheck(req.ServiceID)
+		if err != nil {
+			return nil, err
+		}
 	}
 	updated, err = s.serviceDefSvc.Get(updated.ID)
 	if err != nil {
@@ -408,6 +416,58 @@ func hasBlockingErrors(errs []engine.ValidationError) bool {
 		}
 	}
 	return false
+}
+
+func workflowBlockingValidationErrors(errs []engine.ValidationError) []engine.ValidationError {
+	blocking := make([]engine.ValidationError, 0, len(errs))
+	for _, e := range errs {
+		if !e.IsWarning() {
+			blocking = append(blocking, e)
+		}
+	}
+	return blocking
+}
+
+func publishHealthCheckFromValidationErrors(serviceID uint, errs []engine.ValidationError) *ServiceHealthCheck {
+	items := make([]ServiceHealthItem, 0, len(errs))
+	for i, validationErr := range errs {
+		message := strings.TrimSpace(validationErr.Message)
+		if message == "" {
+			message = "参考路径存在结构性阻塞项"
+		}
+		location := workflowValidationHealthLocation(validationErr)
+		items = append(items, ServiceHealthItem{
+			Key:            "reference_path",
+			Label:          "参考路径",
+			Status:         "fail",
+			Message:        message,
+			Location:       location,
+			Recommendation: "按提示修正参考路径结构后重新生成或刷新检查。",
+			Evidence:       fmt.Sprintf("工作流校验返回 blocking 错误 #%d: %s", i+1, message),
+		})
+	}
+	return &ServiceHealthCheck{ServiceID: serviceID, Status: "fail", Items: items}
+}
+
+func workflowValidationHealthLocation(validationErr engine.ValidationError) ServiceHealthLocation {
+	if edgeID := strings.TrimSpace(validationErr.EdgeID); edgeID != "" {
+		return ServiceHealthLocation{
+			Kind:  "workflow_edge",
+			Path:  fmt.Sprintf("service.workflowJson.edges[id=%s]", edgeID),
+			RefID: edgeID,
+		}
+	}
+	if nodeID := strings.TrimSpace(validationErr.NodeID); nodeID != "" {
+		return ServiceHealthLocation{
+			Kind:  "workflow_node",
+			Path:  fmt.Sprintf("service.workflowJson.nodes[id=%s]", nodeID),
+			RefID: nodeID,
+		}
+	}
+	return ServiceHealthLocation{
+		Kind: "collaboration_spec",
+		Path: "service.collaborationSpec",
+	}
 }
 
 // buildActionsContext formats available service actions for the LLM prompt.

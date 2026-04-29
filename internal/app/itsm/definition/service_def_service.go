@@ -197,6 +197,13 @@ func (s *ServiceDefService) RefreshPublishHealthCheck(id uint) (*ServiceHealthCh
 	if evalErr != nil {
 		check = newPublishHealthEngineFailureCheck(svc.ID, evalErr.Error())
 	}
+	return s.savePublishHealthCheck(id, check)
+}
+
+func (s *ServiceDefService) savePublishHealthCheck(id uint, check *ServiceHealthCheck) (*ServiceHealthCheck, error) {
+	if check == nil {
+		check = &ServiceHealthCheck{ServiceID: id, Status: "pass", Items: []ServiceHealthItem{}}
+	}
 	items, err := json.Marshal(check.Items)
 	if err != nil {
 		return nil, err

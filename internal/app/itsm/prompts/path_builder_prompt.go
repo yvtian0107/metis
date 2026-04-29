@@ -132,6 +132,16 @@ form 节点必须包含 formSchema，描述该节点需要收集的字段：
 其中 user_picker、dept_picker、rich_text、table 等高级类型仅在协作规范明确需要时使用；大多数场景使用 text/textarea/select/number/date/checkbox 即可。
 根据协作规范中描述的业务场景，推断合理的表单字段。排他网关 condition 中引用的 form.xxx 字段必须在上游 form 节点的 formSchema.fields 中有对应 key。
 
+### 生产服务器临时访问表单字段
+
+当协作规范描述“生产服务器临时访问申请”，并要求收集访问服务器、访问时段、操作目的、访问原因时，申请表单字段 key 必须稳定为：
+- server：访问服务器
+- access_time：访问时段
+- operation_purpose：操作目的
+- access_reason：访问原因
+
+后续排他网关必须基于 form.access_reason 路由，不要改用 form.reason、form.purpose、form.request_kind 或自然语言字段名。若访问原因分为运维、网络、安全三类，应使用 form.access_reason 的稳定枚举值表达分支条件。
+
 ## 排他网关（exclusive）条件格式
 
 排他网关的路由条件配置在**出边的 data.condition** 中（不是节点上）：

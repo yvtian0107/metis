@@ -8,6 +8,7 @@ import (
 	. "metis/internal/app/itsm/config"
 	. "metis/internal/app/itsm/domain"
 	orgdomain "metis/internal/app/org/domain"
+	"strings"
 	"testing"
 	"time"
 
@@ -1122,6 +1123,15 @@ func serverAccessIntakeFormSchema() JSONField {
 func serviceHealthHasItem(check *ServiceHealthCheck, key string, status string) bool {
 	for _, item := range check.Items {
 		if item.Key == key && item.Status == status {
+			return true
+		}
+	}
+	return false
+}
+
+func serviceHealthHasMessageContaining(check *ServiceHealthCheck, key string, snippet string) bool {
+	for _, item := range check.Items {
+		if item.Key == key && strings.Contains(item.Message, snippet) {
 			return true
 		}
 	}

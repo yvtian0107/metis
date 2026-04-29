@@ -453,4 +453,13 @@ func TestSeedEngineConfigSyncsPathBuilderPromptDefault(t *testing.T) {
 	if cfg.Value != prompts.PathBuilderSystemPromptDefault {
 		t.Fatalf("expected path prompt default to be synced")
 	}
+	for _, snippet := range []string{
+		"access_reason：访问原因",
+		"必须基于 form.access_reason 路由",
+		"rejected 出边都不可省略",
+	} {
+		if !strings.Contains(cfg.Value, snippet) {
+			t.Fatalf("synced path prompt missing expected guidance: %s", snippet)
+		}
+	}
 }
