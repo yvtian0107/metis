@@ -65,3 +65,21 @@ Feature: 生产服务器临时访问申请 — 智能引擎分支决策
     When 当前活动的被分配人认领并处理完成
     And 智能引擎执行决策循环直到工单完成
     Then 工单状态为 "completed"
+
+  Scenario: 安全分支驳回后不得改派到其他业务分支
+    Given "ops-access-requester" 已创建生产服务器访问工单，场景为 "security"
+    When 智能引擎执行决策循环
+    Then 工单状态为 "in_progress"
+    And 当前处理任务分配到岗位 "security_admin"
+    When 当前活动的被分配人认领并处理驳回
+    And 智能引擎再次执行决策循环
+    Then 工单状态为 "rejected"
+
+  Scenario: 网络分支驳回后不得改派到其他业务分支
+    Given "ops-access-requester" 已创建生产服务器访问工单，场景为 "network"
+    When 智能引擎执行决策循环
+    Then 工单状态为 "in_progress"
+    And 当前处理任务分配到岗位 "network_admin"
+    When 当前活动的被分配人认领并处理驳回
+    And 智能引擎再次执行决策循环
+    Then 工单状态为 "rejected"

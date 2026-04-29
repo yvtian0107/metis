@@ -1725,6 +1725,7 @@ func (e *SmartEngine) agenticDecision(ctx context.Context, tx *gorm.DB, ticketID
 		ticketID:            ticketID,
 		serviceID:           svc.ID,
 		workflowJSON:        svc.WorkflowJSON,
+		collaborationSpec:   svc.CollaborationSpec,
 		knowledgeSearcher:   e.knowledgeSearcher,
 		resolver:            e.resolver,
 		actionExecutor:      e.actionExecutor,
@@ -1803,9 +1804,10 @@ func (e *SmartEngine) buildInitialSeed(tx *gorm.DB, ticketID uint, svc *serviceM
 		Status      string
 		Source      string
 		PriorityID  uint
+		FormData    string
 	}
 	if err := tx.Table("itsm_tickets").Where("id = ?", ticketID).
-		Select("code, title, description, status, source, priority_id").
+		Select("code, title, description, status, source, priority_id, form_data").
 		First(&ticket).Error; err != nil {
 		return "", "", fmt.Errorf("ticket not found: %w", err)
 	}
@@ -1860,10 +1862,16 @@ func (e *SmartEngine) buildInitialSeed(tx *gorm.DB, ticketID uint, svc *serviceM
 			},
 		}
 	}
+	formData := map[string]any{}
+	if ticket.FormData != "" {
+		_ = json.Unmarshal([]byte(ticket.FormData), &formData)
+	}
+	var completedActivity *activityModel
 	if completedActivityID != nil && *completedActivityID > 0 {
 		data := NewDecisionDataStore(tx)
 		if completed, err := data.GetActivityByID(ticketID, *completedActivityID); err == nil {
 			// Lightweight anchor — full facts available via ticket_context tool
+			completedActivity = completed
 			seed["completed_activity"] = map[string]any{
 				"id":               completed.ID,
 				"outcome":          completed.TransitionOutcome,
@@ -1900,6 +1908,20 @@ func (e *SmartEngine) buildInitialSeed(tx *gorm.DB, ticketID uint, svc *serviceM
 						"target_node_type":  targetType,
 						"instruction":       instruction,
 					}
+				}
+			}
+		}
+	}
+	if branchInsights := buildBranchInsights(svc.WorkflowJSON, svc.CollaborationSpec, formData, "", "", completedActivity); len(branchInsights) > 0 {
+		for _, key := range []string{"selected_branch", "active_branch_contract", "current_branch_node_id", "allowed_next_branch_nodes", "completion_contract", "branch_reasoning_basis"} {
+			if value, ok := branchInsights[key]; ok {
+				seed[key] = value
+			}
+		}
+		if workflowCtx, ok := seed["workflow_context"].(map[string]any); ok {
+			for _, key := range []string{"selected_branch", "active_branch_contract", "current_branch_node_id", "allowed_next_branch_nodes", "completion_contract", "branch_reasoning_basis"} {
+				if value, ok := branchInsights[key]; ok {
+					workflowCtx[key] = value
 				}
 			}
 		}
@@ -1954,6 +1976,7 @@ func buildAgenticSystemPrompt(collaborationSpec, decisionMode, workflowJSON stri
 			prompt += "## 决策策略\n\n始终使用 AI 推理决定下一步，不依赖预定义路径。\n\n---\n\n"
 		}
 	}
+	prompt += "## 分支闭环约束\n\n业务分支与候选处理人不是一回事。一旦工单已经命中某条业务分支，后续只能在该分支内推进或结束，不能因为其他岗位也相关就切换到别的业务分支。若协作规范写明“处理完成后直接结束流程”，则 approved/rejected 都应优先解释为当前分支的终态推进，workflow_json 的 approved/rejected 出边属于 continuation contract，而不是普通建议。\n\n---\n\n"
 	prompt += agenticToolGuidance
 	prompt += "\n\n---\n\n"
 	prompt += agenticOutputFormat

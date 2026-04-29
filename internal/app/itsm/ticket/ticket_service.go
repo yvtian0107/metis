@@ -553,17 +553,22 @@ func (s *TicketService) BuildResponses(items []Ticket, operatorID uint) ([]Ticke
 	}
 
 	db := s.ticketRepo.DB()
-	serviceNames := map[uint]string{}
+	type serviceDisplay struct {
+		Name             string
+		IntakeFormSchema JSONField
+	}
+	services := map[uint]serviceDisplay{}
 	if ids := keysOf(serviceIDs); len(ids) > 0 {
 		var rows []struct {
-			ID   uint
-			Name string
+			ID               uint
+			Name             string
+			IntakeFormSchema JSONField
 		}
-		if err := db.Table("itsm_service_definitions").Where("id IN ?", ids).Select("id, name").Scan(&rows).Error; err != nil {
+		if err := db.Table("itsm_service_definitions").Where("id IN ?", ids).Select("id, name, intake_form_schema").Scan(&rows).Error; err != nil {
 			return responses, err
 		}
 		for _, r := range rows {
-			serviceNames[r.ID] = r.Name
+			services[r.ID] = serviceDisplay{Name: r.Name, IntakeFormSchema: r.IntakeFormSchema}
 		}
 	}
 
@@ -630,7 +635,10 @@ func (s *TicketService) BuildResponses(items []Ticket, operatorID uint) ([]Ticke
 		resp.StatusTone = TicketStatusTone(resp.Status, resp.Outcome)
 		resp.LastHumanOutcome = lastHumanOutcomes[resp.ID]
 		resp.DecisioningReason = decisioningReason(resp.Status)
-		resp.ServiceName = serviceNames[resp.ServiceID]
+		if service, ok := services[resp.ServiceID]; ok {
+			resp.ServiceName = service.Name
+			resp.IntakeFormSchema = service.IntakeFormSchema
+		}
 		if p, ok := priorities[resp.PriorityID]; ok {
 			resp.PriorityName = p.Name
 			resp.PriorityColor = p.Color

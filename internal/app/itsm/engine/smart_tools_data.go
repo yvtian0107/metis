@@ -51,6 +51,7 @@ type CurrentActivityInfo struct {
 	ID              uint
 	Name            string
 	ActivityType    string
+	NodeID          string
 	Status          string
 	ExecutionMode   string
 	ActivityGroupID string
@@ -210,7 +211,7 @@ func (s *decisionDataStore) GetCurrentActivities(ticketID uint) ([]CurrentActivi
 	var activities []CurrentActivityInfo
 	err := s.db.Table("itsm_ticket_activities").
 		Where("ticket_id = ? AND status IN ?", ticketID, []string{ActivityPending, ActivityInProgress}).
-		Select("id, name, activity_type, status, execution_mode, activity_group_id, ai_confidence").
+		Select("id, name, activity_type, node_id, status, execution_mode, activity_group_id, ai_confidence").
 		Order("id ASC").
 		Find(&activities).Error
 	return activities, err

@@ -92,6 +92,7 @@ type TicketResponse struct {
 	Description           string               `json:"description"`
 	ServiceID             uint                 `json:"serviceId"`
 	ServiceName           string               `json:"serviceName"`
+	IntakeFormSchema      JSONField            `json:"intakeFormSchema,omitempty"`
 	EngineType            string               `json:"engineType"`
 	Status                string               `json:"status"`
 	Outcome               string               `json:"outcome"`

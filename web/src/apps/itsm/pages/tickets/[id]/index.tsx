@@ -75,6 +75,11 @@ import {
 import { SLABadge } from "../../../components/sla-badge"
 import { TicketStatusBadge } from "../../../components/ticket-status-badge"
 import { WorkflowViewer } from "../../../components/workflow"
+import {
+  parseFieldDisplayMeta as parseTicketFieldDisplayMeta,
+  resolveFieldDisplayValue as resolveTicketFieldDisplayValue,
+  resolveFieldLabel as resolveTicketFieldLabel,
+} from "./field-display"
 import { TICKET_MENU_PERMISSION } from "../navigation"
 
 const ACTIVE_STATUSES = new Set(["submitted", "waiting_human", "approved_decisioning", "rejected_decisioning", "decisioning", "executing_action"])
@@ -187,46 +192,13 @@ function toRecord(value: unknown) {
     : null
 }
 
-function asTrimmedString(value: unknown) {
-  return typeof value === "string" ? value.trim() : ""
-}
-
-function hasCJK(value: string) {
-  return /[\u3400-\u9fff]/.test(value)
-}
-
 interface FieldDisplayMeta {
   label?: string
   valueLabels: Record<string, string>
 }
 
 function parseFieldDisplayMeta(schema: unknown) {
-  const root = toRecord(schema)
-  const rawFields = Array.isArray(root?.fields) ? root.fields : []
-  const meta: Record<string, FieldDisplayMeta> = {}
-  for (const rawField of rawFields) {
-    const field = toRecord(rawField)
-    if (!field) continue
-    const key = asTrimmedString(field.key)
-    if (!key) continue
-    const label = asTrimmedString(field.label)
-    const valueLabels: Record<string, string> = {}
-    const rawOptions = Array.isArray(field.options) ? field.options : []
-    for (const rawOption of rawOptions) {
-      const option = toRecord(rawOption)
-      if (option) {
-        const optionLabel = asTrimmedString(option.label)
-        const optionValue = option.value
-        if (optionLabel && optionValue != null) valueLabels[String(optionValue)] = optionLabel
-        continue
-      }
-      if (typeof rawOption === "string" || typeof rawOption === "number" || typeof rawOption === "boolean") {
-        valueLabels[String(rawOption)] = String(rawOption)
-      }
-    }
-    meta[key] = { label: label || undefined, valueLabels }
-  }
-  return meta
+  return parseTicketFieldDisplayMeta(schema) as Record<string, FieldDisplayMeta>
 }
 
 function formatDate(value?: string | null) {
@@ -279,27 +251,13 @@ function mapStatusToSuggestion(status?: string | null, smartState?: string | nul
   return null
 }
 
-function resolveI18nValue(
-  t: (key: string, options?: Record<string, unknown>) => string,
-  path: string,
-) {
-  const value = t(path, { defaultValue: "" })
-  if (!value || value === path) return ""
-  return value
-}
-
 function resolveFieldLabel(
   key: string,
   fieldMeta: Record<string, FieldDisplayMeta>,
   t: (key: string, options?: Record<string, unknown>) => string,
   locale: string,
 ) {
-  const schemaLabel = fieldMeta[key]?.label || ""
-  const i18nLabel = resolveI18nValue(t, `itsm:tickets.fieldLabels.${key}`)
-  if (locale.startsWith("zh")) return schemaLabel || i18nLabel || key
-  if (i18nLabel) return i18nLabel
-  if (schemaLabel && !hasCJK(schemaLabel)) return schemaLabel
-  return schemaLabel || key
+  return resolveTicketFieldLabel(key, fieldMeta, t, locale)
 }
 
 function resolveFieldOptionLabel(
@@ -309,13 +267,7 @@ function resolveFieldOptionLabel(
   t: (key: string, options?: Record<string, unknown>) => string,
   locale: string,
 ) {
-  const valueKey = String(rawValue)
-  const schemaLabel = fieldMeta[fieldKey]?.valueLabels[valueKey] || ""
-  const i18nLabel = resolveI18nValue(t, `itsm:tickets.fieldValueLabels.${fieldKey}.${valueKey}`)
-  if (locale.startsWith("zh")) return schemaLabel || i18nLabel || valueKey
-  if (i18nLabel) return i18nLabel
-  if (schemaLabel && !hasCJK(schemaLabel)) return schemaLabel
-  return schemaLabel || valueKey
+  return resolveTicketFieldDisplayValue(fieldKey, rawValue, fieldMeta, t, locale)
 }
 
 function resolveFieldDisplayValue(
@@ -325,10 +277,11 @@ function resolveFieldDisplayValue(
   t: (key: string, options?: Record<string, unknown>) => string,
   locale: string,
 ) {
+  return resolveTicketFieldDisplayValue(fieldKey, rawValue, fieldMeta, t, locale)
   if (Array.isArray(rawValue)) {
     const separator = locale.startsWith("zh") ? "、" : ", "
-    return rawValue
-      .map((item) => {
+    return (rawValue as unknown[])
+      .map((item: unknown) => {
         if (typeof item === "string" || typeof item === "number" || typeof item === "boolean") {
           return resolveFieldOptionLabel(fieldKey, item, fieldMeta, t, locale)
         }
@@ -445,7 +398,10 @@ function AIEvidencePanel({
   const { t, i18n } = useTranslation("itsm")
   const formRecord = toRecord(ticket.formData)
   const activityFormRecord = toRecord(activity?.formData)
-  const fieldMeta = parseFieldDisplayMeta(activity?.formSchema)
+  const fieldMeta = {
+    ...parseFieldDisplayMeta(activity?.formSchema),
+    ...parseFieldDisplayMeta(ticket.intakeFormSchema),
+  }
   const locale = i18n.resolvedLanguage || i18n.language || "zh-CN"
   const confidence = confidenceOf(activity, plan)
   const confidencePct = confidence == null ? null : Math.round(confidence * 100)

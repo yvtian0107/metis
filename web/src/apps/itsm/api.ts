@@ -310,6 +310,7 @@ export interface TicketItem {
   description: string
   serviceId: number
   serviceName: string
+  intakeFormSchema?: unknown
   engineType: string
   status: string
   outcome: string

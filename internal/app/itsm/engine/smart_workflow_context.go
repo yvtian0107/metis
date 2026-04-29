@@ -5,7 +5,7 @@ import (
 	"fmt"
 )
 
-func buildWorkflowContext(workflowJSON string, completed *activityModel) map[string]any {
+func buildWorkflowContext(workflowJSON, collaborationSpec string, formData map[string]any, currentNodeID string, currentActivityName string, completed *activityModel) map[string]any {
 	if workflowJSON == "" {
 		return nil
 	}
@@ -23,7 +23,8 @@ func buildWorkflowContext(workflowJSON string, completed *activityModel) map[str
 			"协作规范是核心事实源，workflow_json 是辅助理解协作规范的结构化背景。",
 			"当协作规范与 workflow_json 冲突时，必须以协作规范为准。",
 			"本轮决策必须解释刚完成活动与 workflow_json 中节点、边、条件的关系。",
-			"人工节点被 rejected 后，必须按协作规范定义的恢复路径处理；协作规范未显式定义补充信息或返工路径时，不得退回申请人补充；没有新证据时不得重复创建刚被驳回的同一处理任务。",
+			"人工节点被 rejected 后，必须按协作规范定义的恢复路径处理；没有新证据时不得重复创建刚被驳回的同一处理任务。",
+			"一旦业务分支已命中，后续不得因为其他岗位也相关就横跳到别的业务分支。",
 		},
 	}
 
@@ -37,6 +38,12 @@ func buildWorkflowContext(workflowJSON string, completed *activityModel) map[str
 	}
 	if len(humanSteps) > 0 {
 		ctx["human_steps"] = humanSteps
+	}
+
+	if branchInsights := buildBranchInsights(workflowJSON, collaborationSpec, formData, currentNodeID, currentActivityName, completed); len(branchInsights) > 0 {
+		for key, value := range branchInsights {
+			ctx[key] = value
+		}
 	}
 
 	if completed == nil {
@@ -68,32 +75,33 @@ func buildWorkflowContext(workflowJSON string, completed *activityModel) map[str
 	if completed.NodeID != "" {
 		if node, ok := nodeMap[completed.NodeID]; ok {
 			relatedStep := workflowNodeFact(node, nodeMap, outEdges[node.ID])
-			// Attach outcome-specific edge target for precise path guidance
 			if isPositiveActivityOutcome(completed.TransitionOutcome) {
 				for _, edge := range outEdges[node.ID] {
-					if edge.Data.Outcome == "approved" {
-						if target, ok := nodeMap[edge.Target]; ok {
-							relatedStep["approved_edge_target"] = map[string]any{
-								"node_id": target.ID,
-								"label":   workflowNodeLabel(target),
-								"type":    target.Type,
-							}
-						}
-						break
+					if edge.Data.Outcome != ActivityApproved {
+						continue
 					}
+					if target, ok := nodeMap[edge.Target]; ok {
+						relatedStep["approved_edge_target"] = map[string]any{
+							"node_id": target.ID,
+							"label":   workflowNodeLabel(target),
+							"type":    target.Type,
+						}
+					}
+					break
 				}
 			} else if isHumanActivityType(completed.ActivityType) {
 				for _, edge := range outEdges[node.ID] {
-					if edge.Data.Outcome == "rejected" {
-						if target, ok := nodeMap[edge.Target]; ok {
-							relatedStep["rejected_edge_target"] = map[string]any{
-								"node_id": target.ID,
-								"label":   workflowNodeLabel(target),
-								"type":    target.Type,
-							}
-						}
-						break
+					if edge.Data.Outcome != ActivityRejected {
+						continue
 					}
+					if target, ok := nodeMap[edge.Target]; ok {
+						relatedStep["rejected_edge_target"] = map[string]any{
+							"node_id": target.ID,
+							"label":   workflowNodeLabel(target),
+							"type":    target.Type,
+						}
+					}
+					break
 				}
 			}
 			ctx["related_step"] = relatedStep

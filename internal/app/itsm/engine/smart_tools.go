@@ -24,6 +24,7 @@ type decisionToolContext struct {
 	ticketID            uint
 	serviceID           uint
 	workflowJSON        string
+	collaborationSpec   string
 	knowledgeSearcher   KnowledgeSearcher
 	resolver            *ParticipantResolver
 	knowledgeBaseIDs    []uint
@@ -133,25 +134,20 @@ func toolTicketContext() decisionToolDef {
 			result["activity_history"] = history
 			result["completed_requirements"] = completedRequirements
 
-			if ctx.completedActivityID != nil && *ctx.completedActivityID > 0 {
-				if completed, err := ctx.data.GetActivityByID(ctx.ticketID, *ctx.completedActivityID); err == nil {
-					assignments, _ := ctx.data.GetActivityAssignments(completed.ID)
-					result["completed_activity"] = activityFactMap(completed, assignments)
-					if workflowCtx := buildWorkflowContext(ctx.workflowJSON, completed); workflowCtx != nil {
-						result["workflow_context"] = workflowCtx
-					}
-				}
-			} else if workflowCtx := buildWorkflowContext(ctx.workflowJSON, nil); workflowCtx != nil {
-				result["workflow_context"] = workflowCtx
-			}
-
 			currentActivities, _ := ctx.data.GetCurrentActivities(ctx.ticketID)
 			var current []map[string]any
+			currentNodeID := ""
+			currentActivityName := ""
 			for _, a := range currentActivities {
+				if currentNodeID == "" {
+					currentNodeID = a.NodeID
+					currentActivityName = a.Name
+				}
 				current = append(current, map[string]any{
 					"id":                a.ID,
 					"name":              a.Name,
 					"type":              a.ActivityType,
+					"node_id":           a.NodeID,
 					"status":            a.Status,
 					"execution_mode":    a.ExecutionMode,
 					"activity_group_id": a.ActivityGroupID,
@@ -159,6 +155,27 @@ func toolTicketContext() decisionToolDef {
 				})
 			}
 			result["current_activities"] = current
+
+			formData := map[string]any{}
+			if ticket.FormData != "" {
+				_ = json.Unmarshal([]byte(ticket.FormData), &formData)
+			}
+			var completedActivity *activityModel
+			if ctx.completedActivityID != nil && *ctx.completedActivityID > 0 {
+				if completed, err := ctx.data.GetActivityByID(ctx.ticketID, *ctx.completedActivityID); err == nil {
+					assignments, _ := ctx.data.GetActivityAssignments(completed.ID)
+					result["completed_activity"] = activityFactMap(completed, assignments)
+					completedActivity = completed
+				}
+			}
+			if workflowCtx := buildWorkflowContext(ctx.workflowJSON, ctx.collaborationSpec, formData, currentNodeID, currentActivityName, completedActivity); workflowCtx != nil {
+				result["workflow_context"] = workflowCtx
+				for _, key := range []string{"selected_branch", "active_branch_contract", "current_branch_node_id", "allowed_next_branch_nodes", "completion_contract", "branch_reasoning_basis"} {
+					if value, ok := workflowCtx[key]; ok {
+						result[key] = value
+					}
+				}
+			}
 
 			// Executed actions — shows which service actions have been successfully run
 			execs, _ := ctx.data.GetExecutedActions(ctx.ticketID)
