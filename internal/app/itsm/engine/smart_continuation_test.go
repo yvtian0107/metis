@@ -264,7 +264,7 @@ func TestSmartDecisionPositionAssignmentSingleSQLiteConnectionDoesNotBlock(t *te
 	if err := db.Exec(`CREATE TABLE departments (id integer primary key, code text)`).Error; err != nil {
 		t.Fatalf("create departments: %v", err)
 	}
-	if err := db.Exec(`CREATE TABLE user_positions (user_id integer, position_id integer, department_id integer)`).Error; err != nil {
+	if err := db.Exec(`CREATE TABLE user_positions (user_id integer, position_id integer, department_id integer, deleted_at datetime)`).Error; err != nil {
 		t.Fatalf("create user_positions: %v", err)
 	}
 	if err := db.Exec(`INSERT INTO users (id, username, is_active) VALUES (7, 'network-operator', true)`).Error; err != nil {
@@ -419,6 +419,82 @@ func newSmartContinuationDB(t *testing.T) *gorm.DB {
 	return db
 }
 
+func TestSmartDecisionPositionAssignmentWithoutUsersWaitsForHuman(t *testing.T) {
+	db := newSmartContinuationDB(t)
+	if err := db.Exec(`CREATE TABLE users (id integer primary key, username text, is_active boolean, deleted_at datetime, manager_id integer)`).Error; err != nil {
+		t.Fatalf("create users: %v", err)
+	}
+	if err := db.Exec(`CREATE TABLE positions (id integer primary key, code text)`).Error; err != nil {
+		t.Fatalf("create positions: %v", err)
+	}
+	if err := db.Exec(`CREATE TABLE departments (id integer primary key, code text)`).Error; err != nil {
+		t.Fatalf("create departments: %v", err)
+	}
+	if err := db.Exec(`CREATE TABLE user_positions (user_id integer, position_id integer, department_id integer, deleted_at datetime)`).Error; err != nil {
+		t.Fatalf("create user_positions: %v", err)
+	}
+	if err := db.Exec(`INSERT INTO positions (id, code) VALUES (77, 'ops_admin')`).Error; err != nil {
+		t.Fatalf("seed position: %v", err)
+	}
+	if err := db.Exec(`INSERT INTO departments (id, code) VALUES (88, 'it')`).Error; err != nil {
+		t.Fatalf("seed department: %v", err)
+	}
+
+	service := serviceModel{EngineType: "smart"}
+	if err := db.Create(&service).Error; err != nil {
+		t.Fatalf("create service: %v", err)
+	}
+	ticket := ticketModel{Status: TicketStatusDecisioning, ServiceID: service.ID, EngineType: "smart"}
+	if err := db.Create(&ticket).Error; err != nil {
+		t.Fatalf("create ticket: %v", err)
+	}
+
+	engine := NewSmartEngine(nil, nil, nil, nil, nil, nil)
+	engine.SetDB(db)
+
+	plan := &DecisionPlan{
+		NextStepType:  "process",
+		ExecutionMode: "single",
+		Confidence:    0.95,
+		Activities: []DecisionActivity{{
+			Type:            "process",
+			ParticipantType: "position_department",
+			PositionCode:    "ops_admin",
+			DepartmentCode:  "it",
+			Instructions:    "Handle server troubleshooting access",
+		}},
+	}
+
+	if err := db.Transaction(func(tx *gorm.DB) error {
+		return engine.executeSinglePlan(tx, ticket.ID, plan)
+	}); err != nil {
+		t.Fatalf("execute single plan: %v", err)
+	}
+
+	var reloaded ticketModel
+	if err := db.First(&reloaded, ticket.ID).Error; err != nil {
+		t.Fatalf("reload ticket: %v", err)
+	}
+	if reloaded.Status != TicketStatusWaitingHuman {
+		t.Fatalf("expected ticket status waiting_human, got %s", reloaded.Status)
+	}
+	var assignment assignmentModel
+	if err := db.Where("ticket_id = ? AND participant_type = ?", ticket.ID, "position_department").First(&assignment).Error; err != nil {
+		t.Fatalf("load position assignment: %v", err)
+	}
+	if assignment.UserID != nil {
+		t.Fatalf("expected unresolved assignment user to be nil, got %v", *assignment.UserID)
+	}
+
+	var timeline timelineModel
+	if err := db.Where("ticket_id = ? AND event_type = ?", ticket.ID, "participant_resolution_pending").First(&timeline).Error; err != nil {
+		t.Fatalf("load pending timeline: %v", err)
+	}
+	if timeline.Message == "" {
+		t.Fatal("expected pending participant timeline message")
+	}
+}
+
 func createSmartContinuationTicket(t *testing.T, db *gorm.DB, groupID string, activityStatus string) (ticketModel, activityModel) {
 	t.Helper()
 	ticket := ticketModel{Status: "in_progress", EngineType: "smart"}
@@ -484,7 +560,7 @@ func (r *rootDBPositionResolver) FindUsersByPositionAndDepartment(posCode, deptC
 		Joins("JOIN positions ON positions.id = user_positions.position_id").
 		Joins("JOIN departments ON departments.id = user_positions.department_id").
 		Joins("JOIN users ON users.id = user_positions.user_id").
-		Where("positions.code = ? AND departments.code = ? AND users.is_active = ?", posCode, deptCode, true).
+		Where("positions.code = ? AND departments.code = ? AND user_positions.deleted_at IS NULL AND users.is_active = ?", posCode, deptCode, true).
 		Pluck("DISTINCT users.id", &userIDs).Error
 	return userIDs, err
 }
@@ -493,7 +569,7 @@ func (r *rootDBPositionResolver) FindUsersByPositionID(positionID uint) ([]uint,
 	var userIDs []uint
 	err := r.db.Table("user_positions").
 		Joins("JOIN users ON users.id = user_positions.user_id").
-		Where("user_positions.position_id = ? AND users.is_active = ?", positionID, true).
+		Where("user_positions.position_id = ? AND user_positions.deleted_at IS NULL AND users.is_active = ?", positionID, true).
 		Pluck("DISTINCT users.id", &userIDs).Error
 	return userIDs, err
 }
@@ -502,7 +578,7 @@ func (r *rootDBPositionResolver) FindUsersByDepartmentID(departmentID uint) ([]u
 	var userIDs []uint
 	err := r.db.Table("user_positions").
 		Joins("JOIN users ON users.id = user_positions.user_id").
-		Where("user_positions.department_id = ? AND users.is_active = ?", departmentID, true).
+		Where("user_positions.department_id = ? AND user_positions.deleted_at IS NULL AND users.is_active = ?", departmentID, true).
 		Pluck("DISTINCT users.id", &userIDs).Error
 	return userIDs, err
 }

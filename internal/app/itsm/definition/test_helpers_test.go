@@ -3,6 +3,8 @@ package definition
 import (
 	"bytes"
 	"github.com/gin-gonic/gin"
+	appcore "metis/internal/app"
+	"metis/internal/app/itsm/engine"
 	"net/http/httptest"
 	"testing"
 
@@ -29,9 +31,11 @@ func newServiceDefServiceForTest(t *testing.T, db *gorm.DB) *ServiceDefService {
 		t.Fatalf("create catalog repo: %v", err)
 	}
 	return &ServiceDefService{
-		repo:     &ServiceDefRepo{db: wrapped},
-		db:       wrapped,
-		catalogs: catalogRepo,
+		repo:             &ServiceDefRepo{db: wrapped},
+		db:               wrapped,
+		catalogs:         catalogRepo,
+		llmClientFactory: nil,
+		resolver:         engine.NewParticipantResolver(testServiceDefOrgResolver{}),
 	}
 }
 
@@ -64,3 +68,28 @@ func performJSONRequest(t *testing.T, routes func(*gin.Engine), method, path str
 	r.ServeHTTP(rec, req)
 	return rec
 }
+
+type testServiceDefOrgResolver struct{}
+
+func (testServiceDefOrgResolver) GetUserDeptScope(uint, bool) ([]uint, error) { return nil, nil }
+func (testServiceDefOrgResolver) GetUserPositionIDs(uint) ([]uint, error)     { return nil, nil }
+func (testServiceDefOrgResolver) GetUserDepartmentIDs(uint) ([]uint, error)   { return nil, nil }
+func (testServiceDefOrgResolver) GetUserPositions(uint) ([]appcore.OrgPosition, error) {
+	return nil, nil
+}
+func (testServiceDefOrgResolver) GetUserDepartment(uint) (*appcore.OrgDepartment, error) {
+	return nil, nil
+}
+func (testServiceDefOrgResolver) QueryContext(string, string, string, bool) (*appcore.OrgContextResult, error) {
+	return nil, nil
+}
+func (testServiceDefOrgResolver) FindUsersByPositionCode(string) ([]uint, error)   { return nil, nil }
+func (testServiceDefOrgResolver) FindUsersByDepartmentCode(string) ([]uint, error) { return nil, nil }
+func (testServiceDefOrgResolver) FindUsersByPositionAndDepartment(string, string) ([]uint, error) {
+	return nil, nil
+}
+func (testServiceDefOrgResolver) FindUsersByPositionID(uint) ([]uint, error)   { return nil, nil }
+func (testServiceDefOrgResolver) FindUsersByDepartmentID(uint) ([]uint, error) { return nil, nil }
+func (testServiceDefOrgResolver) FindManagerByUserID(uint) (uint, error)       { return 0, nil }
+
+var _ appcore.OrgResolver = testServiceDefOrgResolver{}

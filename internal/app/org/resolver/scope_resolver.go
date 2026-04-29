@@ -188,7 +188,7 @@ func (r *OrgResolverImpl) FindUsersByPositionCode(posCode string) ([]uint, error
 	err := r.db.Table("user_positions").
 		Joins("JOIN positions ON positions.id = user_positions.position_id").
 		Joins("JOIN users ON users.id = user_positions.user_id").
-		Where("positions.code = ? AND users.is_active = ?", posCode, true).
+		Where("positions.code = ? AND user_positions.deleted_at IS NULL AND users.is_active = ?", posCode, true).
 		Pluck("DISTINCT users.id", &userIDs).Error
 	return userIDs, err
 }
@@ -198,7 +198,7 @@ func (r *OrgResolverImpl) FindUsersByDepartmentCode(deptCode string) ([]uint, er
 	err := r.db.Table("user_positions").
 		Joins("JOIN departments ON departments.id = user_positions.department_id").
 		Joins("JOIN users ON users.id = user_positions.user_id").
-		Where("departments.code = ? AND users.is_active = ?", deptCode, true).
+		Where("departments.code = ? AND user_positions.deleted_at IS NULL AND users.is_active = ?", deptCode, true).
 		Pluck("DISTINCT users.id", &userIDs).Error
 	return userIDs, err
 }
@@ -209,7 +209,7 @@ func (r *OrgResolverImpl) FindUsersByPositionAndDepartment(posCode, deptCode str
 		Joins("JOIN positions ON positions.id = user_positions.position_id").
 		Joins("JOIN departments ON departments.id = user_positions.department_id").
 		Joins("JOIN users ON users.id = user_positions.user_id").
-		Where("positions.code = ? AND departments.code = ? AND users.is_active = ?", posCode, deptCode, true).
+		Where("positions.code = ? AND departments.code = ? AND user_positions.deleted_at IS NULL AND users.is_active = ?", posCode, deptCode, true).
 		Pluck("DISTINCT users.id", &userIDs).Error
 	return userIDs, err
 }
@@ -218,7 +218,7 @@ func (r *OrgResolverImpl) FindUsersByPositionID(positionID uint) ([]uint, error)
 	var userIDs []uint
 	err := r.db.Table("user_positions").
 		Joins("JOIN users ON users.id = user_positions.user_id").
-		Where("user_positions.position_id = ? AND users.is_active = ?", positionID, true).
+		Where("user_positions.position_id = ? AND user_positions.deleted_at IS NULL AND users.is_active = ?", positionID, true).
 		Pluck("DISTINCT users.id", &userIDs).Error
 	return userIDs, err
 }
@@ -227,7 +227,7 @@ func (r *OrgResolverImpl) FindUsersByDepartmentID(departmentID uint) ([]uint, er
 	var userIDs []uint
 	err := r.db.Table("user_positions").
 		Joins("JOIN users ON users.id = user_positions.user_id").
-		Where("user_positions.department_id = ? AND users.is_active = ?", departmentID, true).
+		Where("user_positions.department_id = ? AND user_positions.deleted_at IS NULL AND users.is_active = ?", departmentID, true).
 		Pluck("DISTINCT users.id", &userIDs).Error
 	return userIDs, err
 }

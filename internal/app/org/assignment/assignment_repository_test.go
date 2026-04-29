@@ -98,6 +98,47 @@ func TestAssignmentRepo_AddPosition(t *testing.T) {
 	}
 }
 
+func TestAssignmentRepo_AddPosition_RestoresSoftDeletedRecord(t *testing.T) {
+	db := testutil.NewOrgTestDB(t)
+	repo := &AssignmentRepo{db: db}
+
+	role := testutil.SeedRole(t, db, "user")
+	dept := testutil.SeedDepartment(t, db, "Engineering", "eng", nil, nil, true)
+	pos := testutil.SeedPosition(t, db, "SE", "se", true)
+	user := testutil.SeedUser(t, db, "u1", role.ID)
+	original := testutil.SeedAssignment(t, db, user.ID, dept.ID, pos.ID, false)
+
+	if err := db.Delete(&domain.UserPosition{}, original.ID).Error; err != nil {
+		t.Fatalf("soft delete assignment: %v", err)
+	}
+
+	up := &domain.UserPosition{UserID: user.ID, DepartmentID: dept.ID, PositionID: pos.ID, IsPrimary: true}
+	if err := repo.AddPosition(up); err != nil {
+		t.Fatalf("restore position failed: %v", err)
+	}
+	if up.ID != original.ID {
+		t.Fatalf("expected restored assignment id %d, got %d", original.ID, up.ID)
+	}
+
+	var count int64
+	if err := db.Unscoped().Model(&domain.UserPosition{}).
+		Where("user_id = ? AND department_id = ? AND position_id = ?", user.ID, dept.ID, pos.ID).
+		Count(&count).Error; err != nil {
+		t.Fatalf("count restored assignments: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("expected single restored row, got %d", count)
+	}
+
+	restored, err := repo.FindByID(original.ID)
+	if err != nil {
+		t.Fatalf("find restored assignment: %v", err)
+	}
+	if !restored.IsPrimary {
+		t.Fatal("expected restored assignment to keep latest primary flag")
+	}
+}
+
 func TestAssignmentRepo_AddPositionWithPrimary_DemoteExisting(t *testing.T) {
 	db := testutil.NewOrgTestDB(t)
 	repo := &AssignmentRepo{db: db}
@@ -647,6 +688,59 @@ func TestAssignmentRepo_SetUserDeptPositions(t *testing.T) {
 	}
 }
 
+func TestAssignmentRepo_SetUserDeptPositions_RestoresSoftDeletedPosition(t *testing.T) {
+	db := testutil.NewOrgTestDB(t)
+	repo := &AssignmentRepo{db: db}
+
+	role := testutil.SeedRole(t, db, "user")
+	dept := testutil.SeedDepartment(t, db, "Engineering", "eng", nil, nil, true)
+	pos1 := testutil.SeedPosition(t, db, "SE", "se", true)
+	pos2 := testutil.SeedPosition(t, db, "Manager", "mgr", true)
+	user := testutil.SeedUser(t, db, "u1", role.ID)
+
+	primaryID := pos1.ID
+	if err := repo.SetUserDeptPositions(user.ID, dept.ID, []uint{pos1.ID, pos2.ID}, &primaryID); err != nil {
+		t.Fatalf("initial set positions failed: %v", err)
+	}
+	if err := repo.SetUserDeptPositions(user.ID, dept.ID, []uint{pos1.ID}, &primaryID); err != nil {
+		t.Fatalf("remove pos2 failed: %v", err)
+	}
+
+	var deleted domain.UserPosition
+	if err := db.Unscoped().
+		Where("user_id = ? AND department_id = ? AND position_id = ?", user.ID, dept.ID, pos2.ID).
+		First(&deleted).Error; err != nil {
+		t.Fatalf("find soft-deleted assignment: %v", err)
+	}
+	deletedID := deleted.ID
+
+	primaryID = pos2.ID
+	if err := repo.SetUserDeptPositions(user.ID, dept.ID, []uint{pos1.ID, pos2.ID}, &primaryID); err != nil {
+		t.Fatalf("restore pos2 failed: %v", err)
+	}
+
+	items, err := repo.FindByUserAndDept(user.ID, dept.ID)
+	if err != nil {
+		t.Fatalf("find positions after restore: %v", err)
+	}
+	if len(items) != 2 {
+		t.Fatalf("expected 2 active assignments, got %d", len(items))
+	}
+
+	var restored domain.UserPosition
+	if err := db.Unscoped().
+		Where("user_id = ? AND department_id = ? AND position_id = ?", user.ID, dept.ID, pos2.ID).
+		First(&restored).Error; err != nil {
+		t.Fatalf("find restored assignment: %v", err)
+	}
+	if restored.ID != deletedID {
+		t.Fatalf("expected restored assignment id %d, got %d", deletedID, restored.ID)
+	}
+	if restored.DeletedAt.Valid {
+		t.Fatal("expected restored assignment to be active")
+	}
+}
+
 func TestAssignmentRepo_MultiPositionPerDept(t *testing.T) {
 	db := testutil.NewOrgTestDB(t)
 	repo := &AssignmentRepo{db: db}
@@ -674,9 +768,12 @@ func TestAssignmentRepo_MultiPositionPerDept(t *testing.T) {
 
 	// Cannot add same position twice
 	up3 := &domain.UserPosition{UserID: user.ID, DepartmentID: dept.ID, PositionID: pos1.ID}
-	err := repo.AddPosition(up3)
-	if err == nil {
-		t.Fatal("expected unique constraint error for duplicate user+dept+position")
+	if err := repo.AddPosition(up3); err != nil {
+		t.Fatalf("expected duplicate add to be idempotent, got %v", err)
+	}
+	items, _ = repo.FindByUserAndDept(user.ID, dept.ID)
+	if len(items) != 2 {
+		t.Fatalf("expected still 2 items after duplicate add, got %d", len(items))
 	}
 }
 

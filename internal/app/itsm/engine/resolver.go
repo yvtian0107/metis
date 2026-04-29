@@ -28,21 +28,30 @@ func (r *ParticipantResolver) Resolve(tx *gorm.DB, ticketID uint, p Participant)
 	case "user":
 		uid, err := strconv.ParseUint(p.Value, 10, 64)
 		if err != nil {
-			// Value is not numeric — try resolving as username
 			var user struct{ ID uint }
-			if dbErr := tx.Table("users").Where("username = ?", p.Value).Select("id").First(&user).Error; dbErr != nil {
+			if dbErr := tx.Table("users").
+				Where("username = ? AND deleted_at IS NULL AND is_active = ?", p.Value, true).
+				Select("id").
+				First(&user).Error; dbErr != nil {
 				return nil, fmt.Errorf("user %q not found by ID or username: %w", p.Value, dbErr)
 			}
 			return []uint{user.ID}, nil
 		}
-		return []uint{uint(uid)}, nil
+		var user struct{ ID uint }
+		if dbErr := tx.Table("users").
+			Where("id = ? AND deleted_at IS NULL AND is_active = ?", uint(uid), true).
+			Select("id").
+			First(&user).Error; dbErr != nil {
+			return nil, fmt.Errorf("user %q not found by ID or username: %w", p.Value, dbErr)
+		}
+		return []uint{user.ID}, nil
 
 	case "requester_manager":
 		return r.resolveRequesterManager(tx, ticketID)
 
 	case "position":
 		if r.orgResolver == nil {
-			return nil, fmt.Errorf("参与人解析失败：position 类型需要安装组织架构模块")
+			return nil, fmt.Errorf("participant resolution failed: position type requires org app")
 		}
 		posID, err := strconv.ParseUint(p.Value, 10, 64)
 		if err != nil {
@@ -52,7 +61,7 @@ func (r *ParticipantResolver) Resolve(tx *gorm.DB, ticketID uint, p Participant)
 
 	case "department":
 		if r.orgResolver == nil {
-			return nil, fmt.Errorf("参与人解析失败：department 类型需要安装组织架构模块")
+			return nil, fmt.Errorf("participant resolution failed: department type requires org app")
 		}
 		deptID, err := strconv.ParseUint(p.Value, 10, 64)
 		if err != nil {
@@ -62,10 +71,10 @@ func (r *ParticipantResolver) Resolve(tx *gorm.DB, ticketID uint, p Participant)
 
 	case "position_department":
 		if r.orgResolver == nil {
-			return nil, fmt.Errorf("参与人解析失败：position_department 类型需要安装组织架构模块")
+			return nil, fmt.Errorf("participant resolution failed: position_department type requires org app")
 		}
 		if p.PositionCode == "" || p.DepartmentCode == "" {
-			return nil, fmt.Errorf("position_department 类型需要同时指定 position_code 和 department_code")
+			return nil, fmt.Errorf("position_department requires both position_code and department_code")
 		}
 		return r.resolveUsersByPositionAndDepartment(tx, p.PositionCode, p.DepartmentCode)
 
@@ -111,7 +120,7 @@ func (r *ParticipantResolver) resolveUsersByPositionID(tx *gorm.DB, positionID u
 	var userIDs []uint
 	err := tx.Table("user_positions").
 		Joins("JOIN users ON users.id = user_positions.user_id").
-		Where("user_positions.position_id = ? AND users.is_active = ?", positionID, true).
+		Where("user_positions.position_id = ? AND user_positions.deleted_at IS NULL AND users.is_active = ?", positionID, true).
 		Pluck("DISTINCT users.id", &userIDs).Error
 	return userIDs, err
 }
@@ -120,7 +129,7 @@ func (r *ParticipantResolver) resolveUsersByDepartmentID(tx *gorm.DB, department
 	var userIDs []uint
 	err := tx.Table("user_positions").
 		Joins("JOIN users ON users.id = user_positions.user_id").
-		Where("user_positions.department_id = ? AND users.is_active = ?", departmentID, true).
+		Where("user_positions.department_id = ? AND user_positions.deleted_at IS NULL AND users.is_active = ?", departmentID, true).
 		Pluck("DISTINCT users.id", &userIDs).Error
 	return userIDs, err
 }
@@ -131,7 +140,7 @@ func (r *ParticipantResolver) resolveUsersByPositionAndDepartment(tx *gorm.DB, p
 		Joins("JOIN positions ON positions.id = user_positions.position_id").
 		Joins("JOIN departments ON departments.id = user_positions.department_id").
 		Joins("JOIN users ON users.id = user_positions.user_id").
-		Where("positions.code = ? AND departments.code = ? AND users.is_active = ?", posCode, deptCode, true).
+		Where("positions.code = ? AND departments.code = ? AND user_positions.deleted_at IS NULL AND users.is_active = ?", posCode, deptCode, true).
 		Pluck("DISTINCT users.id", &userIDs).Error
 	return userIDs, err
 }

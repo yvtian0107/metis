@@ -752,6 +752,8 @@ func (e *SmartEngine) createPositionAssignment(tx *gorm.DB, ticketID, activityID
 	}
 	if len(userIDs) == 0 {
 		slog.Warn("position assignment: no users found", "positionCode", positionCode, "departmentCode", departmentCode)
+		e.recordTimeline(tx, ticketID, &activityID, 0, "participant_resolution_pending",
+			fmt.Sprintf("审批岗位 %s@%s 当前没有可用处理人，工单已挂起等待 IT 管理员补充人员配置", positionCode, departmentCode), "")
 	}
 
 	assignment := &assignmentModel{
@@ -788,7 +790,7 @@ func resolveUsersByPositionDepartmentInTx(tx *gorm.DB, positionID, departmentID 
 	var userIDs []uint
 	err := tx.Table("user_positions").
 		Joins("JOIN users ON users.id = user_positions.user_id").
-		Where("user_positions.position_id = ? AND user_positions.department_id = ? AND users.is_active = ?",
+		Where("user_positions.position_id = ? AND user_positions.department_id = ? AND user_positions.deleted_at IS NULL AND users.is_active = ?",
 			positionID, departmentID, true).
 		Pluck("DISTINCT users.id", &userIDs).Error
 	return userIDs, err
@@ -918,7 +920,7 @@ func (e *SmartEngine) validateDecisionPlan(tx *gorm.DB, ticketID uint, plan *Dec
 			var user struct {
 				IsActive bool
 			}
-			if err := tx.Table("users").Where("id = ?", *a.ParticipantID).
+			if err := tx.Table("users").Where("id = ? AND deleted_at IS NULL", *a.ParticipantID).
 				Select("is_active").First(&user).Error; err != nil {
 				return fmt.Errorf("activities[%d].participant_id %d 用户不存在", i, *a.ParticipantID)
 			}
@@ -988,18 +990,12 @@ func (e *SmartEngine) hasResolvableHumanParticipant(tx *gorm.DB, a DecisionActiv
 		return true
 	}
 	if a.ParticipantType == "position_department" && a.PositionCode != "" && a.DepartmentCode != "" {
-		var positionID, departmentID uint
-		tx.Table("positions").Where("code = ?", a.PositionCode).Select("id").Scan(&positionID)
-		tx.Table("departments").Where("code = ?", a.DepartmentCode).Select("id").Scan(&departmentID)
-		userIDs, err := resolveUsersByPositionDepartmentInTx(tx, positionID, departmentID)
-		if err == nil && len(userIDs) > 0 {
-			return true
-		}
+		return true
 	}
 	if a.ParticipantType == "requester" {
 		return true
 	}
-	return e.configProvider != nil && e.configProvider.FallbackAssigneeID() > 0
+	return false
 }
 
 func (e *SmartEngine) validateRoutingConflictDecision(tx *gorm.DB, ticketID uint, plan *DecisionPlan, svc *serviceModel) error {

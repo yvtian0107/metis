@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	. "metis/internal/app/itsm/domain"
+	orgdomain "metis/internal/app/org/domain"
 	"net/http/httptest"
 	"testing"
 
@@ -47,6 +48,10 @@ func NewTestDB(t *testing.T) *gorm.DB {
 		&model.SystemConfig{},
 		&model.User{},
 		&model.TaskExecution{},
+		&orgdomain.Department{},
+		&orgdomain.Position{},
+		&orgdomain.UserPosition{},
+		&orgdomain.DepartmentPosition{},
 	); err != nil {
 		t.Fatalf("migrate test db: %v", err)
 	}

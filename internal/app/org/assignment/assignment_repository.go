@@ -51,7 +51,9 @@ func (r *AssignmentRepo) FindByDepartmentID(deptID uint) ([]domain.UserPosition,
 }
 
 func (r *AssignmentRepo) AddPosition(up *domain.UserPosition) error {
-	return r.db.Create(up).Error
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		return restoreOrCreateUserPosition(tx, up)
+	})
 }
 
 // AddPositionWithPrimary creates a new assignment, atomically handling primary status.
@@ -77,7 +79,7 @@ func (r *AssignmentRepo) AddPositionWithPrimary(up *domain.UserPosition, setPrim
 				up.IsPrimary = true
 			}
 		}
-		return tx.Create(up).Error
+		return restoreOrCreateUserPosition(tx, up)
 	})
 }
 
@@ -149,7 +151,7 @@ func (r *AssignmentRepo) SetUserDeptPositions(userID, deptID uint, positionIDs [
 					DepartmentID: deptID,
 					PositionID:   pid,
 				}
-				if err := tx.Create(up).Error; err != nil {
+				if err := restoreOrCreateUserPosition(tx, up); err != nil {
 					return err
 				}
 			}
@@ -174,6 +176,46 @@ func (r *AssignmentRepo) SetUserDeptPositions(userID, deptID uint, positionIDs [
 
 		return nil
 	})
+}
+
+func restoreOrCreateUserPosition(tx *gorm.DB, up *domain.UserPosition) error {
+	var existing domain.UserPosition
+	err := tx.Unscoped().
+		Where("user_id = ? AND department_id = ? AND position_id = ?", up.UserID, up.DepartmentID, up.PositionID).
+		First(&existing).Error
+	switch {
+	case errors.Is(err, gorm.ErrRecordNotFound):
+		return tx.Create(up).Error
+	case err != nil:
+		return err
+	case existing.DeletedAt.Valid:
+		updates := map[string]any{
+			"deleted_at": nil,
+			"is_primary": up.IsPrimary,
+			"sort":       up.Sort,
+		}
+		if err := tx.Unscoped().Model(&domain.UserPosition{}).
+			Where("id = ?", existing.ID).
+			Updates(updates).Error; err != nil {
+			return err
+		}
+		existing.DeletedAt = gorm.DeletedAt{}
+	default:
+		if err := tx.Model(&domain.UserPosition{}).
+			Where("id = ?", existing.ID).
+			Updates(map[string]any{
+				"is_primary": up.IsPrimary,
+				"sort":       up.Sort,
+			}).Error; err != nil {
+			return err
+		}
+	}
+
+	up.ID = existing.ID
+	up.CreatedAt = existing.CreatedAt
+	up.UpdatedAt = existing.UpdatedAt
+	up.DeletedAt = existing.DeletedAt
+	return nil
 }
 
 func (r *AssignmentRepo) RemovePosition(assignmentID, userID uint) error {

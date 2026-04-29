@@ -7,6 +7,7 @@ import (
 	. "metis/internal/app/itsm/catalog"
 	. "metis/internal/app/itsm/config"
 	. "metis/internal/app/itsm/domain"
+	orgdomain "metis/internal/app/org/domain"
 	"testing"
 	"time"
 
@@ -451,6 +452,84 @@ func TestServiceDefServiceRefreshPublishHealthCheck_WarnsOnInvalidReferencedActi
 	}
 }
 
+func TestServiceDefServiceRefreshPublishHealthCheck_FailsWhenPositionDepartmentHasNoApprover(t *testing.T) {
+	db := newTestDB(t)
+	svc := newServiceDefServiceForTest(t, db)
+	svc.engineConfigSvc = fakePublishHealthConfigProvider{cfg: testPublishHealthRuntimeConfig()}
+	catSvc := newCatalogServiceForTest(t, db)
+
+	root, _ := catSvc.Create("Root", "root", "", "", nil, 10)
+	serviceAgent := createServiceHealthAgent(t, db, "service-agent", true)
+	decisionAgent := createServiceHealthAgent(t, db, "decision-agent", true)
+	setServiceHealthDecisionAgent(t, db, decisionAgent.ID)
+	seedServiceHealthPathEngine(t, db)
+	seedWorkflowParticipantOrgData(t, db, "missing")
+
+	service, err := svc.Create(&ServiceDefinition{
+		Name:              "Smart",
+		Code:              "smart-health-missing-position-approver",
+		CatalogID:         root.ID,
+		EngineType:        "smart",
+		IntakeFormSchema:  serviceHealthIntakeFormSchema(),
+		CollaborationSpec: "route to ops admin",
+		AgentID:           &serviceAgent.ID,
+		WorkflowJSON:      JSONField(workflowWithPositionDepartmentParticipant("ops_admin", "it")),
+	})
+	if err != nil {
+		t.Fatalf("create service: %v", err)
+	}
+
+	check, err := svc.RefreshPublishHealthCheck(service.ID)
+	if err != nil {
+		t.Fatalf("refresh health check: %v", err)
+	}
+	if check.Status != "fail" {
+		t.Fatalf("expected fail status, got %+v", check)
+	}
+	if !serviceHealthHasItem(check, "reference_path_participant", "fail") {
+		t.Fatalf("expected reference_path_participant fail, got %+v", check.Items)
+	}
+}
+
+func TestServiceDefServiceRefreshPublishHealthCheck_FailsWhenPositionDepartmentUserInactive(t *testing.T) {
+	db := newTestDB(t)
+	svc := newServiceDefServiceForTest(t, db)
+	svc.engineConfigSvc = fakePublishHealthConfigProvider{cfg: testPublishHealthRuntimeConfig()}
+	catSvc := newCatalogServiceForTest(t, db)
+
+	root, _ := catSvc.Create("Root", "root", "", "", nil, 10)
+	serviceAgent := createServiceHealthAgent(t, db, "service-agent", true)
+	decisionAgent := createServiceHealthAgent(t, db, "decision-agent", true)
+	setServiceHealthDecisionAgent(t, db, decisionAgent.ID)
+	seedServiceHealthPathEngine(t, db)
+	seedWorkflowParticipantOrgData(t, db, "inactive")
+
+	service, err := svc.Create(&ServiceDefinition{
+		Name:              "Smart",
+		Code:              "smart-health-inactive-position-approver",
+		CatalogID:         root.ID,
+		EngineType:        "smart",
+		IntakeFormSchema:  serviceHealthIntakeFormSchema(),
+		CollaborationSpec: "route to ops admin",
+		AgentID:           &serviceAgent.ID,
+		WorkflowJSON:      JSONField(workflowWithPositionDepartmentParticipant("ops_admin", "it")),
+	})
+	if err != nil {
+		t.Fatalf("create service: %v", err)
+	}
+
+	check, err := svc.RefreshPublishHealthCheck(service.ID)
+	if err != nil {
+		t.Fatalf("refresh health check: %v", err)
+	}
+	if check.Status != "fail" {
+		t.Fatalf("expected fail status, got %+v", check)
+	}
+	if !serviceHealthHasItem(check, "reference_path_participant", "fail") {
+		t.Fatalf("expected reference_path_participant fail, got %+v", check.Items)
+	}
+}
+
 func TestServiceDefServiceHealthCheck_RefreshesLatestSnapshot(t *testing.T) {
 	db := newTestDB(t)
 	svc := newServiceDefServiceForTest(t, db)
@@ -707,6 +786,59 @@ func workflowWithActionID(actionID uint) string {
 			{"id":"e2","source":"action","target":"end","data":{}}
 		]
 	}`, actionID)
+}
+
+func workflowWithPositionDepartmentParticipant(positionCode, departmentCode string) string {
+	return fmt.Sprintf(`{
+		"nodes": [
+			{"id":"start","type":"start","data":{"label":"Start"}},
+			{"id":"process","type":"process","data":{"label":"Ops approval","participants":[{"type":"position_department","position_code":"%s","department_code":"%s"}]}},
+			{"id":"approved_end","type":"end","data":{"label":"Approved"}},
+			{"id":"rejected_end","type":"end","data":{"label":"Rejected"}}
+		],
+		"edges": [
+			{"id":"e1","source":"start","target":"process","data":{}},
+			{"id":"e2","source":"process","target":"approved_end","data":{"outcome":"approved"}},
+			{"id":"e3","source":"process","target":"rejected_end","data":{"outcome":"rejected"}}
+		]
+	}`, positionCode, departmentCode)
+}
+
+func seedWorkflowParticipantOrgData(t *testing.T, db *gorm.DB, mode string) {
+	t.Helper()
+	dept := orgdomain.Department{Name: "IT", Code: "it", IsActive: true}
+	if err := db.Create(&dept).Error; err != nil {
+		t.Fatalf("create department: %v", err)
+	}
+	pos := orgdomain.Position{Name: "Ops Admin", Code: "ops_admin", IsActive: true}
+	if err := db.Create(&pos).Error; err != nil {
+		t.Fatalf("create position: %v", err)
+	}
+	if mode == "missing" {
+		return
+	}
+	if mode != "inactive" {
+		user := createServiceHealthUser(t, db, "ops_admin_user", true)
+		if err := db.Create(&orgdomain.UserPosition{
+			UserID:       user.ID,
+			DepartmentID: dept.ID,
+			PositionID:   pos.ID,
+		}).Error; err != nil {
+			t.Fatalf("create user position: %v", err)
+		}
+		return
+	}
+	user := createServiceHealthUser(t, db, "ops_admin_disabled", false)
+	if err := db.Model(&user).Update("is_active", false).Error; err != nil {
+		t.Fatalf("deactivate user: %v", err)
+	}
+	if err := db.Create(&orgdomain.UserPosition{
+		UserID:       user.ID,
+		DepartmentID: dept.ID,
+		PositionID:   pos.ID,
+	}).Error; err != nil {
+		t.Fatalf("create inactive user position: %v", err)
+	}
 }
 
 func serviceHealthIntakeFormSchema() JSONField {

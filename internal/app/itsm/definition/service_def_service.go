@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	appcore "metis/internal/app"
 	. "metis/internal/app/itsm/catalog"
 	. "metis/internal/app/itsm/config"
 	. "metis/internal/app/itsm/domain"
@@ -43,6 +44,7 @@ type ServiceDefService struct {
 	catalogs         *CatalogRepo
 	engineConfigSvc  publishHealthConfigProvider
 	llmClientFactory workflowLLMClientFactory
+	resolver         *engine.ParticipantResolver
 }
 
 type publishHealthValidationContext struct {
@@ -57,12 +59,14 @@ func NewServiceDefService(i do.Injector) (*ServiceDefService, error) {
 	db := do.MustInvoke[*database.DB](i)
 	catalogs := do.MustInvoke[*CatalogRepo](i)
 	engineConfigSvc := do.MustInvoke[*EngineConfigService](i)
+	orgResolver, _ := do.InvokeAs[appcore.OrgResolver](i)
 	return &ServiceDefService{
 		repo:             repo,
 		db:               db,
 		catalogs:         catalogs,
 		engineConfigSvc:  engineConfigSvc,
 		llmClientFactory: llm.NewClient,
+		resolver:         engine.NewParticipantResolver(orgResolver),
 	}, nil
 }
 
@@ -495,6 +499,9 @@ func (s *ServiceDefService) checkWorkflowParticipantRisk(def *engine.WorkflowDef
 	if def == nil {
 		return nil
 	}
+	if issue := s.checkWorkflowParticipantAvailability(def); issue != nil {
+		return issue
+	}
 	for _, node := range def.Nodes {
 		if node.Type != engine.NodeForm && node.Type != engine.NodeApprove && node.Type != engine.NodeProcess {
 			continue
@@ -508,6 +515,72 @@ func (s *ServiceDefService) checkWorkflowParticipantRisk(def *engine.WorkflowDef
 		}
 	}
 	return nil
+}
+
+func (s *ServiceDefService) checkWorkflowParticipantAvailability(def *engine.WorkflowDef) *ServiceHealthItem {
+	if def == nil {
+		return nil
+	}
+	for _, node := range def.Nodes {
+		if node.Type != engine.NodeForm && node.Type != engine.NodeApprove && node.Type != engine.NodeProcess {
+			continue
+		}
+		data, err := engine.ParseNodeData(node.Data)
+		if err != nil {
+			continue
+		}
+		for _, participant := range data.Participants {
+			if participant.Type == "requester" || participant.Type == "requester_manager" {
+				continue
+			}
+			if s.resolver == nil {
+				return &ServiceHealthItem{
+					Key:     "reference_path_participant",
+					Label:   "Reference Participants",
+					Status:  "warn",
+					Message: fmt.Sprintf("manual node %s cannot verify participant availability because org resolver is unavailable", node.ID),
+				}
+			}
+			userIDs, resolveErr := s.resolver.Resolve(s.db.DB, 0, participant)
+			if resolveErr != nil {
+				return &ServiceHealthItem{
+					Key:     "reference_path_participant",
+					Label:   "Reference Participants",
+					Status:  "fail",
+					Message: fmt.Sprintf("manual node %s participant %s cannot be resolved: %v", node.ID, describeWorkflowParticipant(participant), resolveErr),
+				}
+			}
+			if len(userIDs) == 0 {
+				return &ServiceHealthItem{
+					Key:     "reference_path_participant",
+					Label:   "Reference Participants",
+					Status:  "fail",
+					Message: fmt.Sprintf("manual node %s participant %s has no active approver", node.ID, describeWorkflowParticipant(participant)),
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func describeWorkflowParticipant(p engine.Participant) string {
+	switch p.Type {
+	case "user":
+		if strings.TrimSpace(p.Value) != "" {
+			return fmt.Sprintf("user(%s)", strings.TrimSpace(p.Value))
+		}
+	case "position":
+		if strings.TrimSpace(p.Value) != "" {
+			return fmt.Sprintf("position(%s)", strings.TrimSpace(p.Value))
+		}
+	case "department":
+		if strings.TrimSpace(p.Value) != "" {
+			return fmt.Sprintf("department(%s)", strings.TrimSpace(p.Value))
+		}
+	case "position_department":
+		return fmt.Sprintf("position_department(%s@%s)", strings.TrimSpace(p.PositionCode), strings.TrimSpace(p.DepartmentCode))
+	}
+	return p.Type
 }
 
 func (s *ServiceDefService) checkFallbackRisk() *ServiceHealthItem {
