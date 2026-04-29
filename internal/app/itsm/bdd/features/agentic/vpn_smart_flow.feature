@@ -58,17 +58,17 @@ Feature: VPN 开通申请 — 智能引擎流程
   Scenario: 安全分支被驳回后直接在当前分支收敛为 rejected
     Given "vpn-requester" 已创建 VPN 工单，访问原因为 "external_collaboration"
     When 智能引擎执行决策循环
-    Then 工单状态为 "in_progress"
+    Then 工单状态为 "waiting_human"
     And 当前处理任务分配到岗位 "security_admin"
-    When 当前活动的被分配人认领并处理驳回
+    When 当前活动的被分配人驳回，意见为 "安全条件不满足"
     And 智能引擎再次执行决策循环
     Then 工单状态为 "rejected"
 
   Scenario: 网络分支被驳回后直接在当前分支收敛为 rejected
     Given "vpn-requester" 已创建 VPN 工单，访问原因为 "network_support"
     When 智能引擎执行决策循环
-    Then 工单状态为 "in_progress"
+    Then 工单状态为 "waiting_human"
     And 当前处理任务分配到岗位 "network_admin"
-    When 当前活动的被分配人认领并处理驳回
+    When 当前活动的被分配人驳回，意见为 "网络条件不满足"
     And 智能引擎再次执行决策循环
     Then 工单状态为 "rejected"

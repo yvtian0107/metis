@@ -222,10 +222,10 @@ func TestDecisionTicketContextReturnsStableDecisionAnchors(t *testing.T) {
 				SLAResolutionDeadline: &now,
 			},
 			history: []activityModel{
-				{ID: 9, Name: "处理", ActivityType: "process", Status: ActivityCompleted, TransitionOutcome: "completed", FinishedAt: &now},
+				{ID: 9, Name: "处理", ActivityType: "process", Status: ActivityApproved, TransitionOutcome: "completed", FinishedAt: &now},
 			},
 			activityByID: map[uint]activityModel{
-				9: {ID: 9, Name: "处理", ActivityType: "process", Status: ActivityCompleted, TransitionOutcome: "completed", FinishedAt: &now},
+				9: {ID: 9, Name: "处理", ActivityType: "process", Status: ActivityApproved, TransitionOutcome: "completed", FinishedAt: &now},
 			},
 			assignments: map[uint][]ActivityAssignmentInfo{
 				9: {{ParticipantType: "user", UserID: uintPtrIf(1), AssigneeID: uintPtrIf(1), Status: "completed", FinishedAt: &now}},
@@ -498,7 +498,7 @@ func TestValidateDecisionPlanRejectsDuplicateCompletedHumanActivity(t *testing.T
 		TicketID:          ticket.ID,
 		Name:              "处理",
 		ActivityType:      NodeProcess,
-		Status:            ActivityCompleted,
+		Status:            ActivityApproved,
 		TransitionOutcome: "completed",
 	}
 	if err := db.Create(&activity).Error; err != nil {
@@ -529,6 +529,87 @@ func TestValidateDecisionPlanRejectsDuplicateCompletedHumanActivity(t *testing.T
 	if err == nil || !strings.Contains(err.Error(), "重复创建已完成的人工活动") {
 		t.Fatalf("expected duplicate human activity validation error, got %v", err)
 	}
+}
+
+func TestValidateDecisionPlanNormalizesVPNRouteFromCollaborationSpec(t *testing.T) {
+	db, ticket := setupStructuredRoutingValidationDB(t, `{"request_kind":"network_access_issue"}`)
+
+	eng := &SmartEngine{}
+	plan := &DecisionPlan{
+		NextStepType:  NodeProcess,
+		ExecutionMode: "single",
+		Activities: []DecisionActivity{{
+			Type:            NodeProcess,
+			ParticipantType: "position_department",
+			DepartmentCode:  "it",
+			PositionCode:    "security_admin",
+		}},
+		Confidence: 0.95,
+	}
+	err := eng.validateDecisionPlan(db, ticket.ID, plan, &serviceModel{ID: 1, CollaborationSpec: testVPNRoutingSpec}, nil)
+	if err != nil {
+		t.Fatalf("unexpected validation error: %v", err)
+	}
+	if got := plan.Activities[0].PositionCode; got != "network_admin" {
+		t.Fatalf("expected participant normalized to network_admin, got %q", got)
+	}
+	if got := plan.Activities[0].DepartmentCode; got != "it" {
+		t.Fatalf("expected department to remain it, got %q", got)
+	}
+}
+
+func TestValidateDecisionPlanRejectsMissingVPNRouteField(t *testing.T) {
+	db, ticket := setupStructuredRoutingValidationDB(t, `{"vpn_account":"demo@example.com"}`)
+
+	eng := &SmartEngine{}
+	err := eng.validateDecisionPlan(db, ticket.ID, &DecisionPlan{
+		NextStepType:  NodeProcess,
+		ExecutionMode: "single",
+		Activities: []DecisionActivity{{
+			Type:            NodeProcess,
+			ParticipantType: "position_department",
+			DepartmentCode:  "it",
+			PositionCode:    "security_admin",
+		}},
+		Confidence: 0.95,
+	}, &serviceModel{ID: 1, CollaborationSpec: testVPNRoutingSpec}, nil)
+	if err == nil || !strings.Contains(err.Error(), "request_kind") {
+		t.Fatalf("expected missing request_kind validation error, got %v", err)
+	}
+}
+
+const testVPNRoutingSpec = `流程通过 form.request_kind 进入排他网关：线上支持(online_support)、故障排查(troubleshooting)、生产应急(production_emergency)、网络接入问题(network_access_issue)进入网络管理员处理，岗位编码 network_admin；外部协作(external_collaboration)、长期远程办公(long_term_remote_work)、跨境访问(cross_border_access)、安全合规事项(security_compliance)进入信息安全管理员处理，岗位编码 security_admin。`
+
+func setupStructuredRoutingValidationDB(t *testing.T, formData string) (*gorm.DB, ticketModel) {
+	t.Helper()
+
+	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	if err := db.AutoMigrate(&ticketModel{}, &activityModel{}, &assignmentModel{}); err != nil {
+		t.Fatalf("migrate db: %v", err)
+	}
+	for _, stmt := range []string{
+		`CREATE TABLE users (id integer primary key, is_active boolean)`,
+		`CREATE TABLE positions (id integer primary key, code text)`,
+		`CREATE TABLE departments (id integer primary key, code text)`,
+		`CREATE TABLE user_positions (id integer primary key, user_id integer, position_id integer, department_id integer, deleted_at datetime)`,
+		`INSERT INTO users (id, is_active) VALUES (1, true), (2, true)`,
+		`INSERT INTO positions (id, code) VALUES (11, 'network_admin'), (12, 'security_admin')`,
+		`INSERT INTO departments (id, code) VALUES (21, 'it')`,
+		`INSERT INTO user_positions (id, user_id, position_id, department_id) VALUES (1, 1, 11, 21), (2, 2, 12, 21)`,
+	} {
+		if err := db.Exec(stmt).Error; err != nil {
+			t.Fatalf("exec %q: %v", stmt, err)
+		}
+	}
+
+	ticket := ticketModel{Status: "decisioning", EngineType: "smart", FormData: formData}
+	if err := db.Create(&ticket).Error; err != nil {
+		t.Fatalf("create ticket: %v", err)
+	}
+	return db, ticket
 }
 
 func TestValidateDecisionPlanRejectsRepeatedActivityAfterRejectedCompletion(t *testing.T) {

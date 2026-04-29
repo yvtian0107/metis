@@ -117,7 +117,7 @@ func toolTicketContext() decisionToolDef {
 				assignments, _ := ctx.data.GetActivityAssignments(a.ID)
 				entry := activityFactMap(&a, assignments)
 				history = append(history, entry)
-				if a.Status == ActivityCompleted && isHumanActivityType(a.ActivityType) {
+				if IsCompletedActivityStatus(a.Status) && isHumanActivityType(a.ActivityType) {
 					satisfied := isPositiveActivityOutcome(a.TransitionOutcome)
 					completedRequirements = append(completedRequirements, map[string]any{
 						"type":                       a.ActivityType,
@@ -249,7 +249,7 @@ func activityFactMap(a *activityModel, assignments []ActivityAssignmentInfo) map
 	if a.FinishedAt != nil {
 		entry["completed_at"] = a.FinishedAt.Format(time.RFC3339)
 	}
-	if a.Status == ActivityCompleted && isHumanActivityType(a.ActivityType) {
+	if IsCompletedActivityStatus(a.Status) && isHumanActivityType(a.ActivityType) {
 		satisfied := isPositiveActivityOutcome(a.TransitionOutcome)
 		entry["satisfied"] = satisfied
 		if !satisfied {

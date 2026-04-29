@@ -997,7 +997,7 @@ func (bc *bddContext) whenSmartEngineDecisionCycleUntilComplete() error {
 		ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 		var completedID *uint
 		var lastCompleted TicketActivity
-		if err := bc.db.Where("ticket_id = ? AND status = ?", bc.ticket.ID, "completed").
+		if err := bc.db.Where("ticket_id = ? AND status IN ?", bc.ticket.ID, engine.CompletedActivityStatuses()).
 			Order("id DESC").First(&lastCompleted).Error; err == nil {
 			completedID = &lastCompleted.ID
 		}
@@ -1024,7 +1024,7 @@ func (bc *bddContext) whenSmartEngineDecisionCycleUntilComplete() error {
 }
 
 func isTerminal(status string) bool {
-	return status == "completed" || status == "cancelled" || status == "failed"
+	return engine.IsTerminalTicketStatus(status)
 }
 
 // autoProcessBlockingActivities finds any pending/in_progress activities (non-parallel)

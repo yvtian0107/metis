@@ -245,6 +245,15 @@ func CompletedActivityStatuses() []string {
 	return []string{ActivityCompleted, ActivityApproved, ActivityRejected, ActivityCancelled}
 }
 
+func IsCompletedActivityStatus(status string) bool {
+	switch status {
+	case ActivityCompleted, ActivityApproved, ActivityRejected, ActivityCancelled:
+		return true
+	default:
+		return false
+	}
+}
+
 // Smart engine errors
 var (
 	ErrSmartEngineUnavailable = errors.New("智能引擎不可用：AI 模块未安装")

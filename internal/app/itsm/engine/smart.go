@@ -907,6 +907,15 @@ func (e *SmartEngine) validateDecisionPlan(tx *gorm.DB, ticketID uint, plan *Dec
 		return fmt.Errorf("next_step_type %q 必须包含至少一个活动", plan.NextStepType)
 	}
 
+	// Validate confidence is in range before any confidence-gated normalization.
+	if plan.Confidence < 0 || plan.Confidence > 1 {
+		return fmt.Errorf("confidence %.2f 不在 [0, 1] 范围内", plan.Confidence)
+	}
+
+	if err := e.validateAndNormalizeStructuredRoutingDecision(tx, ticketID, plan, svc); err != nil {
+		return err
+	}
+
 	// Validate activities
 	for i, a := range plan.Activities {
 		if !AllowedSmartStepTypes[a.Type] {
@@ -965,11 +974,6 @@ func (e *SmartEngine) validateDecisionPlan(tx *gorm.DB, ticketID uint, plan *Dec
 		}
 	}
 
-	// Validate confidence is in range
-	if plan.Confidence < 0 || plan.Confidence > 1 {
-		return fmt.Errorf("confidence %.2f 不在 [0, 1] 范围内", plan.Confidence)
-	}
-
 	if err := e.validateRoutingConflictDecision(tx, ticketID, plan, svc); err != nil {
 		return err
 	}
@@ -1025,6 +1029,110 @@ func planCreatesSingleRouteHumanWork(plan *DecisionPlan) bool {
 			continue
 		}
 		return true
+	}
+	return false
+}
+
+func (e *SmartEngine) validateAndNormalizeStructuredRoutingDecision(tx *gorm.DB, ticketID uint, plan *DecisionPlan, svc *serviceModel) error {
+	if plan == nil || svc == nil || plan.Confidence < DefaultConfidenceThreshold {
+		return nil
+	}
+	if !planCreatesSingleRouteHumanWork(plan) {
+		return nil
+	}
+
+	expectedPositions, ok, err := collaborationSpecRequestKindPositions(tx, ticketID, svc.CollaborationSpec)
+	if err != nil || !ok {
+		return err
+	}
+	if len(expectedPositions) == 0 {
+		return fmt.Errorf("form.request_kind 缺失、为空或未命中协作规范定义的路由枚举；不得高置信选择网络或安全单一路由")
+	}
+	if len(expectedPositions) > 1 {
+		return fmt.Errorf("form.request_kind 命中多个协作规范分支；不得高置信选择单一路由")
+	}
+
+	expectedPosition := ""
+	for position := range expectedPositions {
+		expectedPosition = position
+	}
+	for i := range plan.Activities {
+		if !isHumanActivityType(plan.Activities[i].Type) || plan.Activities[i].ParticipantType == "requester" {
+			continue
+		}
+		if decisionActivityTargetsPosition(tx, plan.Activities[i], expectedPosition) {
+			continue
+		}
+		slog.Warn("decision plan route conflicts with collaboration spec, normalizing participant",
+			"activity_index", i,
+			"expected_position", expectedPosition,
+			"actual_participant_type", plan.Activities[i].ParticipantType,
+			"actual_position", plan.Activities[i].PositionCode)
+		plan.Activities[i].ParticipantID = nil
+		plan.Activities[i].ParticipantType = "position_department"
+		plan.Activities[i].DepartmentCode = "it"
+		plan.Activities[i].PositionCode = expectedPosition
+	}
+	return nil
+}
+
+func collaborationSpecRequestKindPositions(tx *gorm.DB, ticketID uint, spec string) (map[string]struct{}, bool, error) {
+	if !looksLikeVPNRequestKindSpec(spec) {
+		return nil, false, nil
+	}
+
+	var ticket struct {
+		FormData string
+	}
+	if err := tx.Table("itsm_tickets").Where("id = ?", ticketID).Select("form_data").First(&ticket).Error; err != nil {
+		return nil, true, err
+	}
+
+	var formData map[string]any
+	if strings.TrimSpace(ticket.FormData) != "" {
+		_ = json.Unmarshal([]byte(ticket.FormData), &formData)
+	}
+	values := conditionValues(formData["request_kind"])
+	if len(values) == 0 {
+		return map[string]struct{}{}, true, nil
+	}
+
+	positions := map[string]struct{}{}
+	for _, value := range values {
+		switch value {
+		case "online_support", "troubleshooting", "production_emergency", "network_access_issue":
+			positions["network_admin"] = struct{}{}
+		case "external_collaboration", "long_term_remote_work", "cross_border_access", "security_compliance":
+			positions["security_admin"] = struct{}{}
+		default:
+			return map[string]struct{}{}, true, nil
+		}
+	}
+	return positions, true, nil
+}
+
+func looksLikeVPNRequestKindSpec(spec string) bool {
+	return strings.Contains(spec, "form.request_kind") &&
+		strings.Contains(spec, "network_admin") &&
+		strings.Contains(spec, "security_admin") &&
+		strings.Contains(spec, "online_support") &&
+		strings.Contains(spec, "security_compliance")
+}
+
+func decisionActivityTargetsPosition(tx *gorm.DB, da DecisionActivity, expectedPosition string) bool {
+	if expectedPosition == "" {
+		return false
+	}
+	if da.ParticipantType == "position_department" {
+		return strings.EqualFold(strings.TrimSpace(da.PositionCode), expectedPosition)
+	}
+	if da.ParticipantID != nil && *da.ParticipantID > 0 {
+		var count int64
+		tx.Table("user_positions").
+			Joins("JOIN positions ON positions.id = user_positions.position_id").
+			Where("user_positions.user_id = ? AND positions.code = ? AND user_positions.deleted_at IS NULL", *da.ParticipantID, expectedPosition).
+			Count(&count)
+		return count > 0
 	}
 	return false
 }
@@ -1137,7 +1245,7 @@ func (e *SmartEngine) validateNoDuplicateCompletedHumanActivity(tx *gorm.DB, tic
 		}
 
 		var completed []activityModel
-		if err := tx.Where("ticket_id = ? AND status = ? AND activity_type = ?", ticketID, ActivityCompleted, da.Type).
+		if err := tx.Where("ticket_id = ? AND status IN ? AND activity_type = ?", ticketID, CompletedActivityStatuses(), da.Type).
 			Order("id ASC").
 			Find(&completed).Error; err != nil {
 			return err
