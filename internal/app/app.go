@@ -56,6 +56,14 @@ type OrgResolver interface {
 	FindManagerByUserID(userID uint) (uint, error)
 }
 
+// OrgStructureResolver exposes bounded organization vocabulary lookups for
+// prompt builders. It intentionally returns department/position metadata only,
+// never user identities.
+type OrgStructureResolver interface {
+	SearchOrgStructure(query string, kinds []string, limit int) (*OrgStructureSearchResult, error)
+	ResolveOrgParticipant(departmentHint, positionHint string, limit int) (*OrgParticipantResolveResult, error)
+}
+
 // OrgDepartment represents a department in the organization.
 type OrgDepartment struct {
 	ID   uint   `json:"id"`
@@ -104,6 +112,30 @@ type OrgContextPosition struct {
 	Code     string `json:"code"`
 	Name     string `json:"name"`
 	IsActive bool   `json:"is_active"`
+}
+
+// OrgStructureSearchResult contains bounded department/position vocabulary
+// matches for prompt grounding.
+type OrgStructureSearchResult struct {
+	Departments []OrgContextDepartment `json:"departments,omitempty"`
+	Positions   []OrgContextPosition   `json:"positions,omitempty"`
+	Summary     string                 `json:"summary,omitempty"`
+}
+
+// OrgParticipantCandidate is a non-user participant mapping candidate.
+type OrgParticipantCandidate struct {
+	Type           string `json:"type"`
+	DepartmentCode string `json:"department_code,omitempty"`
+	DepartmentName string `json:"department_name,omitempty"`
+	PositionCode   string `json:"position_code,omitempty"`
+	PositionName   string `json:"position_name,omitempty"`
+	CandidateCount int64  `json:"candidate_count,omitempty"`
+}
+
+// OrgParticipantResolveResult contains bounded participant mapping candidates.
+type OrgParticipantResolveResult struct {
+	Candidates []OrgParticipantCandidate `json:"candidates,omitempty"`
+	Summary    string                    `json:"summary,omitempty"`
 }
 
 var apps []App

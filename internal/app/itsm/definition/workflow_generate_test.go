@@ -80,6 +80,11 @@ func newWorkflowGenerateServiceForRetryTest(client *fakeWorkflowLLMClient, maxRe
 func validWorkflowJSONForGenerateTest() string {
 	return `{"nodes":[{"id":"start","type":"start","data":{"label":"start"}},{"id":"request","type":"form","data":{"label":"request form","participants":[{"type":"requester"}],"formSchema":{"fields":[{"key":"summary","type":"textarea","label":"Summary"}]}}},{"id":"end","type":"end","data":{"label":"end"}}],"edges":[{"id":"e1","source":"start","target":"request","data":{}},{"id":"e2","source":"request","target":"end","data":{"outcome":"submitted"}}]}`
 }
+
+func validVPNWorkflowJSONForGenerateTest() string {
+	return `{"nodes":[{"id":"start","type":"start","data":{"label":"开始"}},{"id":"request","type":"form","data":{"label":"填写 VPN 开通申请","participants":[{"type":"requester"}],"formSchema":{"fields":[{"key":"vpn_account","type":"text","label":"VPN账号"},{"key":"device_usage","type":"textarea","label":"设备与用途说明"},{"key":"request_kind","type":"select","label":"访问原因","options":["online_support","troubleshooting","production_emergency","network_access_issue","external_collaboration","long_term_remote_work","cross_border_access","security_compliance"]}]}}},{"id":"route","type":"exclusive","data":{"label":"访问原因路由"}},{"id":"network_process","type":"process","data":{"label":"网络管理员处理","participants":[{"type":"position_department","department_code":"it","position_code":"network_admin"}]}},{"id":"security_process","type":"process","data":{"label":"信息安全管理员处理","participants":[{"type":"position_department","department_code":"it","position_code":"security_admin"}]}},{"id":"end","type":"end","data":{"label":"结束"}}],"edges":[{"id":"edge_start_request","source":"start","target":"request","data":{}},{"id":"edge_request_route","source":"request","target":"route","data":{}},{"id":"edge_route_network","source":"route","target":"network_process","data":{"condition":{"field":"form.request_kind","operator":"contains_any","value":["online_support","troubleshooting","production_emergency","network_access_issue"]}}},{"id":"edge_route_security","source":"route","target":"security_process","data":{"condition":{"field":"form.request_kind","operator":"contains_any","value":["external_collaboration","long_term_remote_work","cross_border_access","security_compliance"]}}},{"id":"edge_network_end","source":"network_process","target":"end","data":{}},{"id":"edge_security_end","source":"security_process","target":"end","data":{}}]}`
+}
+
 func workflowWithBlockingIssueForGenerateTest(userID uint) string {
 	return fmt.Sprintf(`{
 		"nodes": [
@@ -740,7 +745,40 @@ func (vpnWorkflowGenerateOrgResolver) QueryContext(string, string, string, bool)
 	}, nil
 }
 
-func TestGenerate_WithServiceIDInjectsVPNFormAndOrgContext(t *testing.T) {
+type vpnWorkflowGenerateOrgStructureResolver struct{}
+
+func (vpnWorkflowGenerateOrgStructureResolver) SearchOrgStructure(query string, kinds []string, limit int) (*appcore.OrgStructureSearchResult, error) {
+	return &appcore.OrgStructureSearchResult{
+		Departments: []appcore.OrgContextDepartment{{Code: "it", Name: "信息部", IsActive: true}},
+		Positions: []appcore.OrgContextPosition{
+			{Code: "network_admin", Name: "网络管理员", IsActive: true},
+			{Code: "security_admin", Name: "信息安全管理员", IsActive: true},
+		},
+		Summary: "测试组织结构搜索: " + query,
+	}, nil
+}
+
+func (vpnWorkflowGenerateOrgStructureResolver) ResolveOrgParticipant(departmentHint, positionHint string, limit int) (*appcore.OrgParticipantResolveResult, error) {
+	candidate := appcore.OrgParticipantCandidate{
+		Type:           "position_department",
+		DepartmentCode: "it",
+		DepartmentName: "信息部",
+		CandidateCount: 2,
+	}
+	if strings.Contains(positionHint, "安全") {
+		candidate.PositionCode = "security_admin"
+		candidate.PositionName = "信息安全管理员"
+	} else {
+		candidate.PositionCode = "network_admin"
+		candidate.PositionName = "网络管理员"
+	}
+	return &appcore.OrgParticipantResolveResult{
+		Candidates: []appcore.OrgParticipantCandidate{candidate},
+		Summary:    "测试参与人解析",
+	}, nil
+}
+
+func TestGenerate_WithServiceIDUsesOrgToolPreflightForVPNContext(t *testing.T) {
 	db := newTestDB(t)
 	catSvc := newCatalogServiceForTest(t, db)
 	root, _ := catSvc.Create("Root", "root", "", "", nil, 10)
@@ -759,20 +797,43 @@ func TestGenerate_WithServiceIDInjectsVPNFormAndOrgContext(t *testing.T) {
 	}
 
 	client := &fakeWorkflowLLMClient{
-		responses: []llm.ChatResponse{{Content: validWorkflowJSONForGenerateTest()}},
+		responses: []llm.ChatResponse{
+			{ToolCalls: []llm.ToolCall{
+				{ID: "call_network", Name: "workflow.org_resolve_participant", Arguments: `{"department_hint":"信息部","position_hint":"网络管理员","limit":10}`},
+				{ID: "call_security", Name: "workflow.org_resolve_participant", Arguments: `{"department_hint":"信息部","position_hint":"信息安全管理员","limit":10}`},
+			}},
+			{Content: "组织上下文已收集"},
+			{Content: validVPNWorkflowJSONForGenerateTest()},
+		},
 	}
 	svc := newWorkflowGenerateServiceForRetryTest(client, 0)
 	svc.serviceDefSvc = newServiceDefServiceForTest(t, db)
-	svc.orgResolver = vpnWorkflowGenerateOrgResolver{}
+	svc.orgStructureResolver = vpnWorkflowGenerateOrgStructureResolver{}
 
 	naturalSpec := "员工申请 VPN 开通时，确认账号、设备或用途、访问原因。网络支持类交给网络管理员，外部协作、跨境访问或安全合规类交给信息安全管理员。"
-	if _, err := svc.Generate(context.Background(), &GenerateRequest{ServiceID: service.ID, CollaborationSpec: naturalSpec}); err != nil {
+	resp, err := svc.Generate(context.Background(), &GenerateRequest{ServiceID: service.ID, CollaborationSpec: naturalSpec})
+	if err != nil {
 		t.Fatalf("generate workflow: %v", err)
 	}
-	if len(client.requests) == 0 || len(client.requests[0].Messages) < 2 {
+	if len(client.requests) != 3 {
+		t.Fatalf("expected org preflight two-turn exchange plus final JSON generation, got %d requests", len(client.requests))
+	}
+	if len(client.requests[0].Tools) != 2 {
+		t.Fatalf("expected org preflight tools, got %+v", client.requests[0].Tools)
+	}
+	if client.requests[0].ResponseFormat != nil {
+		t.Fatalf("preflight request should not force JSON response format")
+	}
+	if len(client.requests[2].Tools) != 0 {
+		t.Fatalf("final workflow generation should not expose org tools, got %+v", client.requests[2].Tools)
+	}
+	if got := client.requests[2].ResponseFormat; got == nil || got.Type != "json_object" {
+		t.Fatalf("final workflow generation should still use json_object response format, got %+v", got)
+	}
+	if len(client.requests[2].Messages) < 2 {
 		t.Fatalf("expected LLM request with user prompt, got %+v", client.requests)
 	}
-	userPrompt := client.requests[0].Messages[1].Content
+	userPrompt := client.requests[2].Messages[1].Content
 	for _, snippet := range []string{
 		naturalSpec,
 		"已有申请表单契约",
@@ -781,7 +842,7 @@ func TestGenerate_WithServiceIDInjectsVPNFormAndOrgContext(t *testing.T) {
 		"request_kind",
 		"online_support",
 		"security_compliance",
-		"组织架构上下文",
+		"按需查询到的组织上下文",
 		"信息部",
 		"it",
 		"网络管理员",
@@ -791,6 +852,12 @@ func TestGenerate_WithServiceIDInjectsVPNFormAndOrgContext(t *testing.T) {
 	} {
 		if !strings.Contains(userPrompt, snippet) {
 			t.Fatalf("expected generated prompt to contain %q, got %s", snippet, userPrompt)
+		}
+	}
+	workflowText := string(resp.WorkflowJSON)
+	for _, snippet := range []string{"form.request_kind", "network_admin", "security_admin"} {
+		if !strings.Contains(workflowText, snippet) {
+			t.Fatalf("expected generated workflow to contain %q, got %s", snippet, workflowText)
 		}
 	}
 }
@@ -1157,7 +1224,10 @@ func TestLLMExtract_BranchWorkflow(t *testing.T) {
 func TestLLMExtract_VPNBranchWorkflowPreservesFormAndRoutingContract(t *testing.T) {
 	env := requireLLMEnv(t)
 
-	spec := `员工在 IT 服务台申请开通 VPN 时，服务台需要确认 VPN 账号、准备用什么设备或场景使用，以及这次访问的主要原因。访问原因包括线上支持、故障排查、生产应急、网络接入问题、外部协作、长期远程办公、跨境访问和安全合规事项。线上支持、故障排查、生产应急、网络接入问题偏网络连通与业务支持，交给信息部网络管理员处理；外部协作、长期远程办公、跨境访问、安全合规事项涉及外部、长期、跨境或合规风险，交给信息部信息安全管理员处理。处理人完成处理后流程结束。`
+	spec := `员工在 IT 服务台申请开通 VPN 时，服务台需要确认 VPN 账号、准备用什么设备或场景使用，以及这次访问的主要原因。
+访问原因包括线上支持、故障排查、生产应急、网络接入问题、外部协作、长期远程办公、跨境访问和安全合规事项。
+线上支持、故障排查、生产应急、网络接入问题偏网络连通与业务支持，交给信息部网络管理员处理；外部协作、长期远程办公、跨境访问、安全合规事项涉及外部、长期、跨境或合规风险，交给信息部信息安全管理员处理。
+处理人完成处理后流程结束。`
 	svc := &WorkflowGenerateService{}
 	promptCtx := workflowPromptContext{
 		FormContractContext: svc.buildFormContractContext(JSONField(`{"version":1,"fields":[{"key":"vpn_account","type":"text","label":"VPN账号"},{"key":"device_usage","type":"textarea","label":"设备与用途说明"},{"key":"request_kind","type":"select","label":"访问原因","options":[{"label":"线上支持","value":"online_support"},{"label":"故障排查","value":"troubleshooting"},{"label":"生产应急","value":"production_emergency"},{"label":"网络接入问题","value":"network_access_issue"},{"label":"外部协作","value":"external_collaboration"},{"label":"长期远程办公","value":"long_term_remote_work"},{"label":"跨境访问","value":"cross_border_access"},{"label":"安全合规事项","value":"security_compliance"}]}]}`)),

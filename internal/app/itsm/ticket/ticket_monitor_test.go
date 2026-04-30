@@ -80,6 +80,21 @@ func createCurrentActivity(t *testing.T, db *gorm.DB, ticket Ticket, activityTyp
 	return activity
 }
 
+func createPendingAssignment(t *testing.T, db *gorm.DB, ticket Ticket, activity TicketActivity, userID uint) {
+	t.Helper()
+	assignment := TicketAssignment{
+		TicketID:        ticket.ID,
+		ActivityID:      activity.ID,
+		ParticipantType: "user",
+		UserID:          &userID,
+		Status:          AssignmentPending,
+		IsCurrent:       true,
+	}
+	if err := db.Create(&assignment).Error; err != nil {
+		t.Fatalf("create pending assignment: %v", err)
+	}
+}
+
 func monitorReasonsContain(item TicketMonitorItem, needle string) bool {
 	return slices.ContainsFunc(item.StuckReasons, func(reason string) bool {
 		return strings.Contains(reason, needle)
@@ -136,10 +151,17 @@ func TestTicketMonitorDetectsSLAAndActionRisk(t *testing.T) {
 
 	breached := createMonitorTicket(t, db, service, priority, requester, func(ticket *Ticket) {
 		ticket.Code = "TICK-SLA-BLOCKED"
-		ticket.SLAStatus = SLAStatusBreachedResolve
+		deadline := now.Add(-10 * time.Minute)
+		ticket.SLAResolutionDeadline = &deadline
+		ticket.SLAStatus = SLAStatusOnTrack
 	})
-	dueSoon := createMonitorTicket(t, db, service, priority, requester, func(ticket *Ticket) {
-		ticket.Code = "TICK-SLA-RISK"
+	responseDueSoon := createMonitorTicket(t, db, service, priority, requester, func(ticket *Ticket) {
+		ticket.Code = "TICK-SLA-RESPONSE-RISK"
+		deadline := now.Add(20 * time.Minute)
+		ticket.SLAResponseDeadline = &deadline
+	})
+	resolutionDueSoon := createMonitorTicket(t, db, service, priority, requester, func(ticket *Ticket) {
+		ticket.Code = "TICK-SLA-RESOLUTION-RISK"
 		deadline := now.Add(20 * time.Minute)
 		ticket.SLAResolutionDeadline = &deadline
 	})
@@ -154,29 +176,42 @@ func TestTicketMonitorDetectsSLAAndActionRisk(t *testing.T) {
 		ticket.Code = "TICK-ACTION-RISK"
 	})
 	createCurrentActivity(t, db, actionRunning, engine.NodeAction, now.Add(-20*time.Minute))
+	humanWaiting := createMonitorTicket(t, db, service, priority, requester, func(ticket *Ticket) {
+		ticket.Code = "TICK-HUMAN-RISK"
+		ticket.EngineType = "classic"
+		ticket.Source = TicketSourceCatalog
+	})
+	humanActivity := createCurrentActivity(t, db, humanWaiting, engine.NodeProcess, now.Add(-70*time.Minute))
+	createPendingAssignment(t, db, humanWaiting, humanActivity, requester.ID)
 
 	resp, err := svc.Monitor(TicketMonitorParams{Page: 1, PageSize: 20}, requester.ID)
 	if err != nil {
 		t.Fatalf("monitor: %v", err)
 	}
-	if resp.Summary.SLARiskTotal != 2 {
-		t.Fatalf("expected two SLA risk tickets, got %+v", resp.Summary)
+	if resp.Summary.SLARiskTotal != 3 || resp.Summary.StuckTotal != 2 || resp.Summary.RiskTotal != 4 {
+		t.Fatalf("expected separated SLA/stuck/risk totals, got %+v", resp.Summary)
 	}
 	byID := map[uint]TicketMonitorItem{}
 	for _, item := range resp.Items {
 		byID[item.ID] = item
 	}
-	if byID[breached.ID].RiskLevel != "blocked" || !monitorReasonsContain(byID[breached.ID], "SLA 已超时") {
+	if byID[breached.ID].RiskLevel != "blocked" || !monitorReasonsContain(byID[breached.ID], "解决 SLA 已超时") {
 		t.Fatalf("expected SLA blocked, got %+v", byID[breached.ID])
 	}
-	if byID[dueSoon.ID].RiskLevel != "risk" || !monitorReasonsContain(byID[dueSoon.ID], "SLA 距离截止") {
-		t.Fatalf("expected SLA due risk, got %+v", byID[dueSoon.ID])
+	if byID[responseDueSoon.ID].RiskLevel != "risk" || !monitorReasonsContain(byID[responseDueSoon.ID], "响应 SLA 距离截止") {
+		t.Fatalf("expected response SLA due risk, got %+v", byID[responseDueSoon.ID])
+	}
+	if byID[resolutionDueSoon.ID].RiskLevel != "risk" || !monitorReasonsContain(byID[resolutionDueSoon.ID], "解决 SLA 距离截止") {
+		t.Fatalf("expected resolution SLA due risk, got %+v", byID[resolutionDueSoon.ID])
 	}
 	if byID[actionFailed.ID].RiskLevel != "blocked" || !monitorReasonsContain(byID[actionFailed.ID], "动作执行失败") {
 		t.Fatalf("expected action failure blocked, got %+v", byID[actionFailed.ID])
 	}
 	if byID[actionRunning.ID].RiskLevel != "risk" || !monitorReasonsContain(byID[actionRunning.ID], "动作运行超过") {
 		t.Fatalf("expected action running risk, got %+v", byID[actionRunning.ID])
+	}
+	if byID[humanWaiting.ID].RiskLevel != "risk" || !monitorReasonsContain(byID[humanWaiting.ID], "人工节点等待超过") {
+		t.Fatalf("expected human wait risk, got %+v", byID[humanWaiting.ID])
 	}
 }
 

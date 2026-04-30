@@ -14,7 +14,7 @@ Feature: VPN 开通申请 — 经典引擎流程
 
   Scenario: 网络支持类请求路由到网络管理员并处理完成
     When "vpn-requester" 提交 VPN 申请，访问原因为 "network_support"
-    Then 工单状态为 "in_progress"
+    Then 工单状态为 "waiting_human"
     And 当前活动类型为 "process"
     And 当前活动分配给 "network-operator" 所属的 it/network_admin
     And 当前活动未分配给 "security-operator"
@@ -23,7 +23,7 @@ Feature: VPN 开通申请 — 经典引擎流程
 
   Scenario: 安全合规类请求路由到安全管理员并处理完成
     When "vpn-requester" 提交 VPN 申请，访问原因为 "external_collaboration"
-    Then 工单状态为 "in_progress"
+    Then 工单状态为 "waiting_human"
     And 当前活动类型为 "process"
     And 当前活动分配给 "security-operator" 所属的 it/security_admin
     And 当前活动未分配给 "network-operator"

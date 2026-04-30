@@ -6,7 +6,6 @@ import { useNavigate } from "react-router"
 import { toast } from "sonner"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import {
@@ -50,7 +49,27 @@ function EngineStatus({ status, label }: { status: SectionStatus; label?: string
   return <WorkspaceStatus tone={toneByStatus[status]} label={content} className="shrink-0 whitespace-nowrap py-0.5 text-[11px]" />
 }
 
-function EngineSettingSection({
+function EngineSettingGroup({
+  title,
+  description,
+  children,
+}: {
+  title: string
+  description: string
+  children: ReactNode
+}) {
+  return (
+    <section className="workspace-surface overflow-hidden rounded-[1.15rem]">
+      <div className="border-b border-border/45 bg-muted/16 px-5 py-4">
+        <h3 className="text-sm font-semibold text-foreground">{title}</h3>
+        <p className="mt-1 max-w-3xl text-xs leading-5 text-muted-foreground">{description}</p>
+      </div>
+      <div className="divide-y divide-border/45">{children}</div>
+    </section>
+  )
+}
+
+function EngineSettingRow({
   icon,
   title,
   description,
@@ -66,24 +85,22 @@ function EngineSettingSection({
   const Icon = icon
 
   return (
-    <Card className="w-full gap-0 overflow-hidden py-0">
-      <CardContent className="grid gap-5 px-5 py-5 xl:grid-cols-[minmax(240px,320px)_1fr] xl:items-start">
-        <div className="flex min-w-0 gap-3">
-          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border bg-muted/45">
-            <Icon className="h-4.5 w-4.5 text-foreground" />
-          </div>
-          <div className="min-w-0">
-            <div className="flex min-w-0 flex-wrap items-center gap-2">
-              <CardTitle className="text-[15px]">{title}</CardTitle>
-              <EngineStatus status={statusFromHealth(health)} />
-            </div>
-            <CardDescription className="mt-1 text-xs leading-5">{description}</CardDescription>
-            {health?.message ? <p className="mt-2 text-xs leading-5 text-muted-foreground">{health.message}</p> : null}
-          </div>
+    <div className="grid gap-5 px-5 py-5 xl:grid-cols-[minmax(230px,310px)_1fr] xl:items-start">
+      <div className="flex min-w-0 gap-3">
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-border/65 bg-background/45">
+          <Icon className="h-4.5 w-4.5 text-foreground" />
         </div>
-        <div className="min-w-0">{children}</div>
-      </CardContent>
-    </Card>
+        <div className="min-w-0">
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            <h4 className="text-[15px] font-semibold text-foreground">{title}</h4>
+            <EngineStatus status={statusFromHealth(health)} />
+          </div>
+          <p className="mt-1 text-xs leading-5 text-muted-foreground">{description}</p>
+          {health?.message ? <p className="mt-2 text-xs leading-5 text-muted-foreground/85">{health.message}</p> : null}
+        </div>
+      </div>
+      <div className="min-w-0">{children}</div>
+    </div>
   )
 }
 
@@ -156,7 +173,7 @@ function PathBuilderFields({
   }
 
   return (
-    <div className="grid gap-4 lg:grid-cols-2 2xl:grid-cols-[minmax(180px,220px)_minmax(220px,280px)_minmax(260px,1fr)_160px_180px] 2xl:items-start">
+    <div className="grid gap-3.5 lg:grid-cols-2 2xl:grid-cols-[minmax(170px,210px)_minmax(210px,260px)_minmax(240px,1fr)_150px_170px] 2xl:items-start">
       <div className="space-y-1.5">
         <Label>{t("engineConfig.provider")}</Label>
         <Select
@@ -212,7 +229,7 @@ function PathBuilderFields({
         </div>
       </div>
       <div className="lg:col-span-2 2xl:col-span-5">
-        <div className="flex items-center justify-between gap-3 rounded-lg border border-border/65 bg-muted/18 px-3 py-2.5">
+        <div className="flex items-center justify-between gap-3 rounded-md border border-border/65 bg-muted/18 px-3 py-2.5">
           <div className="min-w-0">
             <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground/85">
               {t("engineConfig.systemPrompt")}
@@ -437,121 +454,133 @@ function EngineSettingsForm({ config }: { config: EngineSettingsConfig }) {
         </Button>
       </div>
 
-      <EngineSettingSection
-        icon={Route}
-        title={t("itsm:engineConfig.pathBuilderTitle")}
-        description={t("itsm:engineConfig.pathBuilderDesc")}
-        health={healthByKey.get("pathBuilder")}
-      >
-        <PathBuilderFields
-          providerId={pathProviderId}
-          modelId={pathModelId}
-          temperature={pathTemperature}
-          maxRetries={pathMaxRetries}
-          timeoutSeconds={pathTimeoutSeconds}
-          systemPrompt={pathSystemPrompt}
-          promptDrawerTitle={t("engineConfig.pathPromptEditorTitle")}
-          promptDrawerDescription={t("engineConfig.pathPromptEditorDesc")}
-          onProviderChange={setPathProviderId}
-          onModelChange={setPathModelId}
-          onTemperatureChange={setPathTemperature}
-          onMaxRetriesChange={setPathMaxRetries}
-          onTimeoutSecondsChange={setPathTimeoutSeconds}
-          onApplySystemPrompt={applyPathPrompt}
-        />
-      </EngineSettingSection>
+      <div className="space-y-5">
+        <EngineSettingGroup
+          title={t("itsm:engineConfig.modelCapabilityGroupTitle")}
+          description={t("itsm:engineConfig.modelCapabilityGroupDesc")}
+        >
+          <EngineSettingRow
+            icon={Route}
+            title={t("itsm:engineConfig.pathBuilderTitle")}
+            description={t("itsm:engineConfig.pathBuilderDesc")}
+            health={healthByKey.get("pathBuilder")}
+          >
+            <PathBuilderFields
+              providerId={pathProviderId}
+              modelId={pathModelId}
+              temperature={pathTemperature}
+              maxRetries={pathMaxRetries}
+              timeoutSeconds={pathTimeoutSeconds}
+              systemPrompt={pathSystemPrompt}
+              promptDrawerTitle={t("engineConfig.pathPromptEditorTitle")}
+              promptDrawerDescription={t("engineConfig.pathPromptEditorDesc")}
+              onProviderChange={setPathProviderId}
+              onModelChange={setPathModelId}
+              onTemperatureChange={setPathTemperature}
+              onMaxRetriesChange={setPathMaxRetries}
+              onTimeoutSecondsChange={setPathTimeoutSeconds}
+              onApplySystemPrompt={applyPathPrompt}
+            />
+          </EngineSettingRow>
 
-      <EngineSettingSection
-        icon={Route}
-        title={t("itsm:engineConfig.titleBuilderTitle")}
-        description={t("itsm:engineConfig.titleBuilderDesc")}
-        health={healthByKey.get("titleBuilder")}
-      >
-        <PathBuilderFields
-          providerId={titleProviderId}
-          modelId={titleModelId}
-          temperature={titleTemperature}
-          maxRetries={titleMaxRetries}
-          timeoutSeconds={titleTimeoutSeconds}
-          systemPrompt={titleSystemPrompt}
-          promptDrawerTitle={t("engineConfig.titlePromptEditorTitle")}
-          promptDrawerDescription={t("engineConfig.titlePromptEditorDesc")}
-          onProviderChange={setTitleProviderId}
-          onModelChange={setTitleModelId}
-          onTemperatureChange={setTitleTemperature}
-          onMaxRetriesChange={setTitleMaxRetries}
-          onTimeoutSecondsChange={setTitleTimeoutSeconds}
-          onApplySystemPrompt={applyTitlePrompt}
-        />
-      </EngineSettingSection>
+          <EngineSettingRow
+            icon={Route}
+            title={t("itsm:engineConfig.titleBuilderTitle")}
+            description={t("itsm:engineConfig.titleBuilderDesc")}
+            health={healthByKey.get("titleBuilder")}
+          >
+            <PathBuilderFields
+              providerId={titleProviderId}
+              modelId={titleModelId}
+              temperature={titleTemperature}
+              maxRetries={titleMaxRetries}
+              timeoutSeconds={titleTimeoutSeconds}
+              systemPrompt={titleSystemPrompt}
+              promptDrawerTitle={t("engineConfig.titlePromptEditorTitle")}
+              promptDrawerDescription={t("engineConfig.titlePromptEditorDesc")}
+              onProviderChange={setTitleProviderId}
+              onModelChange={setTitleModelId}
+              onTemperatureChange={setTitleTemperature}
+              onMaxRetriesChange={setTitleMaxRetries}
+              onTimeoutSecondsChange={setTitleTimeoutSeconds}
+              onApplySystemPrompt={applyTitlePrompt}
+            />
+          </EngineSettingRow>
 
-      <EngineSettingSection
-        icon={Activity}
-        title={t("itsm:engineConfig.healthCheckerTitle")}
-        description={t("itsm:engineConfig.healthCheckerDesc")}
-        health={healthByKey.get("healthChecker")}
-      >
-        <PathBuilderFields
-          providerId={healthProviderId}
-          modelId={healthModelId}
-          temperature={healthTemperature}
-          maxRetries={healthMaxRetries}
-          timeoutSeconds={healthTimeoutSeconds}
-          systemPrompt={healthSystemPrompt}
-          promptDrawerTitle={t("engineConfig.healthPromptEditorTitle")}
-          promptDrawerDescription={t("engineConfig.healthPromptEditorDesc")}
-          onProviderChange={setHealthProviderId}
-          onModelChange={setHealthModelId}
-          onTemperatureChange={setHealthTemperature}
-          onMaxRetriesChange={setHealthMaxRetries}
-          onTimeoutSecondsChange={setHealthTimeoutSeconds}
-          onApplySystemPrompt={applyHealthPrompt}
-        />
-      </EngineSettingSection>
+          <EngineSettingRow
+            icon={Activity}
+            title={t("itsm:engineConfig.healthCheckerTitle")}
+            description={t("itsm:engineConfig.healthCheckerDesc")}
+            health={healthByKey.get("healthChecker")}
+          >
+            <PathBuilderFields
+              providerId={healthProviderId}
+              modelId={healthModelId}
+              temperature={healthTemperature}
+              maxRetries={healthMaxRetries}
+              timeoutSeconds={healthTimeoutSeconds}
+              systemPrompt={healthSystemPrompt}
+              promptDrawerTitle={t("engineConfig.healthPromptEditorTitle")}
+              promptDrawerDescription={t("engineConfig.healthPromptEditorDesc")}
+              onProviderChange={setHealthProviderId}
+              onModelChange={setHealthModelId}
+              onTemperatureChange={setHealthTemperature}
+              onMaxRetriesChange={setHealthMaxRetries}
+              onTimeoutSecondsChange={setHealthTimeoutSeconds}
+              onApplySystemPrompt={applyHealthPrompt}
+            />
+          </EngineSettingRow>
+        </EngineSettingGroup>
 
-      <EngineSettingSection
-        icon={ShieldAlert}
-        title={t("itsm:engineConfig.guardTitle")}
-        description={t("itsm:engineConfig.guardDesc")}
-        health={healthByKey.get("guard")}
-      >
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-[220px_320px]">
-          <div className="space-y-1.5">
-            <Label>{t("engineConfig.auditLevel")}</Label>
-            <Select value={auditLevel} onValueChange={setAuditLevel}>
-              <SelectTrigger className="w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="full">{t("engineConfig.logFull")}</SelectItem>
-                <SelectItem value="summary">{t("engineConfig.logSummary")}</SelectItem>
-                <SelectItem value="off">{t("engineConfig.logOff")}</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="space-y-1.5">
-            <Label>{t("engineConfig.fallbackAssignee")}</Label>
-            <Select value={String(fallbackAssignee)} onValueChange={(v) => setFallbackAssignee(Number(v))}>
-              <SelectTrigger className="w-full">
-                <SelectValue placeholder={t("engineConfig.fallbackAssigneePlaceholder")} />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="0">{t("engineConfig.fallbackAssigneeNone")}</SelectItem>
-                {!fallbackUserKnown && (
-                  <SelectItem value={String(fallbackAssignee)}>
-                    {t("engineConfig.fallbackAssigneeUnknown", { id: fallbackAssignee })}
-                  </SelectItem>
-                )}
-                {fallbackUsers.map((user) => (
-                  <SelectItem key={user.id} value={String(user.id)}>
-                    {user.username}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-        </div>
-      </EngineSettingSection>
+        <EngineSettingGroup
+          title={t("itsm:engineConfig.runtimeGuardGroupTitle")}
+          description={t("itsm:engineConfig.runtimeGuardGroupDesc")}
+        >
+          <EngineSettingRow
+            icon={ShieldAlert}
+            title={t("itsm:engineConfig.guardTitle")}
+            description={t("itsm:engineConfig.guardDesc")}
+            health={healthByKey.get("guard")}
+          >
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-[220px_320px]">
+              <div className="space-y-1.5">
+                <Label>{t("engineConfig.auditLevel")}</Label>
+                <Select value={auditLevel} onValueChange={setAuditLevel}>
+                  <SelectTrigger className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="full">{t("engineConfig.logFull")}</SelectItem>
+                    <SelectItem value="summary">{t("engineConfig.logSummary")}</SelectItem>
+                    <SelectItem value="off">{t("engineConfig.logOff")}</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <Label>{t("engineConfig.fallbackAssignee")}</Label>
+                <Select value={String(fallbackAssignee)} onValueChange={(v) => setFallbackAssignee(Number(v))}>
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder={t("engineConfig.fallbackAssigneePlaceholder")} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="0">{t("engineConfig.fallbackAssigneeNone")}</SelectItem>
+                    {!fallbackUserKnown && (
+                      <SelectItem value={String(fallbackAssignee)}>
+                        {t("engineConfig.fallbackAssigneeUnknown", { id: fallbackAssignee })}
+                      </SelectItem>
+                    )}
+                    {fallbackUsers.map((user) => (
+                      <SelectItem key={user.id} value={String(user.id)}>
+                        {user.username}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+          </EngineSettingRow>
+        </EngineSettingGroup>
+      </div>
     </div>
   )
 }

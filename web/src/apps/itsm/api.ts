@@ -360,6 +360,7 @@ export interface TicketItem {
 export interface TicketMonitorSummary {
   activeTotal: number
   stuckTotal: number
+  riskTotal: number
   slaRiskTotal: number
   aiIncidentTotal: number
   completedTodayTotal: number

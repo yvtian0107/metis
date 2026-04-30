@@ -47,7 +47,7 @@ func main() {
 			// Known flags — fall through to normal startup
 		default:
 			if os.Args[1][0] != '-' {
-				fmt.Fprintf(os.Stderr, "unknown command: %s\nUsage: server [seed|seed-dev] [-config path] [-dev-env path] [-host addr] [-port num]\n", os.Args[1])
+				fmt.Fprintf(os.Stderr, "unknown command: %s\nUsage: server [seed|seed-dev] [-config path] [-dev-env path] [-host addr] [-port num] [-access-log=true|false]\n", os.Args[1])
 				os.Exit(1)
 			}
 		}
@@ -57,6 +57,7 @@ func main() {
 	devEnvPath := flag.String("dev-env", devAIConfigPath, "path to dev environment file")
 	host := flag.String("host", "0.0.0.0", "server host")
 	port := flag.String("port", "8080", "server port")
+	accessLog := flag.Bool("access-log", false, "enable access log middleware")
 	flag.Parse()
 
 	// 1. Try to load config
@@ -98,7 +99,12 @@ func main() {
 	// Gin engine
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
-	r.Use(middleware.Logger(), middleware.Recovery())
+	if *accessLog {
+		r.Use(middleware.Logger())
+	} else {
+		slog.Info("access log disabled by startup flag")
+	}
+	r.Use(middleware.Recovery())
 	do.ProvideValue(injector, r)
 
 	if !installed {

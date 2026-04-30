@@ -147,6 +147,7 @@ type RecoveryAction struct {
 type TicketMonitorSummary struct {
 	ActiveTotal         int `json:"activeTotal"`
 	StuckTotal          int `json:"stuckTotal"`
+	RiskTotal           int `json:"riskTotal"`
 	SLARiskTotal        int `json:"slaRiskTotal"`
 	AIIncidentTotal     int `json:"aiIncidentTotal"`
 	CompletedTodayTotal int `json:"completedTodayTotal"`

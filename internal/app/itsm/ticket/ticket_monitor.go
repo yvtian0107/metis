@@ -2,6 +2,7 @@ package ticket
 
 import (
 	. "metis/internal/app/itsm/domain"
+	"slices"
 	"time"
 
 	"metis/internal/app/itsm/engine"
@@ -142,14 +143,9 @@ func (s *TicketService) populateMonitorItem(item *TicketMonitorItem, ticket *Tic
 			}
 		}
 	}
-	switch ticket.SLAStatus {
-	case SLAStatusBreachedResponse, SLAStatusBreachedResolve:
-		blocked = append(blocked, "SLA 已超时")
-	default:
-		if ticket.SLAResolutionDeadline != nil && ticket.SLAResolutionDeadline.After(now) && ticket.SLAResolutionDeadline.Sub(now) <= monitorSLADueRiskBefore {
-			risk = append(risk, "SLA 距离截止小于 30 分钟")
-		}
-	}
+	slaBlocked, slaRisk := monitorSLAReasons(ticket, now)
+	blocked = append(blocked, slaBlocked...)
+	risk = append(risk, slaRisk...)
 
 	if len(blocked) > 0 {
 		item.RiskLevel = "blocked"
@@ -159,7 +155,7 @@ func (s *TicketService) populateMonitorItem(item *TicketMonitorItem, ticket *Tic
 	}
 	if len(risk) > 0 {
 		item.RiskLevel = "risk"
-		item.Stuck = true
+		item.Stuck = false
 		item.StuckReasons = risk
 		return
 	}
@@ -176,8 +172,11 @@ func (s *TicketService) accumulateMonitorSummary(summary *TicketMonitorSummary, 
 		} else {
 			summary.ClassicActiveTotal++
 		}
-		if item.Stuck {
+		switch item.RiskLevel {
+		case "blocked":
 			summary.StuckTotal++
+		case "risk":
+			summary.RiskTotal++
 		}
 		if ticket.EngineType == "smart" && (ticket.AIFailureCount >= engine.MaxAIFailureCount || item.SmartState == "ai_disabled") {
 			summary.AIIncidentTotal++
@@ -192,10 +191,46 @@ func (s *TicketService) accumulateMonitorSummary(summary *TicketMonitorSummary, 
 }
 
 func monitorHasSLARisk(ticket *Ticket, now time.Time) bool {
-	if ticket.SLAStatus == SLAStatusBreachedResponse || ticket.SLAStatus == SLAStatusBreachedResolve {
-		return true
+	blocked, risk := monitorSLAReasons(ticket, now)
+	return len(blocked) > 0 || len(risk) > 0
+}
+
+func monitorSLAReasons(ticket *Ticket, now time.Time) ([]string, []string) {
+	var blocked, risk []string
+	addBlocked := func(reason string) {
+		if !slices.Contains(blocked, reason) {
+			blocked = append(blocked, reason)
+		}
 	}
-	return ticket.SLAResolutionDeadline != nil && ticket.SLAResolutionDeadline.After(now) && ticket.SLAResolutionDeadline.Sub(now) <= monitorSLADueRiskBefore
+	addRisk := func(reason string) {
+		if !slices.Contains(risk, reason) {
+			risk = append(risk, reason)
+		}
+	}
+
+	switch ticket.SLAStatus {
+	case SLAStatusBreachedResponse:
+		addBlocked("响应 SLA 已超时")
+	case SLAStatusBreachedResolve:
+		addBlocked("解决 SLA 已超时")
+	}
+	if ticket.SLAResponseDeadline != nil {
+		switch {
+		case !ticket.SLAResponseDeadline.After(now):
+			addBlocked("响应 SLA 已超时")
+		case ticket.SLAResponseDeadline.Sub(now) <= monitorSLADueRiskBefore:
+			addRisk("响应 SLA 距离截止小于 30 分钟")
+		}
+	}
+	if ticket.SLAResolutionDeadline != nil {
+		switch {
+		case !ticket.SLAResolutionDeadline.After(now):
+			addBlocked("解决 SLA 已超时")
+		case ticket.SLAResolutionDeadline.Sub(now) <= monitorSLADueRiskBefore:
+			addRisk("解决 SLA 距离截止小于 30 分钟")
+		}
+	}
+	return blocked, risk
 }
 
 func isActiveTicket(status string) bool {

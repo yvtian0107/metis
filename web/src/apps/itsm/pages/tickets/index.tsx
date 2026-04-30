@@ -241,9 +241,10 @@ export function Component() {
       </div>
 
       <section className="workspace-surface rounded-[1.25rem] px-4 py-3">
-        <div className="grid gap-x-4 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7">
+        <div className="grid gap-x-4 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-8">
           <MetricStrip label={t("monitor.activeTotal")} value={summary?.activeTotal ?? 0} tone="info" />
           <MetricStrip label={t("monitor.stuckTotal")} value={summary?.stuckTotal ?? 0} tone={(summary?.stuckTotal ?? 0) > 0 ? "danger" : "success"} />
+          <MetricStrip label={t("monitor.riskTotal")} value={summary?.riskTotal ?? 0} tone={(summary?.riskTotal ?? 0) > 0 ? "warning" : "neutral"} />
           <MetricStrip label={t("monitor.slaRiskTotal")} value={summary?.slaRiskTotal ?? 0} tone={(summary?.slaRiskTotal ?? 0) > 0 ? "warning" : "neutral"} />
           <MetricStrip label={t("monitor.aiIncidentTotal")} value={summary?.aiIncidentTotal ?? 0} tone={(summary?.aiIncidentTotal ?? 0) > 0 ? "danger" : "neutral"} />
           <MetricStrip label={t("monitor.completedTodayTotal")} value={summary?.completedTodayTotal ?? 0} tone="success" />
@@ -257,7 +258,9 @@ export function Component() {
           <div>
             <p className="text-sm font-semibold">{t("monitor.qualityTitle", { defaultValue: "决策质量 (30 天)" })}</p>
             <p className="text-xs text-muted-foreground">
-              {decisionQuality?.version ? `${t("monitor.qualityVersion", { defaultValue: "口径版本" })}: ${decisionQuality.version}` : t("monitor.qualityHint", { defaultValue: "按固定口径聚合" })}
+              {decisionQuality?.version
+                ? `${t("monitor.qualityVersion", { defaultValue: "口径版本" })}: ${decisionQuality.version} · ${t("monitor.qualityTrendHint", { defaultValue: "基于流程活动结果与时间线事件聚合，仅用于趋势观察" })}`
+                : t("monitor.qualityTrendHint", { defaultValue: "基于流程活动结果与时间线事件聚合，仅用于趋势观察" })}
             </p>
           </div>
           <ButtonGroup>
@@ -507,6 +510,11 @@ function MonitorTicketSheet({
 
   const currentActivity = ticket ? activeHumanActivity(activities, ticket.currentActivityId) : undefined
   const isActive = ticket ? ACTIVE_STATUSES.has(ticket.status) : false
+  const reasonTitle = monitorItem?.riskLevel === "risk" ? t("monitor.riskReasons") : t("monitor.blockingReasons")
+  const emptyReasonText = monitorItem?.riskLevel === "risk" ? t("monitor.noRiskReasons") : t("monitor.noBlockingReasons")
+  const reasonClassName = monitorItem?.riskLevel === "risk"
+    ? "flex gap-2 rounded-lg border border-amber-200/70 bg-amber-50/65 px-3 py-2 text-sm text-amber-800"
+    : "flex gap-2 rounded-lg border border-red-200/70 bg-red-50/65 px-3 py-2 text-sm text-red-800"
 
   function invalidate() {
     if (!ticketId) return
@@ -584,11 +592,11 @@ function MonitorTicketSheet({
               </section>
 
               <section className="space-y-2 border-b border-border/50 pb-4">
-                <h3 className="text-sm font-semibold">{t("monitor.blockingReasons")}</h3>
+                <h3 className="text-sm font-semibold">{reasonTitle}</h3>
                 {monitorItem?.stuckReasons?.length ? (
                   <div className="space-y-2">
                     {monitorItem.stuckReasons.map((reason) => (
-                      <p key={reason} className="flex gap-2 rounded-lg border border-red-200/70 bg-red-50/65 px-3 py-2 text-sm text-red-800">
+                      <p key={reason} className={reasonClassName}>
                         <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
                         <span>{reason}</span>
                       </p>
@@ -596,7 +604,7 @@ function MonitorTicketSheet({
                   </div>
                 ) : (
                   <p className="rounded-lg border border-border/50 bg-background/35 px-3 py-2 text-sm text-muted-foreground">
-                    {t("monitor.noBlockingReasons")}
+                    {emptyReasonText}
                   </p>
                 )}
               </section>

@@ -60,11 +60,13 @@ func (a *OrgApp) Providers(i do.Injector) {
 	do.Provide(i, position.NewPositionHandler)
 	do.Provide(i, assignment.NewAssignmentHandler)
 	// OrgResolver — unified interface for DataScope, ITSM, and AI tools
-	do.ProvideValue[app.OrgResolver](i, resolver.NewOrgResolver(
+	orgResolver := resolver.NewOrgResolver(
 		do.MustInvoke[*assignment.AssignmentService](i),
 		do.MustInvoke[*assignment.AssignmentRepo](i),
 		do.MustInvoke[*database.DB](i).DB,
-	))
+	)
+	do.ProvideValue[app.OrgResolver](i, orgResolver)
+	do.ProvideValue[app.OrgStructureResolver](i, orgResolver)
 }
 
 func (a *OrgApp) Routes(api *gin.RouterGroup) {
