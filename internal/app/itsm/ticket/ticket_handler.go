@@ -143,6 +143,7 @@ func (h *TicketHandler) Monitor(c *gin.Context) {
 		Status:     c.Query("status"),
 		EngineType: c.Query("engineType"),
 		RiskLevel:  c.Query("riskLevel"),
+		MetricCode: c.Query("metricCode"),
 		Page:       page,
 		PageSize:   pageSize,
 	}

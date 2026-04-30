@@ -129,6 +129,7 @@ type TicketMonitorParams struct {
 	Status     string
 	EngineType string
 	RiskLevel  string
+	MetricCode string
 	PriorityID *uint
 	ServiceID  *uint
 	Page       int

@@ -23,7 +23,10 @@ import (
 
 // vpnCollaborationSpec is the collaboration spec for the VPN activation service.
 // Mirrors the seed data in seed.go.
-const vpnCollaborationSpec = `用户在 IT 服务台申请开通 VPN。先让申请人填写一张名为“填写 VPN 开通申请”的表单，表单只需要三项信息：VPN 账号、设备与用途说明、访问原因。为了让后续流程能稳定读取表单数据，三个字段的内部 key 分别使用 vpn_account、device_usage、request_kind；其中访问原因是下拉选择，选项为线上支持(online_support)、故障排查(troubleshooting)、生产应急(production_emergency)、网络接入问题(network_access_issue)、外部协作(external_collaboration)、长期远程办公(long_term_remote_work)、跨境访问(cross_border_access)、安全合规事项(security_compliance)。申请提交后，流程通过 form.request_kind 进入排他网关：线上支持、故障排查、生产应急、网络接入问题进入“网络管理员处理”，由信息部网络管理员岗位处理，参与者类型使用 position_department，部门编码 it，岗位编码 network_admin；外部协作、长期远程办公、跨境访问、安全合规事项进入“信息安全管理员处理”，由信息部信息安全管理员岗位处理，参与者类型使用 position_department，部门编码 it，岗位编码 security_admin。处理任务完成后直接结束流程。`
+const vpnCollaborationSpec = `员工在 IT 服务台申请开通 VPN 时，服务台需要确认 VPN 账号、准备用什么设备或场景使用，以及这次访问的主要原因。
+访问原因包括线上支持、故障排查、生产应急、网络接入问题、外部协作、长期远程办公、跨境访问和安全合规事项。
+线上支持、故障排查、生产应急、网络接入问题偏网络连通与业务支持，交给信息部网络管理员处理；外部协作、长期远程办公、跨境访问、安全合规事项涉及外部、长期、跨境或合规风险，交给信息部信息安全管理员处理。
+处理人完成处理后流程结束。`
 
 // vpnSampleFormData provides typical VPN request form values for BDD tests.
 // The "request_kind" field drives the exclusive gateway routing.

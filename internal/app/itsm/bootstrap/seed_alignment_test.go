@@ -153,18 +153,26 @@ func TestBuiltInSmartSeedsAlignParticipantsAndInstallAdminIdentity(t *testing.T)
 		wanted := map[string][]string{
 			"boss-serial-change-request":      {"headquarters", "serial_reviewer", "ops_admin"},
 			"db-backup-whitelist-action-flow": {"db_admin"},
-			"prod-server-temporary-access":    {"ops_admin", "network_admin", "security_admin"},
-			"vpn-access-request":              {"network_admin", "security_admin"},
 			"copilot-account-request":         {"IT管理员"},
 		}
+		workflowWanted := map[string][]string{
+			"prod-server-temporary-access": {"target_servers", "access_window", "operation_purpose", "access_reason", "ops_admin", "network_admin", "security_admin"},
+			"vpn-access-request":           {"vpn_account", "device_usage", "request_kind", "network_admin", "security_admin"},
+		}
 		for _, svc := range services {
-			needles, ok := wanted[svc.Code]
-			if !ok {
-				continue
+			if needles, ok := wanted[svc.Code]; ok {
+				for _, needle := range needles {
+					if !strings.Contains(svc.CollaborationSpec, needle) {
+						t.Fatalf("service %s missing participant marker %q in collaboration spec", svc.Code, needle)
+					}
+				}
 			}
-			for _, needle := range needles {
-				if !strings.Contains(svc.CollaborationSpec, needle) {
-					t.Fatalf("service %s missing participant marker %q in collaboration spec", svc.Code, needle)
+			if needles, ok := workflowWanted[svc.Code]; ok {
+				structured := string(svc.IntakeFormSchema) + string(svc.WorkflowJSON)
+				for _, needle := range needles {
+					if !strings.Contains(structured, needle) {
+						t.Fatalf("service %s missing structured marker %q in schema/workflow", svc.Code, needle)
+					}
 				}
 			}
 			if strings.Contains(svc.CollaborationSpec, "dba_admin") {

@@ -60,7 +60,7 @@ func TestBuildInitialSeedIncludesDecisionTrigger(t *testing.T) {
 }
 
 func TestAgenticSystemPromptGuardsServerAccessLexicalRouting(t *testing.T) {
-	spec := `生产服务器临时访问申请。访问目的交给不同岗位：应用排障和日志查看由 it/ops_admin 处理；抓包、链路诊断、ACL 和防火墙策略由 it/network_admin 处理；安全审计、取证、入侵排查和合规核查由 it/security_admin 处理。不要让申请人在表单里自己选择处理类别，流程决策智能体应根据访问目的运行时判断。`
+	spec := testServerAccessRoutingSpec
 
 	prompt := buildAgenticSystemPrompt(spec, "ai_only", "")
 
@@ -599,7 +599,31 @@ func TestValidateDecisionPlanRejectsMissingVPNRouteField(t *testing.T) {
 }
 
 func TestValidateDecisionPlanNormalizesServerAccessSecurityBoundary(t *testing.T) {
-	db, ticket := setupStructuredRoutingValidationDB(t, `{"access_purpose":"结合异常访问核查、日志固定和证据保全判断是否需要进一步安全处置。"}`)
+	db, ticket := setupStructuredRoutingValidationDB(t, `{"access_reason":"结合异常访问核查、日志固定和证据保全判断是否需要进一步安全处置。"}`)
+
+	eng := &SmartEngine{}
+	plan := &DecisionPlan{
+		NextStepType:  NodeProcess,
+		ExecutionMode: "single",
+		Activities: []DecisionActivity{{
+			Type:            NodeProcess,
+			ParticipantType: "position_department",
+			DepartmentCode:  "it",
+			PositionCode:    "ops_admin",
+		}},
+		Confidence: 0.95,
+	}
+	err := eng.validateDecisionPlan(db, ticket.ID, plan, &serviceModel{ID: 1, CollaborationSpec: testServerAccessRoutingSpec}, nil)
+	if err != nil {
+		t.Fatalf("unexpected validation error: %v", err)
+	}
+	if got := plan.Activities[0].PositionCode; got != "security_admin" {
+		t.Fatalf("expected participant normalized to security_admin, got %q", got)
+	}
+}
+
+func TestValidateDecisionPlanDoesNotTreatProductionAppHostAsOpsRoute(t *testing.T) {
+	db, ticket := setupStructuredRoutingValidationDB(t, `{"operation_purpose":"登录生产应用主机核查审计痕迹并做取证分析。","access_reason":"核查安全审计痕迹并完成取证分析，确认是否存在异常访问。"}`)
 
 	eng := &SmartEngine{}
 	plan := &DecisionPlan{
@@ -623,7 +647,7 @@ func TestValidateDecisionPlanNormalizesServerAccessSecurityBoundary(t *testing.T
 }
 
 func TestValidateDecisionPlanNormalizesServerAccessNetworkRoute(t *testing.T) {
-	db, ticket := setupStructuredRoutingValidationDB(t, `{"access_purpose":"配合抓包和链路诊断，核对负载均衡后的网络访问路径。"}`)
+	db, ticket := setupStructuredRoutingValidationDB(t, `{"operation_purpose":"配合抓包和链路诊断，核对负载均衡后的网络访问路径。"}`)
 
 	eng := &SmartEngine{}
 	plan := &DecisionPlan{
@@ -648,7 +672,11 @@ func TestValidateDecisionPlanNormalizesServerAccessNetworkRoute(t *testing.T) {
 
 const testVPNRoutingSpec = `流程通过 form.request_kind 进入排他网关：线上支持(online_support)、故障排查(troubleshooting)、生产应急(production_emergency)、网络接入问题(network_access_issue)进入网络管理员处理，岗位编码 network_admin；外部协作(external_collaboration)、长期远程办公(long_term_remote_work)、跨境访问(cross_border_access)、安全合规事项(security_compliance)进入信息安全管理员处理，岗位编码 security_admin。`
 
-const testServerAccessRoutingSpec = `这是一个生产服务器临时访问申请服务。常见的应用排障、主机巡检、日志查看、进程处理、磁盘清理和一般生产运维访问，交给信息部的运维管理员岗位处理，岗位编码使用 ops_admin。网络抓包、链路诊断、ACL 调整、负载均衡检查、防火墙策略核对和其他网络侧访问，交给信息部的网络管理员岗位处理，岗位编码使用 network_admin。安全审计、取证分析、漏洞修复验证、入侵排查、合规核查和其他高敏访问，交给信息部的安全管理员岗位处理，岗位编码使用 security_admin。流程决策智能体应根据访问目的和访问原因在运行时判断应该流转到哪个处理岗位。`
+const testServerAccessRoutingSpec = `员工在 IT 服务台申请生产服务器临时访问时，服务台需要确认要访问的服务器或资源范围、访问时段、本次操作目的，以及为什么需要临时进入生产环境。
+
+访问原因通常分为三类：应用发布、进程排障、日志排查、磁盘清理、主机巡检、生产运维操作偏主机和应用运维，交给信息部运维管理员处理；网络抓包、连通性诊断、ACL 调整、负载均衡变更、防火墙策略调整偏网络诊断与策略处理，交给信息部网络管理员处理；安全审计、入侵排查、漏洞修复验证、取证分析、合规检查偏安全与合规风险，交给信息部信息安全管理员处理。
+
+处理人完成处理后流程结束。`
 
 func setupStructuredRoutingValidationDB(t *testing.T, formData string) (*gorm.DB, ticketModel) {
 	t.Helper()

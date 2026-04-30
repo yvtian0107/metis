@@ -360,6 +360,7 @@ export interface TicketItem {
 export interface TicketMonitorSummary {
   activeTotal: number
   stuckTotal: number
+  riskTotal: number
   slaRiskTotal: number
   aiIncidentTotal: number
   completedTodayTotal: number
@@ -367,10 +368,19 @@ export interface TicketMonitorSummary {
   classicActiveTotal: number
 }
 
+export interface TicketMonitorReason {
+  metricCode: string
+  ruleCode: string
+  severity: "blocked" | "risk" | "info" | string
+  message: string
+  evidence: Record<string, unknown>
+}
+
 export interface TicketMonitorItem extends TicketItem {
   riskLevel: "blocked" | "risk" | "normal" | string
   stuck: boolean
   stuckReasons: string[]
+  monitorReasons: TicketMonitorReason[]
   waitingMinutes: number
   currentActivityName: string
   currentActivityType: string
@@ -380,6 +390,7 @@ export interface TicketMonitorItem extends TicketItem {
 export interface TicketMonitorParams extends TicketListParams {
   engineType?: string
   riskLevel?: string
+  metricCode?: string
 }
 
 export interface TicketMonitorResponse {
@@ -441,6 +452,7 @@ export function fetchTicketMonitor(params: TicketMonitorParams) {
   if (params.serviceId) p.set("serviceId", String(params.serviceId))
   if (params.engineType) p.set("engineType", params.engineType)
   if (params.riskLevel) p.set("riskLevel", params.riskLevel)
+  if (params.metricCode) p.set("metricCode", params.metricCode)
   p.set("page", String(params.page ?? 1))
   p.set("pageSize", String(params.pageSize ?? 20))
   return api.get<TicketMonitorResponse>(`/api/v1/itsm/tickets/monitor?${p}`)

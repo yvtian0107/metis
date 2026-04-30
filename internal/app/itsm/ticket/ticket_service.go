@@ -1005,7 +1005,7 @@ func (s *TicketService) Monitor(params TicketMonitorParams, operatorID uint) (*T
 		item := TicketMonitorItem{TicketResponse: base[i], RiskLevel: "normal"}
 		s.populateMonitorItem(&item, ticket, facts[ticket.ID], now)
 		s.accumulateMonitorSummary(&summary, ticket, &item, now)
-		if monitorRiskMatches(params.RiskLevel, item.RiskLevel) {
+		if monitorRiskMatches(params.RiskLevel, item.RiskLevel) && monitorMetricMatches(params.MetricCode, ticket, &item, now) {
 			items = append(items, item)
 		}
 	}

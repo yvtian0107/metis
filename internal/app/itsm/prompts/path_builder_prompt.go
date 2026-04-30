@@ -135,12 +135,12 @@ form 节点必须包含 formSchema，描述该节点需要收集的字段：
 ### 生产服务器临时访问表单字段
 
 当协作规范描述“生产服务器临时访问申请”，并要求收集访问服务器、访问时段、操作目的、访问原因时，申请表单字段 key 必须稳定为：
-- server：访问服务器
-- access_time：访问时段
+- target_servers：访问服务器
+- access_window：访问时段
 - operation_purpose：操作目的
 - access_reason：访问原因
 
-后续排他网关必须基于 form.access_reason 路由，不要改用 form.reason、form.purpose、form.request_kind 或自然语言字段名。若访问原因分为运维、网络、安全三类，应使用 form.access_reason 的稳定枚举值表达分支条件。
+后续排他网关必须基于 form.access_reason 路由，不要改用 form.reason、form.purpose、form.request_kind、form.access_purpose 或自然语言字段名。
 
 ## 排他网关（exclusive）条件格式
 

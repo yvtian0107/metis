@@ -92,7 +92,7 @@ func (bc *bddContext) whenSubmitVPNRequest(username, requestKind string) error {
 		err = bc.engine.Progress(ctx, bc.db, engine.ProgressParams{
 			TicketID:   ticket.ID,
 			ActivityID: activity.ID,
-			Outcome:    "",
+			Outcome:    "submitted",
 			Result:     formJSON,
 			OperatorID: user.ID,
 		})
@@ -321,7 +321,7 @@ func (bc *bddContext) whenClaimAndProcess(username string) error {
 	err = bc.engine.Progress(ctx, bc.db, engine.ProgressParams{
 		TicketID:   bc.ticket.ID,
 		ActivityID: activity.ID,
-		Outcome:    "",
+		Outcome:    "approved",
 		OperatorID: user.ID,
 	})
 	if err != nil {

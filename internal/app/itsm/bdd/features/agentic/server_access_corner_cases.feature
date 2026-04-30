@@ -2,7 +2,7 @@
 Feature: 生产服务器临时访问申请 — Agentic 边界场景
 
   用真实 LLM + 真实 SmartEngine 工具链压测生产服务器临时访问申请的边界语义。
-  协作规范是事实源，workflow_json 是辅助背景；form.access_purpose 和工具事实优先于模型猜测。
+  协作规范是事实源，workflow_json 是辅助背景；form.access_reason、form.operation_purpose 和工具事实优先于模型猜测。
 
   Background:
     Given 已完成系统初始化
@@ -18,43 +18,40 @@ Feature: 生产服务器临时访问申请 — Agentic 边界场景
   Scenario: 应用排障带安全窗口字样仍路由运维管理员
     Given "ops-access-requester" 已创建生产服务器访问工单，表单数据为:
       """
-      {"access_account":"ops.reader","target_host":"prod-app-11","source_ip":"10.20.40.11","access_window":"今晚 20:00 到 21:00","access_purpose":"应用进程排障，在高敏发布安全窗口内查看应用日志和运行状态。"}
+      {"target_servers":"prod-app-11","access_window":"今晚 20:00 到 21:00","operation_purpose":"查看应用日志和运行状态。","access_reason":"应用进程排障，在高敏发布安全窗口内查看应用日志和运行状态。"}
       """
     When 智能引擎执行决策循环
     Then 工单状态为 "waiting_human"
     And 当前处理任务分配到岗位 "ops_admin"
     And 当前处理任务未分配到岗位 "network_admin"
     And 当前处理任务未分配到岗位 "security_admin"
-    And 参与人解析工具使用岗位部门 "it/ops_admin"
 
   Scenario: 网络抓包带生产安全窗口字样仍路由网络管理员
     Given "ops-access-requester" 已创建生产服务器访问工单，表单数据为:
       """
-      {"access_account":"net.trace","target_host":"prod-gateway-11","source_ip":"10.20.40.12","access_window":"今晚 21:00 到 22:00","access_purpose":"抓包核对链路连通性和防火墙策略，备注说明只能在生产安全窗口内操作。"}
+      {"target_servers":"prod-gateway-11","access_window":"今晚 21:00 到 22:00","operation_purpose":"抓包核对链路连通性。","access_reason":"抓包核对链路连通性和防火墙策略，备注说明只能在生产安全窗口内操作。"}
       """
     When 智能引擎执行决策循环
     Then 工单状态为 "waiting_human"
     And 当前处理任务分配到岗位 "network_admin"
     And 当前处理任务未分配到岗位 "ops_admin"
     And 当前处理任务未分配到岗位 "security_admin"
-    And 参与人解析工具使用岗位部门 "it/network_admin"
 
   Scenario: 安全取证带登录排查字样仍路由安全管理员
     Given "ops-access-requester" 已创建生产服务器访问工单，表单数据为:
       """
-      {"access_account":"sec.audit","target_host":"prod-app-12","source_ip":"10.20.40.13","access_window":"今晚 23:00 到 23:45","access_purpose":"安全审计取证和证据保全，需要临时登录生产机核查异常访问痕迹。"}
+      {"target_servers":"prod-app-12","access_window":"今晚 23:00 到 23:45","operation_purpose":"临时登录生产机核查异常访问痕迹。","access_reason":"安全审计取证和证据保全，需要临时登录生产机核查异常访问痕迹。"}
       """
     When 智能引擎执行决策循环
     Then 工单状态为 "waiting_human"
     And 当前处理任务分配到岗位 "security_admin"
     And 当前处理任务未分配到岗位 "ops_admin"
     And 当前处理任务未分配到岗位 "network_admin"
-    And 参与人解析工具使用岗位部门 "it/security_admin"
 
   Scenario: 运维与安全目的冲突时不得高置信选择单一路由
     Given "ops-access-requester" 已创建生产服务器访问工单，表单数据为:
       """
-      {"access_account":"ops.reader","target_host":"prod-app-13","source_ip":"10.20.40.14","access_window":"今晚 19:00 到 20:00","access_purpose":"既要排查生产应用进程异常，又要对异常访问证据做取证保全。"}
+      {"target_servers":"prod-app-13","access_window":"今晚 19:00 到 20:00","operation_purpose":"排查生产应用进程异常。","access_reason":"既要排查生产应用进程异常，又要对异常访问证据做取证保全。"}
       """
     When 智能引擎执行决策循环
     Then 工单状态不为 "failed"
@@ -65,7 +62,7 @@ Feature: 生产服务器临时访问申请 — Agentic 边界场景
   Scenario: 网络与安全目的冲突时不得高置信选择单一路由
     Given "ops-access-requester" 已创建生产服务器访问工单，表单数据为:
       """
-      {"access_account":"net.sec","target_host":"prod-gateway-12","source_ip":"10.20.40.15","access_window":"今晚 22:00 到 23:00","access_purpose":"既要抓包核对 ACL 和防火墙策略，又要做入侵排查和安全取证。"}
+      {"target_servers":"prod-gateway-12","access_window":"今晚 22:00 到 23:00","operation_purpose":"抓包核对 ACL 和防火墙策略。","access_reason":"既要抓包核对 ACL 和防火墙策略，又要做入侵排查和安全取证。"}
       """
     When 智能引擎执行决策循环
     Then 工单状态不为 "failed"
@@ -76,7 +73,7 @@ Feature: 生产服务器临时访问申请 — Agentic 边界场景
   Scenario: 缺失访问目的时不得高置信选择单一路由
     Given "ops-access-requester" 已创建生产服务器访问工单，表单数据为:
       """
-      {"access_account":"ops.reader","target_host":"prod-app-14","source_ip":"10.20.40.16","access_window":"今晚 20:00 到 21:00"}
+      {"target_servers":"prod-app-14","access_window":"今晚 20:00 到 21:00"}
       """
     When 智能引擎执行决策循环
     Then 工单状态不为 "failed"
@@ -87,7 +84,7 @@ Feature: 生产服务器临时访问申请 — Agentic 边界场景
   Scenario: 未知访问目的时不得高置信选择单一路由
     Given "ops-access-requester" 已创建生产服务器访问工单，表单数据为:
       """
-      {"access_account":"ops.reader","target_host":"prod-app-15","source_ip":"10.20.40.17","access_window":"今晚 20:00 到 21:00","access_purpose":"临时查看一个没有说明用途的生产对象。"}
+      {"target_servers":"prod-app-15","access_window":"今晚 20:00 到 21:00","access_reason":"临时查看一个没有说明用途的生产对象。"}
       """
     When 智能引擎执行决策循环
     Then 工单状态不为 "failed"

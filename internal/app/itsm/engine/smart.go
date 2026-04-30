@@ -479,7 +479,7 @@ func (e *SmartEngine) applyDeterministicServiceGuards(ctx context.Context, tx *g
 	}
 	if ok {
 		if expectedPosition == "" {
-			return fmt.Errorf("form.access_purpose 缺失、为空或未命中协作规范定义的访问目的分支；不得高置信结束或选择单一路由")
+			return fmt.Errorf("form.access_reason/form.operation_purpose 缺失、为空或未命中协作规范定义的访问原因分支；不得高置信结束或选择单一路由")
 		}
 		return e.applySingleHumanRouteGuard(tx, ticketID, plan, expectedPosition, "访问目的已命中协作规范岗位分支")
 	}
@@ -1333,7 +1333,7 @@ func (e *SmartEngine) validateAndNormalizeStructuredRoutingDecision(tx *gorm.DB,
 			return err
 		}
 		if expectedPosition == "" {
-			return fmt.Errorf("form.access_purpose 缺失、为空或未命中协作规范定义的访问目的分支；不得高置信选择单一路由")
+			return fmt.Errorf("form.access_reason/form.operation_purpose 缺失、为空或未命中协作规范定义的访问原因分支；不得高置信选择单一路由")
 		}
 		normalizePlanHumanParticipant(tx, plan, expectedPosition)
 		return nil
@@ -1437,7 +1437,7 @@ func collaborationSpecAccessPurposePosition(tx *gorm.DB, ticketID uint, spec str
 	if strings.TrimSpace(ticket.FormData) != "" {
 		_ = json.Unmarshal([]byte(ticket.FormData), &formData)
 	}
-	text := strings.TrimSpace(fmt.Sprint(formData["access_purpose"]))
+	text := serverAccessRoutingText(formData)
 	if text == "" {
 		text = strings.TrimSpace(ticket.Title)
 	}
@@ -1449,10 +1449,32 @@ func collaborationSpecAccessPurposePosition(tx *gorm.DB, ticketID uint, spec str
 }
 
 func looksLikeServerAccessPurposeSpec(spec string) bool {
-	return strings.Contains(spec, "访问目的") &&
-		strings.Contains(spec, "ops_admin") &&
-		strings.Contains(spec, "network_admin") &&
-		strings.Contains(spec, "security_admin")
+	return strings.Contains(spec, "生产服务器临时访问") &&
+		strings.Contains(spec, "访问") &&
+		((strings.Contains(spec, "运维管理员") &&
+			strings.Contains(spec, "网络管理员") &&
+			strings.Contains(spec, "安全管理员")) ||
+			(strings.Contains(spec, "运维管理员") &&
+				strings.Contains(spec, "网络管理员") &&
+				strings.Contains(spec, "信息安全管理员")) ||
+			(strings.Contains(spec, "ops_admin") &&
+				strings.Contains(spec, "network_admin") &&
+				strings.Contains(spec, "security_admin")))
+}
+
+func serverAccessRoutingText(formData map[string]any) string {
+	if len(formData) == 0 {
+		return ""
+	}
+	var parts []string
+	for _, key := range []string{"access_reason", "operation_purpose", "access_purpose"} {
+		value := strings.TrimSpace(fmt.Sprint(formData[key]))
+		if value == "" || value == "<nil>" {
+			continue
+		}
+		parts = append(parts, value)
+	}
+	return strings.Join(parts, "\n")
 }
 
 func containsAnyText(text string, needles ...string) bool {
@@ -1482,7 +1504,7 @@ func serverAccessPurposeMatches(text string) []string {
 		matches = append(matches, "network_admin")
 	}
 	if containsAnyText(normalized,
-		"应用排障", "应用进程", "生产应用", "主机巡检", "日志查看", "查看应用日志", "进程处理", "磁盘清理", "运行状态", "一般生产运维",
+		"应用排障", "应用进程", "主机巡检", "日志查看", "查看应用日志", "进程处理", "磁盘清理", "运行状态", "一般生产运维",
 	) {
 		matches = append(matches, "ops_admin")
 	}
@@ -2469,12 +2491,12 @@ func agenticStructuredRoutingGuidance(collaborationSpec string) string {
 	case looksLikeServerAccessPurposeSpec(collaborationSpec):
 		return `## 结构化路由判定守卫
 
-生产服务器临时访问申请必须先按协作规范和 form.access_purpose 判定业务分支，再解析参与人：
+生产服务器临时访问申请必须先按协作规范和 form.access_reason、form.operation_purpose 判定业务分支，再解析参与人：
 - 应用排障、应用进程、日志查看、运行状态、主机巡检、进程处理、磁盘清理、一般生产运维 => decision.resolve_participant 使用 {"type":"position_department","department_code":"it","position_code":"ops_admin"}。
 - 抓包、链路诊断、ACL、负载均衡、防火墙策略、网络访问路径、连通性 => decision.resolve_participant 使用 {"type":"position_department","department_code":"it","position_code":"network_admin"}。
 - 安全审计、取证、证据保全、漏洞、入侵排查、合规核查、异常访问、高敏访问 => decision.resolve_participant 使用 {"type":"position_department","department_code":"it","position_code":"security_admin"}。
 
-“安全窗口”“生产安全窗口”“高敏发布安全窗口”只是访问时段或变更窗口修饰词，不是 security_admin 分支证据。若 access_purpose 同时命中多个业务分支，或缺失/未知，不得高置信选择单一路由，应降级为澄清或人工诊断。decision.resolve_participant 的 department_code/position_code 必须与最终输出活动的业务分支一致；如果发现解析了错误岗位，必须重新按协作规范解析正确岗位后再输出决策。`
+“安全窗口”“生产安全窗口”“高敏发布安全窗口”只是访问时段或变更窗口修饰词，不是 security_admin 分支证据。若 access_reason/operation_purpose 同时命中多个业务分支，或缺失/未知，不得高置信选择单一路由，应降级为澄清或人工诊断。decision.resolve_participant 的 department_code/position_code 必须与最终输出活动的业务分支一致；如果发现解析了错误岗位，必须重新按协作规范解析正确岗位后再输出决策。`
 	case looksLikeVPNRequestKindSpec(collaborationSpec):
 		return `## 结构化路由判定守卫
 

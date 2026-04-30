@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	appcore "metis/internal/app"
 	. "metis/internal/app/itsm/config"
 	. "metis/internal/app/itsm/domain"
 	"metis/internal/app/itsm/form"
@@ -33,18 +34,24 @@ type workflowLLMClientFactory func(protocol, baseURL, apiKey string) (llm.Client
 
 // WorkflowGenerateService handles one-shot path engine calls that turn collaboration specs into workflow JSON.
 type WorkflowGenerateService struct {
-	engineConfigSvc  pathEngineConfigProvider
-	actionRepo       *ServiceActionRepo
-	serviceDefSvc    *ServiceDefService
-	llmClientFactory workflowLLMClientFactory
+	engineConfigSvc      pathEngineConfigProvider
+	actionRepo           *ServiceActionRepo
+	serviceDefSvc        *ServiceDefService
+	llmClientFactory     workflowLLMClientFactory
+	orgResolver          appcore.OrgResolver
+	orgStructureResolver appcore.OrgStructureResolver
 }
 
 func NewWorkflowGenerateService(i do.Injector) (*WorkflowGenerateService, error) {
+	orgResolver, _ := do.InvokeAs[appcore.OrgResolver](i)
+	orgStructureResolver, _ := do.InvokeAs[appcore.OrgStructureResolver](i)
 	return &WorkflowGenerateService{
-		engineConfigSvc:  do.MustInvoke[*EngineConfigService](i),
-		actionRepo:       do.MustInvoke[*ServiceActionRepo](i),
-		serviceDefSvc:    do.MustInvoke[*ServiceDefService](i),
-		llmClientFactory: llm.NewClient,
+		engineConfigSvc:      do.MustInvoke[*EngineConfigService](i),
+		actionRepo:           do.MustInvoke[*ServiceActionRepo](i),
+		serviceDefSvc:        do.MustInvoke[*ServiceDefService](i),
+		llmClientFactory:     llm.NewClient,
+		orgResolver:          orgResolver,
+		orgStructureResolver: orgStructureResolver,
 	}, nil
 }
 
@@ -90,25 +97,41 @@ func (s *WorkflowGenerateService) Generate(ctx context.Context, req *GenerateReq
 		return nil, fmt.Errorf("LLM 客户端创建失败: %w", err)
 	}
 
-	// 3. Load available actions for context
-	var actionsContext string
+	// 3. Load structured service context for prompt grounding
+	promptCtx := workflowPromptContext{}
 	if req.ServiceID > 0 {
-		actions, err := s.actionRepo.ListByService(req.ServiceID)
-		if err == nil && len(actions) > 0 {
-			actionsContext = s.buildActionsContext(actions)
+		if s.actionRepo != nil {
+			actions, err := s.actionRepo.ListByService(req.ServiceID)
+			if err == nil && len(actions) > 0 {
+				promptCtx.ActionsContext = s.buildActionsContext(actions)
+			}
+		}
+		if s.serviceDefSvc != nil {
+			if serviceDef, err := s.serviceDefSvc.Get(req.ServiceID); err == nil {
+				promptCtx.FormContractContext = s.buildFormContractContext(serviceDef.IntakeFormSchema)
+			} else {
+				slog.Warn("workflow generate: failed to load service definition for prompt context", "serviceID", req.ServiceID, "error", err)
+			}
 		}
 	}
-
 	// 4. Build prompt and call LLM with retry
 	maxRetries := engineCfg.MaxRetries
 	temp := float32(engineCfg.Temperature)
 	systemPrompt := strings.TrimSpace(engineCfg.SystemPrompt)
+	if req.ServiceID > 0 && s.orgStructureResolver != nil {
+		orgContext, err := s.collectOrgContextWithTools(ctx, client, engineCfg, systemPrompt, temp, req.CollaborationSpec, promptCtx)
+		if err != nil {
+			slog.Warn("workflow generate: org preflight failed; continuing without dynamic org context", "serviceID", req.ServiceID, "error", err)
+		} else if orgContext != "" {
+			promptCtx.OrgContext = orgContext
+		}
+	}
 
 	var lastWorkflowJSON json.RawMessage
 	var lastErrors []engine.ValidationError
 
 	for attempt := 0; attempt <= maxRetries; attempt++ {
-		userMsg := s.buildUserMessage(req.CollaborationSpec, actionsContext, lastErrors)
+		userMsg := s.buildUserMessage(req.CollaborationSpec, promptCtx, lastErrors)
 
 		messages := []llm.Message{
 			{Role: llm.RoleSystem, Content: systemPrompt},
@@ -485,15 +508,357 @@ func (s *WorkflowGenerateService) buildActionsContext(actions []ServiceAction) s
 	return sb.String()
 }
 
+type workflowPromptContext struct {
+	ActionsContext      string
+	FormContractContext string
+	OrgContext          string
+}
+
+func (s *WorkflowGenerateService) buildFormContractContext(raw JSONField) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	schema, err := form.ParseSchema(json.RawMessage(raw))
+	if err != nil || schema == nil || len(schema.Fields) == 0 {
+		return ""
+	}
+
+	var sb strings.Builder
+	sb.WriteString("\n\n## 已有申请表单契约\n")
+	sb.WriteString("该服务已经配置申请确认表单。生成参考路径时必须复用这些字段 key、类型和选项值；排他网关条件引用表单字段时必须使用 form.<key>。\n\n")
+	for _, field := range schema.Fields {
+		label := strings.TrimSpace(field.Label)
+		if label == "" {
+			label = field.Key
+		}
+		sb.WriteString(fmt.Sprintf("- %s: key=`%s`, type=`%s`", label, field.Key, field.Type))
+		if len(field.Options) > 0 {
+			sb.WriteString(", options=")
+			for i, option := range field.Options {
+				if i > 0 {
+					sb.WriteString(", ")
+				}
+				sb.WriteString(fmt.Sprintf("`%v`", option.Value))
+				if option.Label != "" {
+					sb.WriteString(fmt.Sprintf("（%s）", option.Label))
+				}
+			}
+		}
+		sb.WriteString("\n")
+	}
+	return sb.String()
+}
+
+func (s *WorkflowGenerateService) buildOrgContext() string {
+	if s.orgResolver == nil {
+		return ""
+	}
+	ctx, err := s.orgResolver.QueryContext("", "", "", false)
+	if err != nil || ctx == nil || (len(ctx.Departments) == 0 && len(ctx.Positions) == 0) {
+		return ""
+	}
+
+	var sb strings.Builder
+	sb.WriteString("\n\n## 组织架构上下文\n")
+	sb.WriteString("生成人工处理节点参与人时，优先按以下组织名称与 code 映射；特定部门中的特定岗位使用 position_department，并填入 department_code 与 position_code。\n\n")
+	wroteItem := false
+	for _, dept := range ctx.Departments {
+		if !dept.IsActive || strings.TrimSpace(dept.Code) == "" {
+			continue
+		}
+		name := strings.TrimSpace(dept.Name)
+		if name == "" {
+			name = dept.Code
+		}
+		sb.WriteString(fmt.Sprintf("- 部门：%s（code: `%s`）\n", name, dept.Code))
+		wroteItem = true
+	}
+	for _, pos := range ctx.Positions {
+		if !pos.IsActive || strings.TrimSpace(pos.Code) == "" {
+			continue
+		}
+		name := strings.TrimSpace(pos.Name)
+		if name == "" {
+			name = pos.Code
+		}
+		sb.WriteString(fmt.Sprintf("- 岗位：%s（code: `%s`）\n", name, pos.Code))
+		wroteItem = true
+	}
+	if !wroteItem {
+		return ""
+	}
+	return sb.String()
+}
+
+const workflowOrgPreflightMaxTurns = 3
+
+type workflowOrgSearchToolArgs struct {
+	Query string   `json:"query"`
+	Kinds []string `json:"kinds"`
+	Limit int      `json:"limit"`
+}
+
+type workflowOrgResolveToolArgs struct {
+	DepartmentHint string `json:"department_hint"`
+	PositionHint   string `json:"position_hint"`
+	Limit          int    `json:"limit"`
+}
+
+type workflowOrgToolResult struct {
+	Tool           string
+	Query          string
+	Kinds          []string
+	DepartmentHint string
+	PositionHint   string
+	Search         *appcore.OrgStructureSearchResult
+	Resolve        *appcore.OrgParticipantResolveResult
+}
+
+func workflowOrgToolDefs() []llm.ToolDef {
+	return []llm.ToolDef{
+		{
+			Name:        "workflow.org_search_structure",
+			Description: "按中文名称或 code 搜索组织结构词表，仅返回部门和岗位，不返回用户。",
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"query": map[string]any{"type": "string", "description": "要搜索的部门或岗位名称/code，例如 信息部、网络管理员、security_admin"},
+					"kinds": map[string]any{
+						"type":        "array",
+						"description": "搜索类型，可选 department、position；为空时同时搜索部门和岗位。",
+						"items":       map[string]any{"type": "string", "enum": []string{"department", "position"}},
+					},
+					"limit": map[string]any{"type": "integer", "description": "返回上限，最大 10"},
+				},
+				"required": []string{"query"},
+			},
+		},
+		{
+			Name:        "workflow.org_resolve_participant",
+			Description: "把自然语言部门/岗位提示解析为 workflow 参与人配置候选，例如 position_department + department_code + position_code。",
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"department_hint": map[string]any{"type": "string", "description": "部门名称或 code，例如 信息部、it"},
+					"position_hint":   map[string]any{"type": "string", "description": "岗位名称或 code，例如 网络管理员、network_admin"},
+					"limit":           map[string]any{"type": "integer", "description": "返回上限，最大 10"},
+				},
+			},
+		},
+	}
+}
+
+func (s *WorkflowGenerateService) collectOrgContextWithTools(ctx context.Context, client llm.Client, engineCfg LLMEngineRuntimeConfig, systemPrompt string, temp float32, spec string, promptCtx workflowPromptContext) (string, error) {
+	messages := []llm.Message{
+		{Role: llm.RoleSystem, Content: buildOrgPreflightSystemPrompt(systemPrompt)},
+		{Role: llm.RoleUser, Content: s.buildOrgPreflightUserMessage(spec, promptCtx)},
+	}
+	tools := workflowOrgToolDefs()
+	var collected []workflowOrgToolResult
+
+	for turn := 0; turn < workflowOrgPreflightMaxTurns; turn++ {
+		callCtx, cancel := context.WithTimeout(ctx, time.Duration(engineCfg.TimeoutSeconds)*time.Second)
+		resp, err := client.Chat(callCtx, llm.ChatRequest{
+			Model:       engineCfg.Model,
+			Messages:    messages,
+			Tools:       tools,
+			Temperature: &temp,
+			MaxTokens:   engineCfg.MaxTokens,
+		})
+		cancel()
+		if err != nil {
+			return "", fmt.Errorf("org preflight llm call: %w", err)
+		}
+		if resp == nil || len(resp.ToolCalls) == 0 {
+			break
+		}
+
+		messages = append(messages, llm.Message{
+			Role:      llm.RoleAssistant,
+			Content:   resp.Content,
+			ToolCalls: resp.ToolCalls,
+		})
+		for _, tc := range resp.ToolCalls {
+			content, result := s.executeWorkflowOrgTool(tc)
+			if result != nil {
+				collected = append(collected, *result)
+			}
+			messages = append(messages, llm.Message{
+				Role:       llm.RoleTool,
+				ToolCallID: tc.ID,
+				Content:    content,
+			})
+		}
+	}
+
+	return buildWorkflowOrgToolContext(collected), nil
+}
+
+func buildOrgPreflightSystemPrompt(systemPrompt string) string {
+	var sb strings.Builder
+	if strings.TrimSpace(systemPrompt) != "" {
+		sb.WriteString(systemPrompt)
+		sb.WriteString("\n\n---\n\n")
+	}
+	sb.WriteString("你是参考路径生成前的组织上下文查询助手。")
+	sb.WriteString("只在需要把自然语言部门/岗位映射为 workflow 参与人配置时调用工具；")
+	sb.WriteString("不要查询或要求返回具体用户。")
+	return sb.String()
+}
+
+func (s *WorkflowGenerateService) buildOrgPreflightUserMessage(spec string, promptCtx workflowPromptContext) string {
+	var sb strings.Builder
+	sb.WriteString("请阅读协作规范和已有结构化契约，判断是否需要查询组织结构映射。\n")
+	sb.WriteString("如果需要，请调用工具；如果不需要，直接简短回复无需查询。\n\n")
+	sb.WriteString("## 协作规范\n\n")
+	sb.WriteString(spec)
+	if promptCtx.FormContractContext != "" {
+		sb.WriteString(promptCtx.FormContractContext)
+	}
+	if promptCtx.ActionsContext != "" {
+		sb.WriteString(promptCtx.ActionsContext)
+	}
+	return sb.String()
+}
+
+func (s *WorkflowGenerateService) executeWorkflowOrgTool(tc llm.ToolCall) (string, *workflowOrgToolResult) {
+	if s.orgStructureResolver == nil {
+		return workflowOrgToolError("组织结构解析器不可用"), nil
+	}
+	switch tc.Name {
+	case "workflow.org_search_structure":
+		var args workflowOrgSearchToolArgs
+		if err := json.Unmarshal([]byte(tc.Arguments), &args); err != nil {
+			return workflowOrgToolError(fmt.Sprintf("参数不是有效 JSON: %v", err)), nil
+		}
+		result, err := s.orgStructureResolver.SearchOrgStructure(args.Query, args.Kinds, args.Limit)
+		if err != nil {
+			return workflowOrgToolError(err.Error()), nil
+		}
+		return workflowOrgToolOK(result), &workflowOrgToolResult{
+			Tool:   tc.Name,
+			Query:  args.Query,
+			Kinds:  args.Kinds,
+			Search: result,
+		}
+	case "workflow.org_resolve_participant":
+		var args workflowOrgResolveToolArgs
+		if err := json.Unmarshal([]byte(tc.Arguments), &args); err != nil {
+			return workflowOrgToolError(fmt.Sprintf("参数不是有效 JSON: %v", err)), nil
+		}
+		result, err := s.orgStructureResolver.ResolveOrgParticipant(args.DepartmentHint, args.PositionHint, args.Limit)
+		if err != nil {
+			return workflowOrgToolError(err.Error()), nil
+		}
+		return workflowOrgToolOK(result), &workflowOrgToolResult{
+			Tool:           tc.Name,
+			DepartmentHint: args.DepartmentHint,
+			PositionHint:   args.PositionHint,
+			Resolve:        result,
+		}
+	default:
+		return workflowOrgToolError("未知组织上下文工具: " + tc.Name), nil
+	}
+}
+
+func workflowOrgToolOK(result any) string {
+	payload, err := json.Marshal(map[string]any{"ok": true, "result": result})
+	if err != nil {
+		return workflowOrgToolError(fmt.Sprintf("工具结果序列化失败: %v", err))
+	}
+	return string(payload)
+}
+
+func workflowOrgToolError(message string) string {
+	payload, err := json.Marshal(map[string]any{"ok": false, "error": message})
+	if err != nil {
+		return `{"ok":false,"error":"工具结果序列化失败"}`
+	}
+	return string(payload)
+}
+
+func buildWorkflowOrgToolContext(results []workflowOrgToolResult) string {
+	if len(results) == 0 {
+		return ""
+	}
+	var sb strings.Builder
+	sb.WriteString("\n\n## 按需查询到的组织上下文\n")
+	sb.WriteString("以下组织结构映射来自本次按需工具查询。生成人工处理节点参与人时，特定部门中的特定岗位使用 position_department，并填入 department_code 与 position_code；不要输出具体用户。\n\n")
+	wrote := false
+	for _, result := range results {
+		if result.Search != nil {
+			sb.WriteString(formatWorkflowOrgSearchContext(result))
+			wrote = true
+		}
+		if result.Resolve != nil {
+			sb.WriteString(formatWorkflowOrgResolveContext(result))
+			wrote = true
+		}
+	}
+	if !wrote {
+		return ""
+	}
+	return sb.String()
+}
+
+func formatWorkflowOrgSearchContext(result workflowOrgToolResult) string {
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("- 组织搜索：query=`%s`", result.Query))
+	if len(result.Kinds) > 0 {
+		sb.WriteString(fmt.Sprintf(", kinds=`%s`", strings.Join(result.Kinds, ",")))
+	}
+	sb.WriteString("\n")
+	for _, dept := range result.Search.Departments {
+		sb.WriteString(fmt.Sprintf("  - 部门：%s（code: `%s`）\n", dept.Name, dept.Code))
+	}
+	for _, pos := range result.Search.Positions {
+		sb.WriteString(fmt.Sprintf("  - 岗位：%s（code: `%s`）\n", pos.Name, pos.Code))
+	}
+	return sb.String()
+}
+
+func formatWorkflowOrgResolveContext(result workflowOrgToolResult) string {
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("- 参与人解析：department_hint=`%s`, position_hint=`%s`\n", result.DepartmentHint, result.PositionHint))
+	for _, candidate := range result.Resolve.Candidates {
+		sb.WriteString(fmt.Sprintf("  - 候选：type=`%s`", candidate.Type))
+		if candidate.DepartmentCode != "" {
+			sb.WriteString(fmt.Sprintf(", department_code=`%s`", candidate.DepartmentCode))
+			if candidate.DepartmentName != "" {
+				sb.WriteString(fmt.Sprintf("（%s）", candidate.DepartmentName))
+			}
+		}
+		if candidate.PositionCode != "" {
+			sb.WriteString(fmt.Sprintf(", position_code=`%s`", candidate.PositionCode))
+			if candidate.PositionName != "" {
+				sb.WriteString(fmt.Sprintf("（%s）", candidate.PositionName))
+			}
+		}
+		if candidate.CandidateCount > 0 {
+			sb.WriteString(fmt.Sprintf(", candidate_count=%d", candidate.CandidateCount))
+		}
+		sb.WriteString("\n")
+	}
+	return sb.String()
+}
+
 // buildUserMessage constructs the user-facing prompt, optionally injecting previous validation errors.
-func (s *WorkflowGenerateService) buildUserMessage(spec string, actionsCtx string, prevErrors []engine.ValidationError) string {
+func (s *WorkflowGenerateService) buildUserMessage(spec string, promptCtx workflowPromptContext, prevErrors []engine.ValidationError) string {
 	var sb strings.Builder
 	sb.WriteString("请根据以下协作规范生成工作流 JSON。\n\n")
 	sb.WriteString("## 协作规范\n\n")
 	sb.WriteString(spec)
 
-	if actionsCtx != "" {
-		sb.WriteString(actionsCtx)
+	if promptCtx.FormContractContext != "" {
+		sb.WriteString(promptCtx.FormContractContext)
+	}
+
+	if promptCtx.OrgContext != "" {
+		sb.WriteString(promptCtx.OrgContext)
+	}
+
+	if promptCtx.ActionsContext != "" {
+		sb.WriteString(promptCtx.ActionsContext)
 	}
 
 	if len(prevErrors) > 0 {
@@ -546,7 +911,7 @@ func (s *WorkflowGenerateService) buildUserMessage(spec string, actionsCtx strin
 }
 
 func (s *WorkflowGenerateService) BuildUserMessage(spec string, actionsCtx string, prevErrors []engine.ValidationError) string {
-	return s.buildUserMessage(spec, actionsCtx, prevErrors)
+	return s.buildUserMessage(spec, workflowPromptContext{ActionsContext: actionsCtx}, prevErrors)
 }
 
 func validationErrorsRequireParticipantRepair(validationErrors []engine.ValidationError) bool {

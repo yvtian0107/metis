@@ -2,6 +2,7 @@ package ticket
 
 import (
 	. "metis/internal/app/itsm/domain"
+	"slices"
 	"time"
 
 	"metis/internal/app/itsm/engine"
@@ -116,51 +117,17 @@ func (s *TicketService) populateMonitorItem(item *TicketMonitorItem, ticket *Tic
 		return
 	}
 
-	var blocked, risk []string
-	if ticket.EngineType == "smart" && ticket.AIFailureCount >= engine.MaxAIFailureCount {
-		blocked = append(blocked, "AI 连续失败，等待人工接管")
-	}
-	if ticket.CurrentActivityID == nil && now.Sub(ticket.UpdatedAt) >= monitorNoActivityBlockAfter {
-		blocked = append(blocked, "活跃工单超过 5 分钟没有当前活动")
-	}
-	if fact.Activity != nil && isActiveActivity(fact.Activity.Status) {
-		if engine.IsHumanNode(fact.Activity.ActivityType) {
-			switch {
-			case fact.AssignmentCount == 0:
-				blocked = append(blocked, "当前人工节点没有处理人")
-			case fact.ResolvableAssignments == 0:
-				blocked = append(blocked, "当前人工节点没有可解析处理人")
-			case now.Sub(activityStartedAt(fact.Activity)) >= monitorHumanWaitRiskAfter:
-				risk = append(risk, "人工节点等待超过 60 分钟")
-			}
-		}
-		if fact.Activity.ActivityType == engine.NodeAction {
-			if fact.ActionFailed {
-				blocked = append(blocked, "自动化动作执行失败")
-			} else if now.Sub(activityStartedAt(fact.Activity)) >= monitorActionRiskAfter {
-				risk = append(risk, "自动化动作运行超过 15 分钟")
-			}
-		}
-	}
-	switch ticket.SLAStatus {
-	case SLAStatusBreachedResponse, SLAStatusBreachedResolve:
-		blocked = append(blocked, "SLA 已超时")
-	default:
-		if ticket.SLAResolutionDeadline != nil && ticket.SLAResolutionDeadline.After(now) && ticket.SLAResolutionDeadline.Sub(now) <= monitorSLADueRiskBefore {
-			risk = append(risk, "SLA 距离截止小于 30 分钟")
-		}
-	}
-
-	if len(blocked) > 0 {
+	reasons := EvaluateTicketMonitorRules(ticket, fact, now)
+	item.MonitorReasons = reasons
+	item.StuckReasons = monitorReasonMessages(reasons)
+	if monitorReasonsContainSeverity(reasons, "blocked") {
 		item.RiskLevel = "blocked"
 		item.Stuck = true
-		item.StuckReasons = blocked
 		return
 	}
-	if len(risk) > 0 {
+	if monitorReasonsContainSeverity(reasons, "risk") {
 		item.RiskLevel = "risk"
-		item.Stuck = true
-		item.StuckReasons = risk
+		item.Stuck = false
 		return
 	}
 	item.RiskLevel = "normal"
@@ -176,13 +143,16 @@ func (s *TicketService) accumulateMonitorSummary(summary *TicketMonitorSummary, 
 		} else {
 			summary.ClassicActiveTotal++
 		}
-		if item.Stuck {
+		switch item.RiskLevel {
+		case "blocked":
 			summary.StuckTotal++
+		case "risk":
+			summary.RiskTotal++
 		}
-		if ticket.EngineType == "smart" && (ticket.AIFailureCount >= engine.MaxAIFailureCount || item.SmartState == "ai_disabled") {
+		if monitorItemHasMetric(item, "ai_incident_total") {
 			summary.AIIncidentTotal++
 		}
-		if monitorHasSLARisk(ticket, now) {
+		if monitorItemHasMetric(item, "sla_risk_total") {
 			summary.SLARiskTotal++
 		}
 	}
@@ -192,10 +162,179 @@ func (s *TicketService) accumulateMonitorSummary(summary *TicketMonitorSummary, 
 }
 
 func monitorHasSLARisk(ticket *Ticket, now time.Time) bool {
-	if ticket.SLAStatus == SLAStatusBreachedResponse || ticket.SLAStatus == SLAStatusBreachedResolve {
-		return true
+	reasons := EvaluateTicketMonitorRules(ticket, ticketMonitorFact{}, now)
+	return slices.ContainsFunc(reasons, func(reason TicketMonitorReason) bool {
+		return reason.MetricCode == "sla_risk_total"
+	})
+}
+
+func EvaluateTicketMonitorRules(ticket *Ticket, fact ticketMonitorFact, now time.Time) []TicketMonitorReason {
+	if ticket == nil || !isActiveTicket(ticket.Status) {
+		return nil
 	}
-	return ticket.SLAResolutionDeadline != nil && ticket.SLAResolutionDeadline.After(now) && ticket.SLAResolutionDeadline.Sub(now) <= monitorSLADueRiskBefore
+	reasons := make([]TicketMonitorReason, 0)
+	addReason := func(metricCode, ruleCode, severity, message string, evidence map[string]any) {
+		if slices.ContainsFunc(reasons, func(existing TicketMonitorReason) bool { return existing.RuleCode == ruleCode }) {
+			return
+		}
+		if evidence == nil {
+			evidence = map[string]any{}
+		}
+		evidence["observed_at"] = now.Format(time.RFC3339)
+		reasons = append(reasons, TicketMonitorReason{
+			MetricCode: metricCode,
+			RuleCode:   ruleCode,
+			Severity:   severity,
+			Message:    message,
+			Evidence:   evidence,
+		})
+	}
+
+	if ticket.EngineType == "smart" && ticket.AIFailureCount >= engine.MaxAIFailureCount {
+		addReason("ai_incident_total", "ai_circuit_breaker", "blocked", "AI 连续失败，等待人工接管", map[string]any{
+			"engine_type":         ticket.EngineType,
+			"ai_failure_count":    float64(ticket.AIFailureCount),
+			"threshold_count":     float64(engine.MaxAIFailureCount),
+			"ticket_status":       ticket.Status,
+			"current_activity_id": monitorOptionalUint(ticket.CurrentActivityID),
+		})
+	}
+	if ticket.CurrentActivityID == nil && now.Sub(ticket.UpdatedAt) >= monitorNoActivityBlockAfter {
+		addReason("blocked_total", "no_current_activity", "blocked", "活跃工单超过 5 分钟没有当前活动", map[string]any{
+			"current_activity_id": "nil",
+			"ticket_updated_at":   ticket.UpdatedAt.Format(time.RFC3339),
+			"waiting_minutes":     float64(elapsedMinutes(now, ticket.UpdatedAt)),
+			"threshold_minutes":   float64(monitorNoActivityBlockAfter / time.Minute),
+		})
+	}
+	if fact.Activity != nil && isActiveActivity(fact.Activity.Status) {
+		startedAt := activityStartedAt(fact.Activity)
+		if engine.IsHumanNode(fact.Activity.ActivityType) {
+			switch {
+			case fact.AssignmentCount == 0:
+				addReason("blocked_total", "human_assignment_missing", "blocked", "当前人工节点没有处理人", map[string]any{
+					"activity_id":                 float64(fact.Activity.ID),
+					"activity_type":               fact.Activity.ActivityType,
+					"assignment_count":            float64(fact.AssignmentCount),
+					"resolvable_assignment_count": float64(fact.ResolvableAssignments),
+				})
+			case fact.ResolvableAssignments == 0:
+				addReason("blocked_total", "human_assignment_unresolvable", "blocked", "当前人工节点没有可解析处理人", map[string]any{
+					"activity_id":                 float64(fact.Activity.ID),
+					"activity_type":               fact.Activity.ActivityType,
+					"assignment_count":            float64(fact.AssignmentCount),
+					"resolvable_assignment_count": float64(fact.ResolvableAssignments),
+				})
+			case now.Sub(startedAt) >= monitorHumanWaitRiskAfter:
+				addReason("risk_total", "human_waiting_too_long", "risk", "人工节点等待超过 60 分钟", map[string]any{
+					"activity_id":         float64(fact.Activity.ID),
+					"activity_type":       fact.Activity.ActivityType,
+					"activity_started_at": startedAt.Format(time.RFC3339),
+					"waiting_minutes":     float64(elapsedMinutes(now, startedAt)),
+					"threshold_minutes":   float64(monitorHumanWaitRiskAfter / time.Minute),
+				})
+			}
+		}
+		if fact.Activity.ActivityType == engine.NodeAction {
+			if fact.ActionFailed {
+				addReason("blocked_total", "action_execution_failed", "blocked", "自动化动作执行失败", map[string]any{
+					"activity_id":   float64(fact.Activity.ID),
+					"activity_type": fact.Activity.ActivityType,
+					"action_failed": true,
+				})
+			} else if now.Sub(startedAt) >= monitorActionRiskAfter {
+				addReason("risk_total", "action_running_too_long", "risk", "自动化动作运行超过 15 分钟", map[string]any{
+					"activity_id":         float64(fact.Activity.ID),
+					"activity_type":       fact.Activity.ActivityType,
+					"activity_started_at": startedAt.Format(time.RFC3339),
+					"waiting_minutes":     float64(elapsedMinutes(now, startedAt)),
+					"threshold_minutes":   float64(monitorActionRiskAfter / time.Minute),
+				})
+			}
+		}
+	}
+
+	switch ticket.SLAStatus {
+	case SLAStatusBreachedResponse:
+		addReason("sla_risk_total", "sla_response_breached", "blocked", "响应 SLA 已超时", map[string]any{
+			"sla_status":     ticket.SLAStatus,
+			"deadline_field": "sla_response_deadline",
+		})
+	case SLAStatusBreachedResolve:
+		addReason("sla_risk_total", "sla_resolution_breached", "blocked", "解决 SLA 已超时", map[string]any{
+			"sla_status":     ticket.SLAStatus,
+			"deadline_field": "sla_resolution_deadline",
+		})
+	}
+	if ticket.SLAResponseDeadline != nil {
+		switch {
+		case !ticket.SLAResponseDeadline.After(now):
+			addReason("sla_risk_total", "sla_response_breached", "blocked", "响应 SLA 已超时", map[string]any{
+				"sla_status":        ticket.SLAStatus,
+				"deadline_field":    "sla_response_deadline",
+				"deadline":          ticket.SLAResponseDeadline.Format(time.RFC3339),
+				"remaining_minutes": float64(int(ticket.SLAResponseDeadline.Sub(now).Minutes())),
+			})
+		case ticket.SLAResponseDeadline.Sub(now) <= monitorSLADueRiskBefore:
+			addReason("sla_risk_total", "sla_response_due_soon", "risk", "响应 SLA 距离截止小于 30 分钟", map[string]any{
+				"sla_status":        ticket.SLAStatus,
+				"deadline_field":    "sla_response_deadline",
+				"deadline":          ticket.SLAResponseDeadline.Format(time.RFC3339),
+				"remaining_minutes": float64(int(ticket.SLAResponseDeadline.Sub(now).Minutes())),
+				"threshold_minutes": float64(monitorSLADueRiskBefore / time.Minute),
+			})
+		}
+	}
+	if ticket.SLAResolutionDeadline != nil {
+		switch {
+		case !ticket.SLAResolutionDeadline.After(now):
+			addReason("sla_risk_total", "sla_resolution_breached", "blocked", "解决 SLA 已超时", map[string]any{
+				"sla_status":        ticket.SLAStatus,
+				"deadline_field":    "sla_resolution_deadline",
+				"deadline":          ticket.SLAResolutionDeadline.Format(time.RFC3339),
+				"remaining_minutes": float64(int(ticket.SLAResolutionDeadline.Sub(now).Minutes())),
+			})
+		case ticket.SLAResolutionDeadline.Sub(now) <= monitorSLADueRiskBefore:
+			addReason("sla_risk_total", "sla_resolution_due_soon", "risk", "解决 SLA 距离截止小于 30 分钟", map[string]any{
+				"sla_status":        ticket.SLAStatus,
+				"deadline_field":    "sla_resolution_deadline",
+				"deadline":          ticket.SLAResolutionDeadline.Format(time.RFC3339),
+				"remaining_minutes": float64(int(ticket.SLAResolutionDeadline.Sub(now).Minutes())),
+				"threshold_minutes": float64(monitorSLADueRiskBefore / time.Minute),
+			})
+		}
+	}
+	return reasons
+}
+
+func monitorOptionalUint(value *uint) any {
+	if value == nil {
+		return "nil"
+	}
+	return float64(*value)
+}
+
+func monitorReasonMessages(reasons []TicketMonitorReason) []string {
+	if len(reasons) == 0 {
+		return nil
+	}
+	messages := make([]string, 0, len(reasons))
+	for _, reason := range reasons {
+		messages = append(messages, reason.Message)
+	}
+	return messages
+}
+
+func monitorReasonsContainSeverity(reasons []TicketMonitorReason, severity string) bool {
+	return slices.ContainsFunc(reasons, func(reason TicketMonitorReason) bool {
+		return reason.Severity == severity
+	})
+}
+
+func monitorItemHasMetric(item *TicketMonitorItem, metricCode string) bool {
+	return slices.ContainsFunc(item.MonitorReasons, func(reason TicketMonitorReason) bool {
+		return reason.MetricCode == metricCode
+	})
 }
 
 func isActiveTicket(status string) bool {
@@ -234,6 +373,31 @@ func monitorRiskMatches(filter string, riskLevel string) bool {
 		return riskLevel == "blocked" || riskLevel == "risk"
 	default:
 		return filter == riskLevel
+	}
+}
+
+func monitorMetricMatches(metricCode string, ticket *Ticket, item *TicketMonitorItem, now time.Time) bool {
+	switch metricCode {
+	case "", "all":
+		return true
+	case "active_total":
+		return isActiveTicket(ticket.Status)
+	case "blocked_total", "stuck_total":
+		return isActiveTicket(ticket.Status) && item.RiskLevel == "blocked"
+	case "risk_total":
+		return isActiveTicket(ticket.Status) && item.RiskLevel == "risk"
+	case "sla_risk_total":
+		return isActiveTicket(ticket.Status) && monitorItemHasMetric(item, "sla_risk_total")
+	case "ai_incident_total":
+		return isActiveTicket(ticket.Status) && monitorItemHasMetric(item, "ai_incident_total")
+	case "completed_today_total":
+		return ticket.Status == TicketStatusCompleted && ticket.FinishedAt != nil && sameLocalDay(*ticket.FinishedAt, now)
+	case "smart_active_total":
+		return isActiveTicket(ticket.Status) && ticket.EngineType == "smart"
+	case "classic_active_total":
+		return isActiveTicket(ticket.Status) && ticket.EngineType != "smart"
+	default:
+		return true
 	}
 }
 
