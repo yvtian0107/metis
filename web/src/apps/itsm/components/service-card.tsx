@@ -78,7 +78,7 @@ export function ServiceCard({ service, canUpdate, canDelete, onDelete }: Service
                 <DropdownMenuContent align="end">
                   {canUpdate && (
                     <DropdownMenuItem onClick={() => navigate(`/itsm/services/${service.id}`)}>
-                      <Pencil className="mr-2 h-3.5 w-3.5" />{t("edit")}
+                      <Pencil className="mr-2 h-3.5 w-3.5" />{t("common:edit")}
                     </DropdownMenuItem>
                   )}
                   {canDelete && (
