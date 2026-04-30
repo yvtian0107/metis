@@ -442,6 +442,7 @@ func TestPathBuilderSystemPromptReusesEquivalentEndNodes(t *testing.T) {
 		"业务结果由 edge.data.outcome 表达，不由 end 节点名称表达",
 		"默认只生成一个公共终态",
 		"多个 process 节点的 rejected 出边如果最终也是结束，也应全部指向同一个 end",
+		"rejected 出边都不可省略",
 		"不要生成“驳回结束”“通过完成”",
 	}
 	for _, snippet := range requiredSnippets {
@@ -459,6 +460,24 @@ func TestPathBuilderSystemPromptReusesEquivalentEndNodes(t *testing.T) {
 	for _, snippet := range misleadingSnippets {
 		if strings.Contains(PathBuilderSystemPrompt, snippet) {
 			t.Fatalf("system prompt still contains misleading end-node guidance: %s", snippet)
+		}
+	}
+}
+
+func TestPathBuilderSystemPromptGuidesServerAccessFieldKeysAndRouting(t *testing.T) {
+	requiredSnippets := []string{
+		"生产服务器临时访问申请",
+		"server：访问服务器",
+		"access_time：访问时段",
+		"operation_purpose：操作目的",
+		"access_reason：访问原因",
+		"必须基于 form.access_reason 路由",
+		"不要改用 form.reason、form.purpose、form.request_kind",
+		"使用 form.access_reason 的稳定枚举值表达分支条件",
+	}
+	for _, snippet := range requiredSnippets {
+		if !strings.Contains(PathBuilderSystemPrompt, snippet) {
+			t.Fatalf("system prompt missing server access field/routing guidance: %s", snippet)
 		}
 	}
 }
@@ -821,8 +840,14 @@ func TestBuildGenerateResponse_PersistsBlockingDraftAndHealthFailure(t *testing.
 	if resp.HealthCheck.Status != "fail" {
 		t.Fatalf("expected health check fail for blocking draft, got %+v", resp.HealthCheck)
 	}
-	if !serviceHealthHasItem(resp.HealthCheck, "health_engine", "fail") {
-		t.Fatalf("expected health_engine fail item, got %+v", resp.HealthCheck.Items)
+	if !serviceHealthHasItem(resp.HealthCheck, "reference_path", "fail") {
+		t.Fatalf("expected reference_path fail item, got %+v", resp.HealthCheck.Items)
+	}
+	if serviceHealthHasItem(resp.HealthCheck, "health_engine", "fail") {
+		t.Fatalf("blocking draft should not be masked as health_engine failure: %+v", resp.HealthCheck.Items)
+	}
+	if !serviceHealthHasMessageContaining(resp.HealthCheck, "reference_path", `缺少 outcome="rejected"`) {
+		t.Fatalf("expected reference_path item to expose rejected-edge validation error, got %+v", resp.HealthCheck.Items)
 	}
 	if string(resp.Service.WorkflowJSON) != string(workflowJSON) {
 		t.Fatalf("expected workflow json to be saved, got %s", resp.Service.WorkflowJSON)
