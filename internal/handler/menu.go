@@ -73,7 +73,12 @@ func (h *MenuHandler) Create(c *gin.Context) {
 	}
 
 	if err := h.menuSvc.Create(menu); err != nil {
-		Fail(c, http.StatusInternalServerError, err.Error())
+		switch {
+		case errors.Is(err, service.ErrMenuInvalidType), errors.Is(err, service.ErrMenuPermissionExists), errors.Is(err, service.ErrMenuParentNotFound), errors.Is(err, service.ErrMenuParentNotAllowed), errors.Is(err, service.ErrMenuCircularParent):
+			Fail(c, http.StatusBadRequest, err.Error())
+		default:
+			Fail(c, http.StatusInternalServerError, err.Error())
+		}
 		return
 	}
 
@@ -97,8 +102,12 @@ func (h *MenuHandler) Update(c *gin.Context) {
 
 	menu, err := h.menuSvc.Update(id, updates)
 	if err != nil {
-		if errors.Is(err, service.ErrMenuNotFound) {
+		switch {
+		case errors.Is(err, service.ErrMenuNotFound):
 			Fail(c, http.StatusNotFound, "menu not found")
+			return
+		case errors.Is(err, service.ErrMenuInvalidType), errors.Is(err, service.ErrMenuPermissionExists), errors.Is(err, service.ErrMenuParentNotFound), errors.Is(err, service.ErrMenuParentNotAllowed), errors.Is(err, service.ErrMenuCircularParent):
+			Fail(c, http.StatusBadRequest, err.Error())
 			return
 		}
 		Fail(c, http.StatusInternalServerError, err.Error())
@@ -122,7 +131,15 @@ func (h *MenuHandler) Reorder(c *gin.Context) {
 		Fail(c, http.StatusBadRequest, err.Error())
 		return
 	}
+	if len(req.Items) == 0 {
+		Fail(c, http.StatusBadRequest, "items is required")
+		return
+	}
 	if err := h.menuSvc.ReorderMenus(req.Items); err != nil {
+		if errors.Is(err, service.ErrMenuNotFound) {
+			Fail(c, http.StatusBadRequest, err.Error())
+			return
+		}
 		Fail(c, http.StatusInternalServerError, err.Error())
 		return
 	}

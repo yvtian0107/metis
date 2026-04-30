@@ -75,6 +75,9 @@ func (s *SessionService) KickSession(sessionID uint, currentJTI string) error {
 	if rt.Revoked {
 		return ErrSessionNotFound
 	}
+	if !rt.ExpiresAt.After(time.Now()) {
+		return ErrSessionNotFound
+	}
 
 	// Prevent self-kick
 	if rt.AccessTokenJTI == currentJTI {

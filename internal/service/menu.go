@@ -11,8 +11,13 @@ import (
 )
 
 var (
-	ErrMenuNotFound    = errors.New("error.menu.not_found")
-	ErrMenuHasChildren = errors.New("error.menu.has_children")
+	ErrMenuNotFound         = errors.New("error.menu.not_found")
+	ErrMenuHasChildren      = errors.New("error.menu.has_children")
+	ErrMenuInvalidType      = errors.New("error.menu.invalid_type")
+	ErrMenuPermissionExists = errors.New("error.menu.permission_exists")
+	ErrMenuParentNotFound   = errors.New("error.menu.parent_not_found")
+	ErrMenuParentNotAllowed = errors.New("error.menu.parent_not_allowed")
+	ErrMenuCircularParent   = errors.New("error.menu.circular_parent")
 )
 
 type MenuService struct {
@@ -109,7 +114,84 @@ func (s *MenuService) GetUserPermissions(roleCode string) []string {
 	return perms
 }
 
+func isValidMenuType(menuType model.MenuType) bool {
+	switch menuType {
+	case model.MenuTypeDirectory, model.MenuTypeMenu, model.MenuTypeButton:
+		return true
+	default:
+		return false
+	}
+}
+
+func (s *MenuService) ensurePermissionAvailable(permission string, currentID uint) error {
+	if permission == "" {
+		return nil
+	}
+	existing, err := s.menuRepo.FindByPermission(permission)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil
+		}
+		return err
+	}
+	if existing.ID != currentID {
+		return ErrMenuPermissionExists
+	}
+	return nil
+}
+
+func (s *MenuService) ensureParentExists(parentID *uint, currentID uint) error {
+	if parentID == nil {
+		return nil
+	}
+	if *parentID == currentID {
+		return ErrMenuCircularParent
+	}
+	parent, err := s.menuRepo.FindByID(*parentID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return ErrMenuParentNotFound
+		}
+		return err
+	}
+	if parent.Type == model.MenuTypeButton {
+		return ErrMenuParentNotAllowed
+	}
+	if currentID != 0 {
+		allMenus, err := s.menuRepo.FindAll()
+		if err != nil {
+			return err
+		}
+		parentByID := make(map[uint]*uint, len(allMenus))
+		for _, menu := range allMenus {
+			parentByID[menu.ID] = menu.ParentID
+		}
+		visited := map[uint]bool{}
+		cursor := parentID
+		for cursor != nil {
+			if visited[*cursor] {
+				return ErrMenuCircularParent
+			}
+			if *cursor == currentID {
+				return ErrMenuCircularParent
+			}
+			visited[*cursor] = true
+			cursor = parentByID[*cursor]
+		}
+	}
+	return nil
+}
+
 func (s *MenuService) Create(menu *model.Menu) error {
+	if !isValidMenuType(menu.Type) {
+		return ErrMenuInvalidType
+	}
+	if err := s.ensureParentExists(menu.ParentID, 0); err != nil {
+		return err
+	}
+	if err := s.ensurePermissionAvailable(menu.Permission, 0); err != nil {
+		return err
+	}
 	return s.menuRepo.Create(menu)
 }
 
@@ -152,6 +234,16 @@ func (s *MenuService) Update(id uint, updates map[string]any) (*model.Menu, erro
 		}
 	}
 
+	if !isValidMenuType(menu.Type) {
+		return nil, ErrMenuInvalidType
+	}
+	if err := s.ensureParentExists(menu.ParentID, menu.ID); err != nil {
+		return nil, err
+	}
+	if err := s.ensurePermissionAvailable(menu.Permission, menu.ID); err != nil {
+		return nil, err
+	}
+
 	if err := s.menuRepo.Update(menu); err != nil {
 		return nil, err
 	}
@@ -159,6 +251,19 @@ func (s *MenuService) Update(id uint, updates map[string]any) (*model.Menu, erro
 }
 
 func (s *MenuService) ReorderMenus(items []repository.SortItem) error {
+	menus, err := s.menuRepo.FindByIDs(func() []uint {
+		ids := make([]uint, 0, len(items))
+		for _, item := range items {
+			ids = append(ids, item.ID)
+		}
+		return ids
+	}())
+	if err != nil {
+		return err
+	}
+	if len(menus) != len(items) {
+		return ErrMenuNotFound
+	}
 	return s.menuRepo.UpdateSorts(items)
 }
 

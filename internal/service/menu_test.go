@@ -274,6 +274,68 @@ func TestMenuServiceCreate_RootDirectory(t *testing.T) {
 	}
 }
 
+func TestMenuServiceCreate_RejectsInvalidType(t *testing.T) {
+	db := newTestDBForMenu(t)
+	svc := newMenuServiceForTest(t, db)
+
+	err := svc.Create(&model.Menu{
+		Name:       "Invalid",
+		Type:       model.MenuType("invalid"),
+		Permission: "test:create:invalid-type",
+	})
+	if !errors.Is(err, ErrMenuInvalidType) {
+		t.Fatalf("expected ErrMenuInvalidType, got %v", err)
+	}
+}
+
+func TestMenuServiceCreate_RejectsDuplicatePermission(t *testing.T) {
+	db := newTestDBForMenu(t)
+	svc := newMenuServiceForTest(t, db)
+
+	seedMenu(t, db, &model.Menu{Name: "Old", Type: model.MenuTypeMenu, Permission: "test:create:duplicate", Sort: 1})
+	err := svc.Create(&model.Menu{
+		Name:       "New",
+		Type:       model.MenuTypeMenu,
+		Permission: "test:create:duplicate",
+	})
+	if !errors.Is(err, ErrMenuPermissionExists) {
+		t.Fatalf("expected ErrMenuPermissionExists, got %v", err)
+	}
+}
+
+func TestMenuServiceCreate_RejectsUnknownParent(t *testing.T) {
+	db := newTestDBForMenu(t)
+	svc := newMenuServiceForTest(t, db)
+
+	missingParentID := uint(999)
+	err := svc.Create(&model.Menu{
+		Name:       "Child",
+		Type:       model.MenuTypeMenu,
+		ParentID:   &missingParentID,
+		Permission: "test:create:unknown-parent",
+	})
+	if err == nil {
+		t.Fatal("expected create to fail when parent does not exist")
+	}
+}
+
+func TestMenuServiceCreate_RejectsButtonParent(t *testing.T) {
+	db := newTestDBForMenu(t)
+	svc := newMenuServiceForTest(t, db)
+
+	button := seedMenu(t, db, &model.Menu{Name: "按钮权限", Type: model.MenuTypeButton, Permission: "test:create:button-parent", Sort: 1})
+	err := svc.Create(&model.Menu{
+		Name:       "非法子项",
+		Type:       model.MenuTypeMenu,
+		ParentID:   &button.ID,
+		Permission: "test:create:child-under-button",
+	})
+	if err == nil {
+		t.Fatal("expected create to fail when parent is a button")
+	}
+	
+}
+
 func TestMenuServiceUpdate_Success(t *testing.T) {
 	db := newTestDBForMenu(t)
 	svc := newMenuServiceForTest(t, db)
@@ -315,6 +377,60 @@ func TestMenuServiceUpdate_Parent(t *testing.T) {
 	}
 }
 
+func TestMenuServiceUpdate_ClearParent(t *testing.T) {
+	db := newTestDBForMenu(t)
+	svc := newMenuServiceForTest(t, db)
+
+	parent := seedMenu(t, db, &model.Menu{Name: "Parent", Type: model.MenuTypeDirectory, Permission: "test:update:clear-parent-parent", Sort: 1})
+	menu := seedMenu(t, db, &model.Menu{Name: "Child", Type: model.MenuTypeMenu, ParentID: &parent.ID, Permission: "test:update:clear-parent-child", Sort: 1})
+
+	updated, err := svc.Update(menu.ID, map[string]any{"parentId": nil})
+	if err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	if updated.ParentID != nil {
+		t.Fatalf("expected parentID nil, got %v", updated.ParentID)
+	}
+}
+
+func TestMenuServiceUpdate_RejectsInvalidType(t *testing.T) {
+	db := newTestDBForMenu(t)
+	svc := newMenuServiceForTest(t, db)
+
+	menu := seedMenu(t, db, &model.Menu{Name: "Menu", Type: model.MenuTypeMenu, Permission: "test:update:invalid-type", Sort: 1})
+
+	_, err := svc.Update(menu.ID, map[string]any{"type": "invalid"})
+	if !errors.Is(err, ErrMenuInvalidType) {
+		t.Fatalf("expected ErrMenuInvalidType, got %v", err)
+	}
+}
+
+func TestMenuServiceUpdate_RejectsDuplicatePermission(t *testing.T) {
+	db := newTestDBForMenu(t)
+	svc := newMenuServiceForTest(t, db)
+
+	seedMenu(t, db, &model.Menu{Name: "MenuA", Type: model.MenuTypeMenu, Permission: "test:update:duplicate-a", Sort: 1})
+	menuB := seedMenu(t, db, &model.Menu{Name: "MenuB", Type: model.MenuTypeMenu, Permission: "test:update:duplicate-b", Sort: 2})
+
+	_, err := svc.Update(menuB.ID, map[string]any{"permission": "test:update:duplicate-a"})
+	if !errors.Is(err, ErrMenuPermissionExists) {
+		t.Fatalf("expected ErrMenuPermissionExists, got %v", err)
+	}
+}
+
+func TestMenuServiceUpdate_RejectsButtonParent(t *testing.T) {
+	db := newTestDBForMenu(t)
+	svc := newMenuServiceForTest(t, db)
+
+	button := seedMenu(t, db, &model.Menu{Name: "Button", Type: model.MenuTypeButton, Permission: "test:update:button-parent", Sort: 1})
+	menu := seedMenu(t, db, &model.Menu{Name: "Menu", Type: model.MenuTypeMenu, Permission: "test:update:button-parent-child", Sort: 2})
+
+	_, err := svc.Update(menu.ID, map[string]any{"parentId": float64(button.ID)})
+	if !errors.Is(err, ErrMenuParentNotAllowed) {
+		t.Fatalf("expected ErrMenuParentNotAllowed, got %v", err)
+	}
+}
+
 func TestMenuServiceUpdate_NotFound(t *testing.T) {
 	db := newTestDBForMenu(t)
 	svc := newMenuServiceForTest(t, db)
@@ -323,6 +439,20 @@ func TestMenuServiceUpdate_NotFound(t *testing.T) {
 	if !errors.Is(err, ErrMenuNotFound) {
 		t.Fatalf("expected ErrMenuNotFound, got %v", err)
 	}
+}
+
+func TestMenuServiceUpdate_RejectsDescendantParent(t *testing.T) {
+	db := newTestDBForMenu(t)
+	svc := newMenuServiceForTest(t, db)
+
+	root := seedMenu(t, db, &model.Menu{Name: "Root", Type: model.MenuTypeDirectory, Permission: "test:update:cycle-root", Sort: 1})
+	child := seedMenu(t, db, &model.Menu{Name: "Child", Type: model.MenuTypeMenu, ParentID: &root.ID, Permission: "test:update:cycle-child", Sort: 1})
+
+	_, err := svc.Update(root.ID, map[string]any{"parentId": float64(child.ID)})
+	if err == nil {
+		t.Fatal("expected update to fail when moving a node under its descendant")
+	}
+	
 }
 
 func TestMenuServiceReorderMenus_Success(t *testing.T) {
@@ -345,6 +475,17 @@ func TestMenuServiceReorderMenus_Success(t *testing.T) {
 	}
 	if found2.Sort != 10 {
 		t.Fatalf("expected m2 sort 10, got %d", found2.Sort)
+	}
+}
+
+func TestMenuServiceReorderMenus_RejectsUnknownID(t *testing.T) {
+	db := newTestDBForMenu(t)
+	svc := newMenuServiceForTest(t, db)
+
+	seedMenu(t, db, &model.Menu{Name: "M1", Type: model.MenuTypeMenu, Permission: "test:reorder:unknown-existing", Sort: 1})
+	err := svc.ReorderMenus([]repository.SortItem{{ID: 999, Sort: 10}})
+	if !errors.Is(err, ErrMenuNotFound) {
+		t.Fatalf("expected ErrMenuNotFound, got %v", err)
 	}
 }
 

@@ -33,12 +33,17 @@ func (h *SessionHandler) List(c *gin.Context) {
 		return
 	}
 
-	OK(c, result)
+	OK(c, gin.H{
+		"items":    result.Items,
+		"total":    result.Total,
+		"page":     page,
+		"pageSize": pageSize,
+	})
 }
 
 func (h *SessionHandler) Kick(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
-	if err != nil {
+	if err != nil || id == 0 {
 		Fail(c, http.StatusBadRequest, "invalid session id")
 		return
 	}

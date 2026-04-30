@@ -65,13 +65,32 @@ func (s *UserService) GetByIDWithManager(id uint) (*model.User, error) {
 	return user, nil
 }
 
+type CreateUserParams struct {
+	Username  string
+	Password  string
+	Email     string
+	Phone     string
+	RoleID    uint
+	ManagerID *uint
+}
+
 func (s *UserService) Create(username, password, email, phone string, roleID uint) (*model.User, error) {
+	return s.CreateWithParams(CreateUserParams{
+		Username: username,
+		Password: password,
+		Email:    email,
+		Phone:    phone,
+		RoleID:   roleID,
+	})
+}
+
+func (s *UserService) CreateWithParams(params CreateUserParams) (*model.User, error) {
 	// Validate password policy
-	if violations := token.ValidatePassword(password, s.settingsSvc.GetPasswordPolicy()); len(violations) > 0 {
+	if violations := token.ValidatePassword(params.Password, s.settingsSvc.GetPasswordPolicy()); len(violations) > 0 {
 		return nil, fmt.Errorf("%w: %s", ErrPasswordViolation, violations[0])
 	}
 
-	exists, err := s.userRepo.ExistsByUsername(username)
+	exists, err := s.userRepo.ExistsByUsername(params.Username)
 	if err != nil {
 		return nil, err
 	}
@@ -79,18 +98,19 @@ func (s *UserService) Create(username, password, email, phone string, roleID uin
 		return nil, ErrUsernameExists
 	}
 
-	hashed, err := token.HashPassword(password)
+	hashed, err := token.HashPassword(params.Password)
 	if err != nil {
 		return nil, err
 	}
 
 	now := time.Now()
 	user := &model.User{
-		Username:          username,
+		Username:          params.Username,
 		Password:          hashed,
-		Email:             email,
-		Phone:             phone,
-		RoleID:            roleID,
+		Email:             params.Email,
+		Phone:             params.Phone,
+		RoleID:            params.RoleID,
+		ManagerID:         params.ManagerID,
 		IsActive:          true,
 		PasswordChangedAt: &now,
 	}
@@ -98,8 +118,8 @@ func (s *UserService) Create(username, password, email, phone string, roleID uin
 	if err := s.userRepo.Create(user); err != nil {
 		return nil, err
 	}
-	// Reload to get Role association
-	return s.userRepo.FindByID(user.ID)
+	// Reload to get Role + Manager associations.
+	return s.userRepo.FindByIDWithManager(user.ID)
 }
 
 type UpdateUserParams struct {

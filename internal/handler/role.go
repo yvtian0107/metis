@@ -22,6 +22,12 @@ type RoleHandler struct {
 func (h *RoleHandler) List(c *gin.Context) {
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("pageSize", "20"))
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 {
+		pageSize = 20
+	}
 
 	roles, total, err := h.roleSvc.List(page, pageSize)
 	if err != nil {
@@ -189,8 +195,8 @@ func (h *RoleHandler) GetPermissions(c *gin.Context) {
 
 	policies := h.casbinSvc.GetPoliciesForRole(role.Code)
 
-	var menuPerms []string
-	var apiPolicies []gin.H
+	menuPerms := make([]string, 0)
+	apiPolicies := make([]gin.H, 0)
 	for _, p := range policies {
 		obj, act := p[1], p[2]
 		if len(obj) > 0 && obj[0] == '/' {

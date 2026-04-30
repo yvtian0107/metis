@@ -92,7 +92,7 @@ func (r *UserRepo) List(params ListParams) (*ListResult, error) {
 
 	var users []model.User
 	offset := (params.Page - 1) * params.PageSize
-	if err := query.Preload("Role").Offset(offset).Limit(params.PageSize).Order("id DESC").Find(&users).Error; err != nil {
+	if err := query.Preload("Role").Preload("Manager").Offset(offset).Limit(params.PageSize).Order("id DESC").Find(&users).Error; err != nil {
 		return nil, err
 	}
 

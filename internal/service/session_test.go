@@ -225,6 +225,30 @@ func TestSessionServiceKickSession_AlreadyRevoked(t *testing.T) {
 	}
 }
 
+func TestSessionServiceKickSession_ExpiredSessionReturnsNotFound(t *testing.T) {
+	db := newTestDBForSession(t)
+	svc := newSessionServiceForTest(t, db)
+	user := seedUserForSessionTest(t, db, "henry")
+	past := time.Now().Add(-24 * time.Hour)
+	rt := seedRefreshToken(t, db, user.ID, "rt-expired", false, past, "jti-expired")
+
+	err := svc.KickSession(rt.ID, "other-jti")
+	if !errors.Is(err, ErrSessionNotFound) {
+		t.Fatalf("expected ErrSessionNotFound, got %v", err)
+	}
+	if svc.blacklist.IsBlocked("jti-expired") {
+		t.Fatal("expected expired session jti not to be blacklisted")
+	}
+
+	updated, findErr := svc.refreshTokenRepo.FindByID(rt.ID)
+	if findErr != nil {
+		t.Fatalf("find by id: %v", findErr)
+	}
+	if updated.Revoked {
+		t.Fatal("expected expired session to remain unchanged")
+	}
+}
+
 func TestSessionServiceKickSession_EmptyJTI(t *testing.T) {
 	db := newTestDBForSession(t)
 	svc := newSessionServiceForTest(t, db)

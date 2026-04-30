@@ -647,3 +647,163 @@ func TestUserServiceClearManager_ReturnsNotFoundForMissing(t *testing.T) {
 		t.Fatalf("expected ErrUserNotFound, got %v", err)
 	}
 }
+
+func TestUserServiceList_PreloadsManagerForManagedUsers(t *testing.T) {
+	db := newTestDB(t)
+	svc := newUserServiceForTest(t, db)
+	role := seedRole(t, db, "test-role")
+	manager := seedUser(t, db, svc, "manager", role.ID)
+	user := seedUser(t, db, svc, "alice", role.ID)
+	user.ManagerID = &manager.ID
+	if err := db.Save(user).Error; err != nil {
+		t.Fatalf("set manager: %v", err)
+	}
+
+	result, err := svc.List(repository.ListParams{Page: 1, PageSize: 20})
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(result.Items) != 2 {
+		t.Fatalf("expected 2 users, got %d", len(result.Items))
+	}
+	if result.Items[0].ID != user.ID {
+		t.Fatalf("expected managed user %d first, got %d", user.ID, result.Items[0].ID)
+	}
+	if result.Items[0].Manager == nil {
+		t.Fatal("expected manager to be preloaded for list item")
+	}
+	if result.Items[0].Manager.ID != manager.ID {
+		t.Fatalf("expected manager ID %d, got %d", manager.ID, result.Items[0].Manager.ID)
+	}
+}
+
+func TestUserServiceCreateWithParams_SetsManagerWhenProvided(t *testing.T) {
+	db := newTestDB(t)
+	svc := newUserServiceForTest(t, db)
+	role := seedRole(t, db, "test-role")
+	manager := seedUser(t, db, svc, "manager", role.ID)
+
+	user, err := svc.CreateWithParams(CreateUserParams{
+		Username:  "alice",
+		Password:  "Password123!",
+		Email:     "alice@example.com",
+		Phone:     "1234567890",
+		RoleID:    role.ID,
+		ManagerID: &manager.ID,
+	})
+	if err != nil {
+		t.Fatalf("create with params: %v", err)
+	}
+	if user.ManagerID == nil || *user.ManagerID != manager.ID {
+		t.Fatalf("expected manager ID %d, got %v", manager.ID, user.ManagerID)
+	}
+	if user.Manager == nil || user.Manager.ID != manager.ID {
+		t.Fatalf("expected manager to be preloaded, got %+v", user.Manager)
+	}
+}
+
+func TestUserServiceList_SearchesAcrossUsernameEmailAndPhone(t *testing.T) {
+	db := newTestDB(t)
+	svc := newUserServiceForTest(t, db)
+	role := seedRole(t, db, "test-role")
+	if _, err := svc.Create("alice", "Password123!", "alice@example.com", "111", role.ID); err != nil {
+		t.Fatalf("create alice: %v", err)
+	}
+	if _, err := svc.Create("bob", "Password123!", "bob@example.com", "222", role.ID); err != nil {
+		t.Fatalf("create bob: %v", err)
+	}
+	if _, err := svc.Create("charlie", "Password123!", "charlie@example.com", "333", role.ID); err != nil {
+		t.Fatalf("create charlie: %v", err)
+	}
+
+	usernameResult, err := svc.List(repository.ListParams{Keyword: "ali", Page: 1, PageSize: 20})
+	if err != nil {
+		t.Fatalf("list by username: %v", err)
+	}
+	if len(usernameResult.Items) != 1 || usernameResult.Items[0].Username != "alice" {
+		t.Fatalf("expected only alice by username search, got %+v", usernameResult.Items)
+	}
+
+	emailResult, err := svc.List(repository.ListParams{Keyword: "bob@example", Page: 1, PageSize: 20})
+	if err != nil {
+		t.Fatalf("list by email: %v", err)
+	}
+	if len(emailResult.Items) != 1 || emailResult.Items[0].Username != "bob" {
+		t.Fatalf("expected only bob by email search, got %+v", emailResult.Items)
+	}
+
+	phoneResult, err := svc.List(repository.ListParams{Keyword: "333", Page: 1, PageSize: 20})
+	if err != nil {
+		t.Fatalf("list by phone: %v", err)
+	}
+	if len(phoneResult.Items) != 1 || phoneResult.Items[0].Username != "charlie" {
+		t.Fatalf("expected only charlie by phone search, got %+v", phoneResult.Items)
+	}
+}
+
+func TestUserServiceList_AppliesActiveFilterAndDefaultPagination(t *testing.T) {
+	db := newTestDB(t)
+	svc := newUserServiceForTest(t, db)
+	role := seedRole(t, db, "test-role")
+	for i := 0; i < 25; i++ {
+		user := seedUser(t, db, svc, fmt.Sprintf("user-%02d", i), role.ID)
+		if i%2 == 0 {
+			user.IsActive = false
+			if err := db.Save(user).Error; err != nil {
+				t.Fatalf("deactivate user %d: %v", i, err)
+			}
+		}
+	}
+
+	active := true
+	result, err := svc.List(repository.ListParams{IsActive: &active, Page: 0, PageSize: 0})
+	if err != nil {
+		t.Fatalf("list active users: %v", err)
+	}
+	if result.Total != 12 {
+		t.Fatalf("expected 12 active users, got %d", result.Total)
+	}
+	if len(result.Items) != 12 {
+		t.Fatalf("expected 12 items on first page, got %d", len(result.Items))
+	}
+	for _, item := range result.Items {
+		if !item.IsActive {
+			t.Fatalf("expected only active users, found inactive user %d", item.ID)
+		}
+	}
+
+	unfiltered, err := svc.List(repository.ListParams{Page: 0, PageSize: 0})
+	if err != nil {
+		t.Fatalf("list default pagination: %v", err)
+	}
+	if unfiltered.Total != 25 {
+		t.Fatalf("expected total 25 users, got %d", unfiltered.Total)
+	}
+	if len(unfiltered.Items) != 20 {
+		t.Fatalf("expected default page size 20, got %d", len(unfiltered.Items))
+	}
+}
+
+func TestUserServiceUpdateProfile_Success(t *testing.T) {
+	db := newTestDB(t)
+	svc := newUserServiceForTest(t, db)
+	role := seedRole(t, db, "test-role")
+	user := seedUser(t, db, svc, "alice", role.ID)
+	user.Locale = "zh-CN"
+	user.Timezone = "Asia/Shanghai"
+
+	if err := svc.UpdateProfile(user); err != nil {
+		t.Fatalf("update profile: %v", err)
+	}
+
+	updated, err := svc.GetByID(user.ID)
+	if err != nil {
+		t.Fatalf("reload user: %v", err)
+	}
+	if updated.Locale != "zh-CN" {
+		t.Fatalf("expected locale zh-CN, got %s", updated.Locale)
+	}
+	if updated.Timezone != "Asia/Shanghai" {
+		t.Fatalf("expected timezone Asia/Shanghai, got %s", updated.Timezone)
+	}
+}

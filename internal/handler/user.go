@@ -72,6 +72,7 @@ type createUserReq struct {
 	Email    string `json:"email"`
 	Phone    string `json:"phone"`
 	RoleID   uint   `json:"roleId" binding:"required"`
+	ManagerID *uint `json:"managerId"`
 }
 
 func (h *UserHandler) Create(c *gin.Context) {
@@ -81,9 +82,16 @@ func (h *UserHandler) Create(c *gin.Context) {
 		return
 	}
 
-	user, err := h.userSvc.Create(req.Username, req.Password, req.Email, req.Phone, req.RoleID)
+	user, err := h.userSvc.CreateWithParams(service.CreateUserParams{
+		Username:  req.Username,
+		Password:  req.Password,
+		Email:     req.Email,
+		Phone:     req.Phone,
+		RoleID:    req.RoleID,
+		ManagerID: req.ManagerID,
+	})
 	if err != nil {
-		if errors.Is(err, service.ErrUsernameExists) {
+		if errors.Is(err, service.ErrUsernameExists) || errors.Is(err, service.ErrPasswordViolation) {
 			Fail(c, http.StatusBadRequest, err.Error())
 			return
 		}
@@ -177,6 +185,8 @@ func (h *UserHandler) Update(c *gin.Context) {
 		case errors.Is(err, service.ErrUserNotFound):
 			Fail(c, http.StatusNotFound, err.Error())
 		case errors.Is(err, service.ErrCannotSelf):
+			Fail(c, http.StatusBadRequest, err.Error())
+		case errors.Is(err, service.ErrCircularManagerChain):
 			Fail(c, http.StatusBadRequest, err.Error())
 		default:
 			Fail(c, http.StatusInternalServerError, err.Error())

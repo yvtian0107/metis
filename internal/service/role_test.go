@@ -156,6 +156,23 @@ func TestRoleServiceGetByIDWithDeptScope_Success(t *testing.T) {
 	}
 }
 
+func TestRoleServiceGetByIDWithDeptScope_ReturnsEmptyDeptIDsForRoleWithoutCustomScope(t *testing.T) {
+	db := newTestDBForRole(t)
+	svc := newRoleServiceForTest(t, db)
+	role := seedRoleForTest(t, db, "Editor", "editor", false)
+
+	_, deptIDs, err := svc.GetByIDWithDeptScope(role.ID)
+	if err != nil {
+		t.Fatalf("get by id with dept scope: %v", err)
+	}
+	if deptIDs == nil {
+		t.Fatal("expected empty deptIDs slice, got nil")
+	}
+	if len(deptIDs) != 0 {
+		t.Fatalf("expected no dept IDs, got %v", deptIDs)
+	}
+}
+
 // 3. Update
 
 func TestRoleServiceUpdate_Success(t *testing.T) {
@@ -202,6 +219,25 @@ func TestRoleServiceUpdate_PreventsSystemRoleCodeChange(t *testing.T) {
 	_, err := svc.Update(role.ID, UpdateRoleParams{Code: &newCode})
 	if !errors.Is(err, ErrSystemRole) {
 		t.Fatalf("expected ErrSystemRole, got %v", err)
+	}
+}
+
+func TestRoleServiceUpdate_AllowsSystemRoleNonCodeChanges(t *testing.T) {
+	db := newTestDBForRole(t)
+	svc := newRoleServiceForTest(t, db)
+	role := seedRoleForTest(t, db, "Admin", "admin", true)
+
+	newName := "Administrator"
+	newDesc := "Built-in admin role"
+	updated, err := svc.Update(role.ID, UpdateRoleParams{Name: &newName, Description: &newDesc})
+	if err != nil {
+		t.Fatalf("update system role metadata: %v", err)
+	}
+	if updated.Code != "admin" {
+		t.Fatalf("expected code to remain admin, got %s", updated.Code)
+	}
+	if updated.Name != newName || updated.Description != newDesc {
+		t.Fatalf("expected updated metadata, got %+v", updated)
 	}
 }
 
@@ -296,6 +332,35 @@ func TestRoleServiceUpdateDataScope_ClearsDeptIDsWhenNotCustom(t *testing.T) {
 	}
 	if count != 0 {
 		t.Fatalf("expected 0 dept scopes after clearing, got %d", count)
+	}
+}
+
+func TestRoleServiceUpdateDataScope_CustomWithEmptyDeptIDsClearsExistingScopes(t *testing.T) {
+	db := newTestDBForRole(t)
+	svc := newRoleServiceForTest(t, db)
+	role := seedRoleForTest(t, db, "Custom", "custom", false)
+
+	if _, err := svc.UpdateDataScope(role.ID, model.DataScopeCustom, []uint{1, 2}); err != nil {
+		t.Fatalf("set custom scope: %v", err)
+	}
+
+	updated, err := svc.UpdateDataScope(role.ID, model.DataScopeCustom, nil)
+	if err != nil {
+		t.Fatalf("clear custom scope entries: %v", err)
+	}
+	if updated.DataScope != model.DataScopeCustom {
+		t.Fatalf("expected DataScope=custom, got %s", updated.DataScope)
+	}
+
+	deptIDs, err := svc.roleRepo.GetCustomDeptIDs(role.ID)
+	if err != nil {
+		t.Fatalf("get custom dept ids: %v", err)
+	}
+	if deptIDs == nil {
+		t.Fatal("expected empty deptIDs slice, got nil")
+	}
+	if len(deptIDs) != 0 {
+		t.Fatalf("expected custom dept ids to be cleared, got %v", deptIDs)
 	}
 }
 
