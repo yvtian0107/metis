@@ -52,6 +52,17 @@ function CatalogIcon({ name, className }: { name?: string; className?: string })
   return <Icon className={className} />
 }
 
+function CatalogCount({ value, className }: { value: number; className?: string }) {
+  return (
+    <span className={cn(
+      "ml-2 min-w-7 shrink-0 text-right font-mono text-[11px] leading-none tabular-nums text-muted-foreground/65",
+      className,
+    )}>
+      {value}
+    </span>
+  )
+}
+
 // ─── Schema ────────────────────────────────────────────
 
 function useCatalogSchema() {
@@ -156,7 +167,7 @@ export function CatalogNavPanel({
 
   return (
     <>
-      <div className="workspace-surface flex w-56 shrink-0 flex-col overflow-hidden rounded-[1.15rem]">
+      <div className="workspace-surface flex w-60 shrink-0 flex-col overflow-hidden rounded-[1.15rem]">
         <div className="flex-1 overflow-y-auto p-1.5">
           {/* "全部" */}
           <button
@@ -169,10 +180,8 @@ export function CatalogNavPanel({
             )}
           >
             <FolderTree className="h-4 w-4 shrink-0 text-muted-foreground" />
-            <span className="flex-1">{t("itsm:services.allNav")}</span>
-            <span className="ml-auto w-6 text-right text-xs tabular-nums text-muted-foreground">
-              {totalServices}
-            </span>
+            <span className="min-w-0 flex-1 truncate">{t("itsm:services.allNav")}</span>
+            <CatalogCount value={totalServices} />
           </button>
 
           {/* Group sections */}
@@ -180,27 +189,30 @@ export function CatalogNavPanel({
             <div key={root.id} className="mt-3">
               {/* Section header */}
               <div className={cn(
-                "group/header flex items-center gap-1 rounded-lg px-2.5 py-1.5 transition-colors",
+                "group/header relative rounded-lg transition-colors",
                 selectedCatalogId === root.id && "bg-background/70",
               )}>
                 <button
                   type="button"
                   onClick={() => onSelect(root.id)}
-                  className="flex min-w-0 flex-1 items-center gap-1.5 text-left"
+                  className="flex min-w-0 w-full items-center gap-1.5 px-2.5 py-1.5 text-left"
                 >
                   <CatalogIcon name={root.icon} className="h-3.5 w-3.5 shrink-0 text-muted-foreground/60" />
                   <span className={cn(
-                    "workspace-nav-section-title flex-1 truncate",
+                    "workspace-nav-section-title min-w-0 flex-1 truncate",
                     selectedCatalogId === root.id && "text-foreground",
                   )}>
                     {root.name}
                   </span>
-                  <span className="w-5 text-right text-xs tabular-nums text-muted-foreground/75">
-                    {getDisplayedCatalogCount(serviceCounts, root.id, "root")}
-                  </span>
+                  <CatalogCount
+                    value={getDisplayedCatalogCount(serviceCounts, root.id, "root")}
+                    className={cn(
+                      (canUpdate || canDelete || canCreate) && "transition-opacity group-hover/header:opacity-0",
+                    )}
+                  />
                 </button>
                 {(canUpdate || canDelete || canCreate) && (
-                  <div className="opacity-0 transition-opacity group-hover/header:opacity-100" onClick={(event) => event.stopPropagation()}>
+                  <div className="absolute right-2 top-1/2 -translate-y-1/2 opacity-0 transition-opacity group-hover/header:opacity-100" onClick={(event) => event.stopPropagation()}>
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
                         <button type="button" className="inline-flex h-5 w-5 items-center justify-center rounded text-muted-foreground/50 hover:bg-background/60 hover:text-foreground">
@@ -245,10 +257,8 @@ export function CatalogNavPanel({
                       selectedCatalogId === child.id && "bg-background/70 font-medium text-foreground",
                     )}
                   >
-                    <span className="flex-1 truncate">{child.name}</span>
-                    <span className="w-5 text-right text-xs tabular-nums text-muted-foreground/75">
-                      {getDisplayedCatalogCount(serviceCounts, child.id, "child")}
-                    </span>
+                    <span className="min-w-0 flex-1 truncate">{child.name}</span>
+                    <CatalogCount value={getDisplayedCatalogCount(serviceCounts, child.id, "child")} />
                   </button>
                 ))}
                 {(!root.children || root.children.length === 0) && (

@@ -77,6 +77,7 @@ import { OverrideActions } from "../../components/override-actions"
 import { SLABadge } from "../../components/sla-badge"
 import { TicketStatusBadge } from "../../components/ticket-status-badge"
 import { TICKET_STATUS_OPTIONS } from "../../components/ticket-status"
+import { itsmQueryKeys } from "../../query-keys"
 import { TICKET_MENU_PERMISSION } from "./navigation"
 
 const PAGE_SIZE = 20
@@ -197,7 +198,7 @@ export function Component() {
   }, [refetch])
 
   const { data: priorities = [] } = useQuery({
-    queryKey: ["itsm-priorities"],
+    queryKey: itsmQueryKeys.priorities.all,
     queryFn: () => fetchPriorities(),
   })
 

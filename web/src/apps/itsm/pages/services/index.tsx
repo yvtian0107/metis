@@ -24,6 +24,7 @@ import {
 } from "@/components/ui/form"
 import {
   fetchCatalogTree, fetchCatalogServiceCounts, fetchServiceDefs, createServiceDef, deleteServiceDef,
+  type CatalogItem, type ServiceDefItem,
 } from "../../api"
 import { CatalogNavPanel } from "../../components/catalog-nav-panel"
 import { ServiceCard } from "../../components/service-card"
@@ -119,6 +120,33 @@ export function Component() {
     return names
   }, [catalogs])
 
+  const allServiceGroups = useMemo(() => {
+    const groups = new Map<number, { catalog: CatalogItem; services: ServiceDefItem[] }>()
+    const rootByCatalogId = new Map<number, CatalogItem>()
+
+    for (const root of catalogs) {
+      rootByCatalogId.set(root.id, root)
+      for (const child of root.children ?? []) {
+        rootByCatalogId.set(child.id, root)
+      }
+    }
+
+    for (const service of allServices) {
+      const root = rootByCatalogId.get(service.catalogId)
+      if (!root) continue
+      const group = groups.get(root.id)
+      if (group) {
+        group.services.push(service)
+      } else {
+        groups.set(root.id, { catalog: root, services: [service] })
+      }
+    }
+
+    return roots
+      .map((root) => groups.get(root.id))
+      .filter((group): group is { catalog: CatalogItem; services: ServiceDefItem[] } => Boolean(group))
+  }, [allServices, catalogs, roots])
+
   // ── Delete service ───────────────────────────────────
 
   const deleteMut = useMutation({
@@ -212,22 +240,48 @@ export function Component() {
             />
           ) : (
             <div className="space-y-3">
-              <div className="flex items-center justify-between gap-3 border-b border-border/45 pb-2 text-xs text-muted-foreground">
-                <span>{t("itsm:services.listCount", { count: totalServices })}</span>
-                <span>{page} / {totalPages}</span>
-              </div>
-              <div className="grid grid-cols-[repeat(auto-fill,minmax(260px,1fr))] gap-4">
-                {allServices.map((svc) => (
-                  <ServiceCard
-                    key={svc.id}
-                    service={svc}
-                    catalogName={catalogNames.get(svc.catalogId)}
-                    canUpdate={canUpdateService}
-                    canDelete={canDeleteService}
-                    onDelete={(id) => deleteMut.mutate(id)}
-                  />
-                ))}
-              </div>
+              {selectedCatalogId === null ? (
+                <div className="space-y-5">
+                  {allServiceGroups.map((group) => (
+                    <section key={group.catalog.id} className="space-y-3">
+                      <button
+                        type="button"
+                        onClick={() => handleSelectCatalog(group.catalog.id)}
+                        className="flex w-full items-center border-b border-border/35 pb-2 text-left transition-colors hover:border-border/60"
+                      >
+                        <span className="text-[13px] font-semibold tracking-[-0.01em] text-foreground">
+                          {group.catalog.name}
+                        </span>
+                      </button>
+                      <div className="grid grid-cols-[repeat(auto-fill,minmax(260px,1fr))] gap-4">
+                        {group.services.map((svc) => (
+                          <ServiceCard
+                            key={svc.id}
+                            service={svc}
+                            catalogName={catalogNames.get(svc.catalogId)}
+                            canUpdate={canUpdateService}
+                            canDelete={canDeleteService}
+                            onDelete={(id) => deleteMut.mutate(id)}
+                          />
+                        ))}
+                      </div>
+                    </section>
+                  ))}
+                </div>
+              ) : (
+                <div className="grid grid-cols-[repeat(auto-fill,minmax(260px,1fr))] gap-4">
+                  {allServices.map((svc) => (
+                    <ServiceCard
+                      key={svc.id}
+                      service={svc}
+                      catalogName={catalogNames.get(svc.catalogId)}
+                      canUpdate={canUpdateService}
+                      canDelete={canDeleteService}
+                      onDelete={(id) => deleteMut.mutate(id)}
+                    />
+                  ))}
+                </div>
+              )}
               {totalPages > 1 && (
                 <div className="flex justify-end gap-2 pt-2">
                   <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage((v) => Math.max(1, v - 1))}>

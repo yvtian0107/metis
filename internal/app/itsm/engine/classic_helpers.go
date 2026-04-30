@@ -14,6 +14,7 @@ type ticketModel struct {
 	ServiceID             uint       `gorm:"column:service_id"`
 	EngineType            string     `gorm:"column:engine_type"`
 	WorkflowJSON          string     `gorm:"column:workflow_json;type:text"`
+	AssigneeID            *uint      `gorm:"column:assignee_id"`
 	CurrentActivityID     *uint      `gorm:"column:current_activity_id"`
 	FinishedAt            *time.Time `gorm:"column:finished_at"`
 	RequesterID           uint       `gorm:"column:requester_id"`

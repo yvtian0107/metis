@@ -11,6 +11,7 @@ import { usePermission } from "@/hooks/use-permission"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
 import {
   DataTableActions,
@@ -46,15 +47,23 @@ import {
 import {
   type PriorityItem, fetchPriorities, createPriority, updatePriority, deletePriority,
 } from "../../api"
+import { itsmQueryKeys } from "../../query-keys"
+import {
+  createPriorityFormSchema,
+  defaultPriorityFormValues,
+  isHexColor,
+  numberInputValue,
+  parseIntegerInputValue,
+} from "./priority-form"
 
 function usePrioritySchema() {
   const { t } = useTranslation("itsm")
-  return z.object({
-    name: z.string().min(1, t("validation.nameRequired")),
-    code: z.string().min(1, t("validation.codeRequired")),
-    value: z.number().min(0),
-    color: z.string().min(1),
-    description: z.string().optional(),
+  return createPriorityFormSchema({
+    nameRequired: t("validation.nameRequired"),
+    codeRequired: t("validation.codeRequired"),
+    valueRequired: t("validation.valueRequired"),
+    colorRequired: t("validation.colorRequired"),
+    colorInvalid: t("validation.colorInvalid"),
   })
 }
 
@@ -64,10 +73,6 @@ function matchesQuery(item: Pick<PriorityItem, "name" | "code" | "description">,
   if (!query) return true
   const haystack = `${item.name} ${item.code} ${item.description ?? ""}`.toLowerCase()
   return haystack.includes(query)
-}
-
-function isHexColor(value: string) {
-  return /^#[0-9a-fA-F]{6}$/.test(value)
 }
 
 export function Component() {
@@ -83,7 +88,7 @@ export function Component() {
   const canDelete = usePermission("itsm:priority:delete")
 
   const { data: items = [], isLoading } = useQuery({
-    queryKey: ["itsm-priorities"],
+    queryKey: itsmQueryKeys.priorities.all,
     queryFn: () => fetchPriorities(),
   })
 
@@ -98,8 +103,12 @@ export function Component() {
   const form = useForm<FormValues>({
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     resolver: zodResolver(schema as any),
-    defaultValues: { name: "", code: "", value: 0, color: "#5b6f8f", description: "" },
+    defaultValues: defaultPriorityFormValues,
   })
+
+  function invalidatePriorities() {
+    queryClient.invalidateQueries({ queryKey: itsmQueryKeys.priorities.all })
+  }
 
   useEffect(() => {
     if (formOpen) {
@@ -110,28 +119,41 @@ export function Component() {
           value: editing.value,
           color: editing.color,
           description: editing.description,
+          isActive: editing.isActive,
         })
       } else {
-        form.reset({ name: "", code: "", value: 0, color: "#5b6f8f", description: "" })
+        form.reset(defaultPriorityFormValues)
       }
     }
   }, [formOpen, editing, form])
 
   const createMut = useMutation({
-    mutationFn: (v: FormValues) => createPriority({ ...v, description: v.description ?? "" }),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["itsm-priorities"] }); setFormOpen(false); toast.success(t("itsm:priorities.createSuccess")) },
+    mutationFn: (v: FormValues) => createPriority({
+      name: v.name,
+      code: v.code,
+      value: v.value,
+      color: v.color,
+      description: v.description ?? "",
+    }),
+    onSuccess: () => { invalidatePriorities(); setFormOpen(false); toast.success(t("itsm:priorities.createSuccess")) },
     onError: (err) => toast.error(err.message),
   })
 
   const updateMut = useMutation({
     mutationFn: (v: FormValues) => updatePriority(editing!.id, { ...v, description: v.description ?? "" }),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["itsm-priorities"] }); setFormOpen(false); toast.success(t("itsm:priorities.updateSuccess")) },
+    onSuccess: () => { invalidatePriorities(); setFormOpen(false); toast.success(t("itsm:priorities.updateSuccess")) },
+    onError: (err) => toast.error(err.message),
+  })
+
+  const toggleMut = useMutation({
+    mutationFn: ({ id, isActive }: { id: number; isActive: boolean }) => updatePriority(id, { isActive }),
+    onSuccess: () => { invalidatePriorities(); toast.success(t("itsm:priorities.updateSuccess")) },
     onError: (err) => toast.error(err.message),
   })
 
   const deleteMut = useMutation({
     mutationFn: (id: number) => deletePriority(id),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["itsm-priorities"] }); toast.success(t("itsm:priorities.deleteSuccess")) },
+    onSuccess: () => { invalidatePriorities(); toast.success(t("itsm:priorities.deleteSuccess")) },
     onError: (err) => toast.error(err.message),
   })
 
@@ -207,7 +229,17 @@ export function Component() {
                   </TableCell>
                   <TableCell className="text-sm tabular-nums">{item.value}</TableCell>
                   <TableCell>
-                    <WorkspaceBooleanStatus active={item.isActive} activeLabel={t("itsm:priorities.active")} inactiveLabel={t("itsm:priorities.inactive")} />
+                    <div className="flex items-center gap-2">
+                      {canUpdate ? (
+                        <Switch
+                          checked={item.isActive}
+                          onCheckedChange={(isActive) => toggleMut.mutate({ id: item.id, isActive })}
+                          disabled={toggleMut.isPending}
+                          aria-label={item.isActive ? t("itsm:priorities.inactive") : t("itsm:priorities.active")}
+                        />
+                      ) : null}
+                      <WorkspaceBooleanStatus active={item.isActive} activeLabel={t("itsm:priorities.active")} inactiveLabel={t("itsm:priorities.inactive")} />
+                    </div>
                   </TableCell>
                   <DataTableActionsCell>
                     <DataTableActions>
@@ -266,13 +298,19 @@ export function Component() {
                       <FormMessage />
                     </FormItem>
                   )} />
-                  <FormField control={form.control} name="value" render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>{t("itsm:priorities.value")}</FormLabel>
-                      <FormControl><Input type="number" {...field} onChange={(e) => field.onChange(Number(e.target.value))} /></FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )} />
+	                  <FormField control={form.control} name="value" render={({ field }) => (
+	                    <FormItem>
+	                      <FormLabel>{t("itsm:priorities.value")}</FormLabel>
+	                      <FormControl>
+	                        <Input
+	                          type="number"
+	                          value={numberInputValue(field.value)}
+	                          onChange={(e) => field.onChange(parseIntegerInputValue(e.target.value))}
+	                        />
+	                      </FormControl>
+	                      <FormMessage />
+	                    </FormItem>
+	                  )} />
                 </div>
               </WorkspaceFormSection>
               <WorkspaceFormSection title={t("itsm:priorities.formVisual")}>
@@ -287,9 +325,20 @@ export function Component() {
                     </FormControl>
                     <FormMessage />
                   </FormItem>
-                )} />
-              </WorkspaceFormSection>
-              <WorkspaceFormSection title={t("itsm:priorities.formDescription")}>
+	                )} />
+	              </WorkspaceFormSection>
+	              <WorkspaceFormSection title={t("common:status")}>
+	                <FormField control={form.control} name="isActive" render={({ field }) => (
+	                  <FormItem>
+	                    <div className="flex h-9 items-center justify-between gap-3 rounded-md border border-border/60 bg-background/35 px-3">
+	                      <FormLabel className="text-sm font-normal">{field.value ? t("itsm:priorities.active") : t("itsm:priorities.inactive")}</FormLabel>
+	                      <FormControl><Switch checked={field.value} onCheckedChange={field.onChange} /></FormControl>
+	                    </div>
+	                    <FormMessage />
+	                  </FormItem>
+	                )} />
+	              </WorkspaceFormSection>
+	              <WorkspaceFormSection title={t("itsm:priorities.formDescription")}>
                 <FormField control={form.control} name="description" render={({ field }) => (
                   <FormItem>
                     <FormLabel>{t("itsm:priorities.description")}</FormLabel>

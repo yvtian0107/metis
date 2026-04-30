@@ -28,6 +28,14 @@ func (r *SLATemplateRepo) FindByID(id uint) (*SLATemplate, error) {
 	return &s, nil
 }
 
+func (r *SLATemplateRepo) FindActiveByID(id uint) (*SLATemplate, error) {
+	var s SLATemplate
+	if err := r.db.Where("id = ? AND is_active = ?", id, true).First(&s).Error; err != nil {
+		return nil, err
+	}
+	return &s, nil
+}
+
 func (r *SLATemplateRepo) FindByCode(code string) (*SLATemplate, error) {
 	var s SLATemplate
 	if err := r.db.Where("code = ?", code).First(&s).Error; err != nil {

@@ -89,7 +89,7 @@ func (h *ServiceDefHandler) Create(c *gin.Context) {
 		switch {
 		case errors.Is(err, ErrServiceCodeExists):
 			handler.Fail(c, http.StatusConflict, err.Error())
-		case errors.Is(err, ErrCatalogNotFound), errors.Is(err, ErrServiceEngineMismatch), errors.Is(err, ErrAgentNotAvailable):
+		case errors.Is(err, ErrCatalogNotFound), errors.Is(err, ErrServiceEngineMismatch), errors.Is(err, ErrAgentNotAvailable), errors.Is(err, ErrSLATemplateUnavailable):
 			handler.Fail(c, http.StatusBadRequest, err.Error())
 		case errors.Is(err, ErrWorkflowValidation):
 			handler.Fail(c, http.StatusBadRequest, err.Error())
@@ -288,7 +288,7 @@ func (h *ServiceDefHandler) Update(c *gin.Context) {
 			handler.Fail(c, http.StatusNotFound, err.Error())
 		case errors.Is(err, ErrServiceCodeExists):
 			handler.Fail(c, http.StatusConflict, err.Error())
-		case errors.Is(err, ErrCatalogNotFound), errors.Is(err, ErrServiceEngineMismatch), errors.Is(err, ErrAgentNotAvailable):
+		case errors.Is(err, ErrCatalogNotFound), errors.Is(err, ErrServiceEngineMismatch), errors.Is(err, ErrAgentNotAvailable), errors.Is(err, ErrSLATemplateUnavailable):
 			handler.Fail(c, http.StatusBadRequest, err.Error())
 		case errors.Is(err, ErrWorkflowValidation):
 			handler.Fail(c, http.StatusBadRequest, err.Error())

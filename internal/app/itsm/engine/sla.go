@@ -37,6 +37,7 @@ type escalationRuleModel struct {
 	ActionType   string `gorm:"column:action_type"`
 	TargetConfig string `gorm:"column:target_config;type:text"`
 	IsActive     bool   `gorm:"column:is_active"`
+	DeletedAt    gorm.DeletedAt `gorm:"column:deleted_at;index"`
 }
 
 func (escalationRuleModel) TableName() string { return "itsm_escalation_rules" }
@@ -89,6 +90,102 @@ func HandleSLACheck(db *gorm.DB, configProvider SLAAssuranceConfigProvider, exec
 
 // checkTicketSLA checks a single ticket for SLA breaches and executes escalation.
 func checkTicketSLA(ctx context.Context, db *gorm.DB, t *ticketModel, now time.Time, configProvider SLAAssuranceConfigProvider, executor app.AIDecisionExecutor, resolver *ParticipantResolver, notifier NotificationSender) {
+	responseBreached := t.SLAResponseDeadline != nil && now.After(*t.SLAResponseDeadline)
+	resolutionBreached := t.SLAResolutionDeadline != nil && now.After(*t.SLAResolutionDeadline)
+
+	if resolutionBreached {
+		if t.SLAStatus != slaBreachedResolve {
+			db.Model(&ticketModel{}).Where("id = ?", t.ID).Update("sla_status", slaBreachedResolve)
+			t.SLAStatus = slaBreachedResolve
+			slog.Warn("sla-check: resolution SLA breached", "ticketID", t.ID, "code", t.Code,
+				"deadline", t.SLAResolutionDeadline.Format(time.RFC3339))
+		}
+	} else if responseBreached {
+		if t.SLAStatus != slaBreachedResponse {
+			db.Model(&ticketModel{}).Where("id = ?", t.ID).Update("sla_status", slaBreachedResponse)
+			t.SLAStatus = slaBreachedResponse
+			slog.Warn("sla-check: response SLA breached", "ticketID", t.ID, "code", t.Code,
+				"deadline", t.SLAResponseDeadline.Format(time.RFC3339))
+		}
+	}
+
+	if responseBreached {
+		executeEscalation(ctx, db, t, "response_timeout", now, configProvider, executor, resolver, notifier)
+	}
+	if resolutionBreached {
+		executeEscalation(ctx, db, t, "resolution_timeout", now, configProvider, executor, resolver, notifier)
+	}
+}
+
+// executeEscalation loads and executes matching escalation rules for a ticket's SLA breach.
+func executeEscalation(ctx context.Context, db *gorm.DB, t *ticketModel, triggerType string, now time.Time, configProvider SLAAssuranceConfigProvider, executor app.AIDecisionExecutor, resolver *ParticipantResolver, notifier NotificationSender) {
+	slaID, ok := loadTicketSLAID(db, t.ID)
+	if !ok {
+		slog.Warn("sla-check: ticket has no SLA template, skipping escalation", "ticketID", t.ID)
+		return
+	}
+
+	var rules []escalationRuleModel
+	err := db.Where("sla_id = ? AND trigger_type = ? AND is_active = ? AND deleted_at IS NULL", slaID, triggerType, true).
+		Order("level ASC").
+		Find(&rules).Error
+	if err != nil {
+		slog.Error("sla-check: failed to load escalation rules", "error", err, "ticketID", t.ID)
+		return
+	}
+
+	var deadline *time.Time
+	if triggerType == "response_timeout" {
+		deadline = t.SLAResponseDeadline
+	} else {
+		deadline = t.SLAResolutionDeadline
+	}
+	if deadline == nil {
+		return
+	}
+
+	for _, rule := range rules {
+		// Check if enough time has passed since breach for this escalation level
+		triggerTime := deadline.Add(time.Duration(rule.WaitMinutes) * time.Minute)
+		if now.Before(triggerTime) {
+			continue // not yet time for this escalation level
+		}
+		if escalationAlreadyRecorded(db, t.ID, rule.ID) {
+			continue
+		}
+		if t.EngineType == "classic" {
+			reasoning := "系统计时器已判定 SLA 超时，经典引擎按已配置升级规则直接执行动作。"
+			if err := executeEscalationAction(ctx, db, t, &rule, triggerType, 0, "系统计时器", reasoning, resolver, notifier); err != nil {
+				slog.Warn("sla-check: classic escalation failed", "ticketID", t.ID, "ruleID", rule.ID, "error", err)
+				recordEscalationPending(db, t, &rule, triggerType, 0, "系统计时器", fmt.Sprintf("经典引擎 SLA 升级动作执行失败：%v", err))
+			}
+			continue
+		}
+
+		agentID := uint(0)
+		if configProvider != nil {
+			agentID = configProvider.SLAAssuranceAgentID()
+		}
+		if agentID == 0 {
+			recordEscalationPending(db, t, &rule, triggerType, 0, "", "系统计时器已判定 SLA 超时，但 SLA 保障岗未绑定智能体，未自动触发升级动作。")
+			continue
+		}
+		if executor == nil {
+			recordEscalationPending(db, t, &rule, triggerType, agentID, "SLA 保障岗", "SLA 保障岗已配置，但 AI 执行器不可用，升级动作待人工处理。")
+			continue
+		}
+		agentName := loadAgentName(db, agentID)
+		if err := runSLAAssuranceAgent(ctx, db, t, &rule, triggerType, agentID, agentName, executor, resolver, notifier); err != nil {
+			slog.Warn("sla-check: SLA assurance agent failed", "ticketID", t.ID, "ruleID", rule.ID, "error", err)
+			recordEscalationPending(db, t, &rule, triggerType, agentID, agentName, fmt.Sprintf("SLA 保障岗运行失败，升级动作待人工处理：%v", err))
+		}
+	}
+}
+
+func oldCheckTicketSLARemoved() {
+}
+
+/*
 	if t.SLAResponseDeadline != nil && now.After(*t.SLAResponseDeadline) {
 		if t.SLAStatus != slaBreachedResponse && t.SLAStatus != slaBreachedResolve {
 			db.Model(&ticketModel{}).Where("id = ?", t.ID).Update("sla_status", slaBreachedResponse)
@@ -109,6 +206,7 @@ func checkTicketSLA(ctx context.Context, db *gorm.DB, t *ticketModel, now time.T
 		}
 	}
 }
+*/
 
 // executeEscalation loads and executes matching escalation rules for a ticket's SLA breach.
 func executeEscalation(ctx context.Context, db *gorm.DB, t *ticketModel, triggerType string, now time.Time, configProvider SLAAssuranceConfigProvider, executor app.AIDecisionExecutor, resolver *ParticipantResolver, notifier NotificationSender) {

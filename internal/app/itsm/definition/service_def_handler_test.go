@@ -25,6 +25,55 @@ func TestServiceDefHandlerCreate_Returns400ForMissingCatalog(t *testing.T) {
 	}
 }
 
+func TestServiceDefHandlerCreate_Returns400ForInvalidSLA(t *testing.T) {
+	db := newTestDB(t)
+	catSvc := newCatalogServiceForTest(t, db)
+	svc := newServiceDefServiceForTest(t, db)
+	h := &ServiceDefHandler{svc: svc}
+	root, err := catSvc.Create("Root", "root", "", "", nil, 10)
+	if err != nil {
+		t.Fatalf("create root: %v", err)
+	}
+
+	rec := performJSONRequest(t, func(r *gin.Engine) {
+		r.POST("/services", h.Create)
+	}, http.MethodPost, "/services", []byte(`{"name":"VPN","code":"vpn","catalogId":`+strconv.FormatUint(uint64(root.ID), 10)+`,"engineType":"classic","slaId":999}`))
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestServiceDefHandlerUpdate_Returns400ForInactiveSLA(t *testing.T) {
+	db := newTestDB(t)
+	catSvc := newCatalogServiceForTest(t, db)
+	svc := newServiceDefServiceForTest(t, db)
+	h := &ServiceDefHandler{svc: svc}
+	root, err := catSvc.Create("Root", "root", "", "", nil, 10)
+	if err != nil {
+		t.Fatalf("create root: %v", err)
+	}
+	service, err := svc.Create(&ServiceDefinition{Name: "VPN", Code: "vpn", CatalogID: root.ID, EngineType: "classic"})
+	if err != nil {
+		t.Fatalf("create service: %v", err)
+	}
+	inactiveSLA := SLATemplate{Name: "停用 SLA", Code: "inactive-sla", ResponseMinutes: 1, ResolutionMinutes: 5, IsActive: false}
+	if err := db.Create(&inactiveSLA).Error; err != nil {
+		t.Fatalf("create inactive SLA: %v", err)
+	}
+	if err := db.Model(&inactiveSLA).Update("is_active", false).Error; err != nil {
+		t.Fatalf("deactivate SLA: %v", err)
+	}
+
+	rec := performJSONRequest(t, func(r *gin.Engine) {
+		r.PUT("/services/:id", h.Update)
+	}, http.MethodPut, "/services/"+strconv.FormatUint(uint64(service.ID), 10), []byte(`{"slaId":`+strconv.FormatUint(uint64(inactiveSLA.ID), 10)+`}`))
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestServiceDefHandlerUpdate_ClearsSLAWithExplicitNull(t *testing.T) {
 	db := newTestDB(t)
 	catSvc := newCatalogServiceForTest(t, db)
@@ -35,7 +84,11 @@ func TestServiceDefHandlerUpdate_ClearsSLAWithExplicitNull(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create root: %v", err)
 	}
-	slaID := uint(42)
+	sla := SLATemplate{Name: "标准 SLA", Code: "standard-sla", ResponseMinutes: 1, ResolutionMinutes: 5, IsActive: true}
+	if err := db.Create(&sla).Error; err != nil {
+		t.Fatalf("create SLA: %v", err)
+	}
+	slaID := sla.ID
 	service, err := svc.Create(&ServiceDefinition{Name: "VPN", Code: "vpn", CatalogID: root.ID, EngineType: "classic", SLAID: &slaID})
 	if err != nil {
 		t.Fatalf("create service: %v", err)
@@ -67,7 +120,11 @@ func TestServiceDefHandlerUpdate_LeavesSLAWhenFieldOmitted(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create root: %v", err)
 	}
-	slaID := uint(42)
+	sla := SLATemplate{Name: "标准 SLA", Code: "standard-sla", ResponseMinutes: 1, ResolutionMinutes: 5, IsActive: true}
+	if err := db.Create(&sla).Error; err != nil {
+		t.Fatalf("create SLA: %v", err)
+	}
+	slaID := sla.ID
 	service, err := svc.Create(&ServiceDefinition{Name: "VPN", Code: "vpn", CatalogID: root.ID, EngineType: "classic", SLAID: &slaID})
 	if err != nil {
 		t.Fatalf("create service: %v", err)

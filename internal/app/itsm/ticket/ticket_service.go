@@ -43,7 +43,10 @@ var (
 	errSubmissionAlreadyExists   = errors.New("service desk submission already exists")
 )
 
-const recoveryDedupWindow = 15 * time.Second
+const (
+	defaultAgentPriorityCode = "P3"
+	recoveryDedupWindow     = 15 * time.Second
+)
 
 type TicketService struct {
 	ticketRepo    *TicketRepo
@@ -166,14 +169,18 @@ func (s *TicketService) prepareTicket(input CreateTicketInput, requesterID uint)
 
 	// Calculate SLA deadlines
 	if svc.SLAID != nil {
-		sla, err := s.slaRepo.FindByID(*svc.SLAID)
-		if err == nil {
-			now := time.Now()
-			responseDeadline := now.Add(time.Duration(sla.ResponseMinutes) * time.Minute)
-			resolutionDeadline := now.Add(time.Duration(sla.ResolutionMinutes) * time.Minute)
-			ticket.SLAResponseDeadline = &responseDeadline
-			ticket.SLAResolutionDeadline = &resolutionDeadline
+		sla, err := s.slaRepo.FindActiveByID(*svc.SLAID)
+		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil, nil, ErrSLATemplateNotFound
+			}
+			return nil, nil, err
 		}
+		now := time.Now()
+		responseDeadline := now.Add(time.Duration(sla.ResponseMinutes) * time.Minute)
+		resolutionDeadline := now.Add(time.Duration(sla.ResolutionMinutes) * time.Minute)
+		ticket.SLAResponseDeadline = &responseDeadline
+		ticket.SLAResolutionDeadline = &resolutionDeadline
 	}
 	return ticket, svc, nil
 }
@@ -220,10 +227,9 @@ func (s *TicketService) createTicketLifecycleInTx(ctx context.Context, tx *gorm.
 // (validation, SLA, engine start, timeline). This ensures agent-created tickets are identical to
 // UI-created tickets in terms of lifecycle processing.
 func (s *TicketService) CreateFromAgent(ctx context.Context, req tools.AgentTicketRequest) (*tools.AgentTicketResult, error) {
-	// Resolve default priority (lowest value = highest priority)
-	defaultPriority, err := s.priorityRepo.FindDefaultActive()
+	defaultPriority, err := s.priorityRepo.FindActiveByCode(defaultAgentPriorityCode)
 	if err != nil {
-		return nil, fmt.Errorf("no active priority found: %w", err)
+		return nil, fmt.Errorf("default agent priority %s is not active: %w", defaultAgentPriorityCode, err)
 	}
 
 	formJSON, _ := json.Marshal(req.FormData)

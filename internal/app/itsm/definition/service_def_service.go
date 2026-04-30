@@ -29,6 +29,7 @@ var (
 	ErrWorkflowValidation    = errors.New("workflow validation failed")
 	ErrServiceEngineMismatch = errors.New("service engine field mismatch")
 	ErrAgentNotAvailable     = errors.New("agent not available")
+	ErrSLATemplateUnavailable = errors.New("SLA template not available")
 )
 
 type publishHealthConfigProvider interface {
@@ -76,6 +77,9 @@ func (s *ServiceDefService) Create(svc *ServiceDefinition) (*ServiceDefinition, 
 		return nil, ErrServiceCodeExists
 	}
 	if err := s.validateCatalogID(svc.CatalogID); err != nil {
+		return nil, err
+	}
+	if err := s.validateSLAID(svc.SLAID); err != nil {
 		return nil, err
 	}
 	if err := s.validateEngineFields(svc.EngineType, svc.WorkflowJSON, svc.CollaborationSpec, svc.AgentID); err != nil {
@@ -126,6 +130,15 @@ func (s *ServiceDefService) Update(id uint, updates map[string]any) (*ServiceDef
 	}
 	if catalogID, ok := updates["catalog_id"].(uint); ok {
 		if err := s.validateCatalogID(catalogID); err != nil {
+			return nil, err
+		}
+	}
+	if rawSLAID, ok := updates["sla_id"]; ok {
+		slaID, err := parseOptionalSLAID(rawSLAID)
+		if err != nil {
+			return nil, err
+		}
+		if err := s.validateSLAID(slaID); err != nil {
 			return nil, err
 		}
 	}
@@ -997,6 +1010,40 @@ func (s *ServiceDefService) validateCatalogID(catalogID uint) error {
 		return err
 	}
 	return nil
+}
+
+func (s *ServiceDefService) validateSLAID(slaID *uint) error {
+	if slaID == nil || *slaID == 0 {
+		return nil
+	}
+	var sla SLATemplate
+	if err := s.db.Where("id = ? AND is_active = ?", *slaID, true).First(&sla).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return ErrSLATemplateUnavailable
+		}
+		return err
+	}
+	return nil
+}
+
+func parseOptionalSLAID(value any) (*uint, error) {
+	if value == nil {
+		return nil, nil
+	}
+	switch v := value.(type) {
+	case uint:
+		return &v, nil
+	case *uint:
+		return v, nil
+	case int:
+		if v < 0 {
+			return nil, ErrSLATemplateUnavailable
+		}
+		parsed := uint(v)
+		return &parsed, nil
+	default:
+		return nil, ErrSLATemplateUnavailable
+	}
 }
 
 func (s *ServiceDefService) validateEngineFields(engineType string, workflowJSON JSONField, collaborationSpec string, agentID *uint) error {

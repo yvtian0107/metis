@@ -13,7 +13,12 @@ export const itsmQueryKeys = {
     detail: (serviceId: number) => [...itsmQueryKeys.services.all, "detail", serviceId] as const,
     actions: (serviceId: number) => [...itsmQueryKeys.services.all, "actions", serviceId] as const,
   },
+  priorities: {
+    all: ["itsm", "priorities"] as const,
+  },
   sla: {
     all: ["itsm", "sla"] as const,
+    escalations: (slaId: number) => [...itsmQueryKeys.sla.all, slaId, "escalations"] as const,
+    notificationChannels: ["itsm", "sla", "notification-channels"] as const,
   },
 }

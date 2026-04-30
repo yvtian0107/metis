@@ -77,13 +77,108 @@ func setupSLAAssuranceTestDB(t *testing.T) *gorm.DB {
 	if err := db.Exec(`CREATE TABLE users (id integer primary key, username text, is_active boolean, deleted_at datetime, manager_id integer)`).Error; err != nil {
 		t.Fatalf("create users table: %v", err)
 	}
-	if err := db.Exec(`CREATE TABLE itsm_service_definitions (id integer primary key, name text)`).Error; err != nil {
+	if err := db.Exec(`CREATE TABLE itsm_service_definitions (id integer primary key, name text, sla_id integer)`).Error; err != nil {
 		t.Fatalf("create service definitions table: %v", err)
+	}
+	if err := db.Exec(`CREATE TABLE itsm_escalation_rules (
+		id integer primary key,
+		sla_id integer,
+		trigger_type text,
+		level integer,
+		wait_minutes integer,
+		action_type text,
+		target_config text,
+		is_active boolean,
+		deleted_at datetime
+	)`).Error; err != nil {
+		t.Fatalf("create escalation rules table: %v", err)
 	}
 	if err := db.Exec(`INSERT INTO users (id, username, is_active) VALUES (10, 'notify-a', true), (11, 'notify-b', true), (20, 'ops-a', true), (21, 'ops-b', true)`).Error; err != nil {
 		t.Fatalf("seed users: %v", err)
 	}
+	if err := db.Exec(`INSERT INTO itsm_service_definitions (id, name, sla_id) VALUES (1, 'VPN', 3)`).Error; err != nil {
+		t.Fatalf("seed service definition: %v", err)
+	}
 	return db
+}
+
+func TestSLACheckTriggersDelayedRuleOnLaterScan(t *testing.T) {
+	db := setupSLAAssuranceTestDB(t)
+	deadline := time.Now().Add(-5 * time.Minute)
+	ticket := &ticketModel{
+		ID:                  1,
+		Code:                "T-1",
+		Title:               "VPN 申请",
+		ServiceID:           1,
+		EngineType:          "classic",
+		Status:              TicketStatusWaitingHuman,
+		SLAResponseDeadline: &deadline,
+		SLAStatus:           slaOnTrack,
+	}
+	if err := db.Create(ticket).Error; err != nil {
+		t.Fatalf("create ticket: %v", err)
+	}
+	if err := db.Exec(`INSERT INTO itsm_escalation_rules
+		(id, sla_id, trigger_type, level, wait_minutes, action_type, target_config, is_active)
+		VALUES (7, 3, 'response_timeout', 1, 10, 'notify',
+		'{"recipients":[{"type":"user","value":"10"}],"channelId":5}', true)`).Error; err != nil {
+		t.Fatalf("create escalation rule: %v", err)
+	}
+	notifier := &fakeEscalationNotifier{}
+
+	checkTicketSLA(context.Background(), db, ticket, deadline.Add(5*time.Minute), nil, nil, NewParticipantResolver(nil), notifier)
+	if len(notifier.calls) != 0 {
+		t.Fatalf("delayed escalation fired too early: %+v", notifier.calls)
+	}
+	var earlyCount int64
+	if err := db.Table("itsm_ticket_timelines").Where("ticket_id = ? AND event_type = ?", ticket.ID, "sla_escalation").Count(&earlyCount).Error; err != nil {
+		t.Fatalf("count early timelines: %v", err)
+	}
+	if earlyCount != 0 {
+		t.Fatalf("expected no early escalation timeline, got %d", earlyCount)
+	}
+
+	checkTicketSLA(context.Background(), db, ticket, deadline.Add(11*time.Minute), nil, nil, NewParticipantResolver(nil), notifier)
+	if len(notifier.calls) != 1 {
+		t.Fatalf("expected delayed escalation on later scan, got calls=%+v", notifier.calls)
+	}
+}
+
+func TestSLACheckSkipsSoftDeletedEscalationRules(t *testing.T) {
+	db := setupSLAAssuranceTestDB(t)
+	deadline := time.Now().Add(-15 * time.Minute)
+	ticket := &ticketModel{
+		ID:                  1,
+		Code:                "T-1",
+		Title:               "VPN 申请",
+		ServiceID:           1,
+		EngineType:          "classic",
+		Status:              TicketStatusWaitingHuman,
+		SLAResponseDeadline: &deadline,
+		SLAStatus:           slaOnTrack,
+	}
+	if err := db.Create(ticket).Error; err != nil {
+		t.Fatalf("create ticket: %v", err)
+	}
+	if err := db.Exec(`INSERT INTO itsm_escalation_rules
+		(id, sla_id, trigger_type, level, wait_minutes, action_type, target_config, is_active, deleted_at)
+		VALUES (7, 3, 'response_timeout', 1, 0, 'notify',
+		'{"recipients":[{"type":"user","value":"10"}],"channelId":5}', true, CURRENT_TIMESTAMP)`).Error; err != nil {
+		t.Fatalf("create soft deleted escalation rule: %v", err)
+	}
+	notifier := &fakeEscalationNotifier{}
+
+	checkTicketSLA(context.Background(), db, ticket, deadline.Add(15*time.Minute), nil, nil, NewParticipantResolver(nil), notifier)
+	if len(notifier.calls) != 0 {
+		t.Fatalf("soft-deleted escalation rule fired: %+v", notifier.calls)
+	}
+	var count int64
+	if err := db.Table("itsm_ticket_timelines").Where("ticket_id = ? AND event_type = ?", ticket.ID, "sla_escalation").Count(&count).Error; err != nil {
+		t.Fatalf("count timelines: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("expected no escalation timeline for soft-deleted rule, got %d", count)
+	}
 }
 
 func TestSLAAssuranceAgentTriggersEscalationTool(t *testing.T) {
@@ -207,6 +302,48 @@ func TestEscalationReassignTakesFirstResolvedUser(t *testing.T) {
 	}
 	if got := uint(details["selected_user_id"].(float64)); got != 20 {
 		t.Fatalf("selected_user_id = %d, want 20", got)
+	}
+}
+
+func TestEscalationReassignUpdatesCurrentAssignment(t *testing.T) {
+	db := setupSLAAssuranceTestDB(t)
+	if err := db.AutoMigrate(&activityModel{}, &assignmentModel{}); err != nil {
+		t.Fatalf("migrate activity assignment models: %v", err)
+	}
+	activityID := uint(99)
+	currentUser := uint(20)
+	ticket := &ticketModel{ID: 1, Code: "T-1", Title: "VPN 申请", Status: "waiting_human", CurrentActivityID: &activityID, SLAStatus: slaBreachedResponse}
+	if err := db.Create(ticket).Error; err != nil {
+		t.Fatalf("create ticket: %v", err)
+	}
+	activity := activityModel{ID: activityID, TicketID: ticket.ID, ActivityType: NodeProcess, Status: ActivityPending}
+	if err := db.Create(&activity).Error; err != nil {
+		t.Fatalf("create activity: %v", err)
+	}
+	assignment := assignmentModel{TicketID: ticket.ID, ActivityID: activity.ID, ParticipantType: "user", UserID: &currentUser, AssigneeID: &currentUser, Status: ActivityPending, IsCurrent: true}
+	if err := db.Create(&assignment).Error; err != nil {
+		t.Fatalf("create assignment: %v", err)
+	}
+	rule := &escalationRuleModel{
+		ID:           8,
+		SLAID:        3,
+		TriggerType:  "resolution_timeout",
+		Level:        2,
+		ActionType:   "reassign",
+		TargetConfig: `{"assigneeCandidates":[{"type":"user","value":"21"}]}`,
+		IsActive:     true,
+	}
+
+	err := executeEscalationAction(context.Background(), db, ticket, rule, "resolution_timeout", 0, "系统计时器", "命中规则", NewParticipantResolver(nil), nil)
+	if err != nil {
+		t.Fatalf("execute escalation: %v", err)
+	}
+	var updated assignmentModel
+	if err := db.First(&updated, assignment.ID).Error; err != nil {
+		t.Fatalf("load assignment: %v", err)
+	}
+	if updated.UserID == nil || *updated.UserID != 21 || updated.AssigneeID == nil || *updated.AssigneeID != 21 {
+		t.Fatalf("expected current assignment to move to user 21, got %+v", updated)
 	}
 }
 

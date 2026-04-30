@@ -168,6 +168,92 @@ func TestAgentDraftSubmission_SingleSQLiteConnectionDoesNotBlock(t *testing.T) {
 	}
 }
 
+func TestAgentTicketUsesP3AsDefaultPriority(t *testing.T) {
+	db := newTestDB(t)
+	ticketSvc := newSubmissionTicketService(t, db)
+	service := testutil.SeedSmartSubmissionService(t, db)
+	p0 := Priority{Name: "P0", Code: "P0", Value: 0, Color: "#dc2626", IsActive: true}
+	if err := db.Create(&p0).Error; err != nil {
+		t.Fatalf("create P0 priority: %v", err)
+	}
+
+	result, err := ticketSvc.CreateFromAgent(context.Background(), tools.AgentTicketRequest{
+		UserID:       7,
+		ServiceID:    service.ID,
+		Summary:      "VPN 开通申请",
+		FormData:     map[string]any{"vpn_account": "admin@dev.com", "request_kind": "线上支持"},
+		SessionID:    101,
+		DraftVersion: 1,
+		FieldsHash:   "fields-v1",
+		RequestHash:  "request-v1",
+	})
+	if err != nil {
+		t.Fatalf("create from agent: %v", err)
+	}
+
+	var priority Priority
+	if err := db.Table("itsm_priorities").
+		Joins("JOIN itsm_tickets ON itsm_tickets.priority_id = itsm_priorities.id").
+		Where("itsm_tickets.id = ?", result.TicketID).
+		First(&priority).Error; err != nil {
+		t.Fatalf("load ticket priority: %v", err)
+	}
+	if priority.Code != "P3" {
+		t.Fatalf("expected agent ticket default priority P3, got %s", priority.Code)
+	}
+}
+
+func TestCreateTicketFailsWhenBoundSLAIsMissingOrInactive(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		setupSLA func(t *testing.T, db *gorm.DB) uint
+	}{
+		{
+			name: "missing",
+			setupSLA: func(t *testing.T, db *gorm.DB) uint {
+				return 999
+			},
+		},
+		{
+			name: "inactive",
+			setupSLA: func(t *testing.T, db *gorm.DB) uint {
+				sla := SLATemplate{Name: "停用 SLA", Code: "inactive-sla", ResponseMinutes: 1, ResolutionMinutes: 5, IsActive: false}
+				if err := db.Create(&sla).Error; err != nil {
+					t.Fatalf("create inactive SLA: %v", err)
+				}
+				if err := db.Model(&sla).Update("is_active", false).Error; err != nil {
+					t.Fatalf("deactivate SLA: %v", err)
+				}
+				return sla.ID
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db := newTestDB(t)
+			ticketSvc := newSubmissionTicketService(t, db)
+			service := testutil.SeedSmartSubmissionService(t, db)
+			slaID := tc.setupSLA(t, db)
+			if err := db.Model(&ServiceDefinition{}).Where("id = ?", service.ID).Update("sla_id", slaID).Error; err != nil {
+				t.Fatalf("bind SLA: %v", err)
+			}
+			var priority Priority
+			if err := db.Where("code = ?", "P3").First(&priority).Error; err != nil {
+				t.Fatalf("load P3 priority: %v", err)
+			}
+
+			_, err := ticketSvc.Create(CreateTicketInput{
+				Title:      "VPN 开通申请",
+				ServiceID:  service.ID,
+				PriorityID: priority.ID,
+				FormData:   JSONField(`{}`),
+			}, 7)
+			if err == nil {
+				t.Fatal("expected ticket creation to fail for invalid bound SLA")
+			}
+		})
+	}
+}
+
 func TestTicketProgress_SingleSQLiteConnectionWithOrgScopeDoesNotBlock(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
