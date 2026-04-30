@@ -179,7 +179,7 @@ func toolTicketContext() decisionToolDef {
 
 			// Executed actions — shows which service actions have been successfully run
 			execs, _ := ctx.data.GetExecutedActions(ctx.ticketID)
-			totalActions, _ := ctx.data.CountActiveServiceActions(ctx.serviceID)
+			totalActions, _ := ctx.data.CountActiveServiceActions(ctx.ticketID, ctx.serviceID)
 			actionProgress := map[string]any{
 				"total":         totalActions,
 				"executed":      len(execs),
@@ -645,7 +645,7 @@ func toolListActions() decisionToolDef {
 			},
 		},
 		Handler: func(ctx *decisionToolContext, _ json.RawMessage) (json.RawMessage, error) {
-			actions, _ := ctx.data.ListActiveServiceActions(ctx.serviceID)
+			actions, _ := ctx.data.ListActiveServiceActions(ctx.ticketID, ctx.serviceID)
 
 			items := make([]map[string]any, len(actions))
 			for i, a := range actions {
@@ -692,7 +692,7 @@ func toolExecuteAction() decisionToolDef {
 			}
 
 			// Verify action exists and is active
-			action, err := ctx.data.GetServiceAction(params.ActionID, ctx.serviceID)
+			action, err := ctx.data.GetServiceAction(ctx.ticketID, params.ActionID, ctx.serviceID)
 			if err != nil {
 				return toolError("动作不存在")
 			}
@@ -731,9 +731,9 @@ func toolExecuteAction() decisionToolDef {
 			execCtx, cancel := context.WithTimeout(ctx.ctx, 120*time.Second)
 			defer cancel()
 
-			err = ctx.actionExecutor.Execute(
+			err = ctx.actionExecutor.ExecuteWithConfig(
 				execCtx,
-				ctx.ticketID, 0, params.ActionID,
+				ctx.ticketID, 0, params.ActionID, action.ActionType, action.ConfigJSON,
 			)
 
 			if err != nil {

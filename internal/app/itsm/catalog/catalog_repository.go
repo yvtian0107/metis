@@ -81,3 +81,25 @@ func (r *CatalogRepo) HasServices(id uint) (bool, error) {
 	}
 	return count > 0, nil
 }
+
+func (r *CatalogRepo) ServiceCountsByCatalog() (map[uint]int64, int64, error) {
+	type row struct {
+		CatalogID uint
+		Count     int64
+	}
+	var rows []row
+	if err := r.db.Model(&ServiceDefinition{}).
+		Select("catalog_id, COUNT(*) AS count").
+		Group("catalog_id").
+		Scan(&rows).Error; err != nil {
+		return nil, 0, err
+	}
+
+	counts := make(map[uint]int64, len(rows))
+	var total int64
+	for _, row := range rows {
+		counts[row.CatalogID] = row.Count
+		total += row.Count
+	}
+	return counts, total, nil
+}

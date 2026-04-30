@@ -154,6 +154,7 @@ func TestConvergenceTimeoutPreservesCompletedResults(t *testing.T) {
 	if err := db.Create(&second).Error; err != nil {
 		t.Fatalf("create second activity: %v", err)
 	}
+	assignSmartActivityToOperator(t, db, ticket.ID, second.ID, 1)
 
 	third := activityModel{
 		TicketID:        ticket.ID,

@@ -6,13 +6,14 @@ import { useTranslation } from "react-i18next"
 import { useForm, useWatch } from "react-hook-form"
 import { z } from "zod"
 import { zodResolver } from "@hookform/resolvers/zod"
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
-import { ChevronRight, Pencil, Plus, Timer, Trash2 } from "lucide-react"
+import { useQuery, useMutation, useQueryClient, useQueries } from "@tanstack/react-query"
+import { ChevronRight, Pencil, Plus, ShieldAlert, Timer, Trash2 } from "lucide-react"
 import { usePermission } from "@/hooks/use-permission"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
@@ -41,15 +42,24 @@ import {
   WorkspaceFormSection,
   WorkspaceIconAction,
   WorkspaceBooleanStatus,
+  WorkspaceStatus,
 } from "@/components/workspace/primitives"
 import { ParticipantPicker } from "../../components/workflow/panels/participant-picker"
-import type { Participant } from "../../components/workflow/types"
 import {
-  type SLATemplateItem, type EscalationRuleItem,
+  type SLATemplateItem, type EscalationRuleItem, type NotificationChannelOption, type PriorityItem,
   fetchSLATemplates, createSLATemplate, updateSLATemplate, deleteSLATemplate,
   fetchEscalationRules, createEscalationRule, updateEscalationRule, deleteEscalationRule,
   fetchNotificationChannels, fetchPriorities,
 } from "../../api"
+import { itsmQueryKeys } from "../../query-keys"
+import {
+  buildSLARulePreviewRows,
+  readTargetConfig,
+  ruleTargetSummary,
+  type EscalationTargetConfig,
+  type SLARulePreviewRow,
+  type SLARuleRiskCode,
+} from "./sla-rule-preview"
 
 function useSLASchema() {
   const { t } = useTranslation("itsm")
@@ -57,8 +67,9 @@ function useSLASchema() {
     name: z.string().min(1, t("validation.nameRequired")),
     code: z.string().min(1, t("validation.codeRequired")),
     description: z.string().optional(),
-    responseMinutes: z.number().min(1),
-    resolutionMinutes: z.number().min(1),
+    responseMinutes: z.number().int().min(1),
+    resolutionMinutes: z.number().int().min(1),
+    isActive: z.boolean(),
   })
 }
 
@@ -75,8 +86,8 @@ function useEscalationSchema() {
   })
   return z.object({
     triggerType: z.enum(["response_timeout", "resolution_timeout"]),
-    level: z.number().min(1),
-    waitMinutes: z.number().min(1),
+    level: z.number().int().min(1),
+    waitMinutes: z.number().int().min(1),
     actionType: z.enum(["notify", "reassign", "escalate_priority"]),
     recipients: z.array(participantSchema),
     channelId: z.number(),
@@ -84,6 +95,7 @@ function useEscalationSchema() {
     bodyTemplate: z.string().optional(),
     assigneeCandidates: z.array(participantSchema),
     priorityId: z.number(),
+    isActive: z.boolean(),
   }).superRefine((value, ctx) => {
     if (value.actionType === "notify") {
       if (value.recipients.length === 0) {
@@ -108,6 +120,15 @@ function formatMinutes(minutes: number, unit: string) {
   return `${minutes} ${unit}`
 }
 
+function parseIntegerInputValue(value: string) {
+  if (value.trim() === "") return Number.NaN
+  return Number(value)
+}
+
+function numberInputValue(value: number) {
+  return Number.isNaN(value) ? "" : value
+}
+
 function matchesQuery(item: Pick<SLATemplateItem, "name" | "code" | "description">, query: string) {
   if (!query) return true
   const haystack = `${item.name} ${item.code} ${item.description ?? ""}`.toLowerCase()
@@ -122,22 +143,8 @@ function RuleActionBadge({ children }: { children: ReactNode }) {
   )
 }
 
-interface EscalationTargetConfig {
-  recipients?: Participant[]
-  channelId?: number
-  subjectTemplate?: string
-  bodyTemplate?: string
-  assigneeCandidates?: Participant[]
-  priorityId?: number
-}
-
 const defaultNotifySubject = "SLA 升级通知：{{ticket.code}}"
 const defaultNotifyBody = "工单 {{ticket.code}} 已触发 SLA 升级规则，请及时处理。"
-
-function readTargetConfig(value: unknown): EscalationTargetConfig {
-  if (!value || typeof value !== "object") return {}
-  return value as EscalationTargetConfig
-}
 
 function buildTargetConfig(v: EscalationFormValues): EscalationTargetConfig {
   if (v.actionType === "notify") {
@@ -164,22 +171,103 @@ function escalationPayload(v: EscalationFormValues) {
   }
 }
 
-function participantLabel(p: Participant) {
-  if (p.type === "requester_manager") return "提交人上级"
-  if (p.type === "position_department") {
-    return [p.department_code, p.position_code].filter(Boolean).join(" / ") || "岗位+部门"
+function escalationUpdatePayload(v: EscalationFormValues) {
+  return {
+    ...escalationPayload(v),
+    isActive: v.isActive,
   }
-  return p.name ?? p.value ?? p.type
 }
 
-function formatParticipants(items: Participant[] | undefined) {
-  if (!items || items.length === 0) return "未配置"
-  return items.map(participantLabel).join("、")
+function riskLabel(code: SLARuleRiskCode, t: ReturnType<typeof useTranslation>["t"]) {
+  return t(`itsm:sla.risk.${code}`)
 }
 
-function EscalationRules({ slaId }: { slaId: number }) {
+function RiskStatus({ row }: { row: Pick<SLARulePreviewRow, "riskCodes" | "riskTone"> }) {
+  const { t } = useTranslation("itsm")
+  if (row.riskCodes.length === 0) {
+    return <WorkspaceStatus tone="success" label={t("sla.risk.ok")} />
+  }
+  const first = riskLabel(row.riskCodes[0], t)
+  const label = row.riskCodes.length > 1 ? `${first} +${row.riskCodes.length - 1}` : first
+  return <WorkspaceStatus tone={row.riskTone} label={label} />
+}
+
+function SLARuleOverview({
+  rows,
+  isLoading,
+}: {
+  rows: SLARulePreviewRow[]
+  isLoading: boolean
+}) {
+  const { t } = useTranslation(["itsm", "common"])
+  const minuteUnit = t("itsm:sla.minuteShort")
+  const triggerLabel = (v: string) => v === "response_timeout" ? t("itsm:sla.escalation.responseTimeout") : t("itsm:sla.escalation.resolutionTimeout")
+  const actionLabel = (v: string) => ({ notify: t("itsm:sla.escalation.notify"), reassign: t("itsm:sla.escalation.reassign"), escalate_priority: t("itsm:sla.escalation.escalatePriority") })[v] ?? v
+
+  return (
+    <DataTableCard>
+      <DataTableToolbar>
+        <div className="min-w-0">
+          <h3 className="text-sm font-semibold text-foreground/86">{t("itsm:sla.ruleOverview")}</h3>
+          <p className="mt-0.5 text-xs text-muted-foreground">{t("itsm:sla.ruleOverviewDesc")}</p>
+        </div>
+        <span className="text-xs text-muted-foreground">
+          {t("itsm:sla.ruleOverviewCount", { count: rows.length })}
+        </span>
+      </DataTableToolbar>
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead className="min-w-[160px]">{t("itsm:sla.name")}</TableHead>
+            <TableHead className="w-[120px]">{t("itsm:sla.escalation.triggerType")}</TableHead>
+            <TableHead className="w-[72px]">{t("itsm:sla.escalation.level")}</TableHead>
+            <TableHead className="w-[112px]">{t("itsm:sla.escalation.waitMinutes")}</TableHead>
+            <TableHead className="w-[118px]">{t("itsm:sla.escalation.actionType")}</TableHead>
+            <TableHead>{t("itsm:sla.escalation.targetConfig")}</TableHead>
+            <TableHead className="w-[140px]">{t("itsm:sla.risk.title")}</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {isLoading ? (
+            <DataTableLoadingRow colSpan={7} />
+          ) : rows.length === 0 ? (
+            <DataTableEmptyRow colSpan={7} icon={ShieldAlert} title={t("itsm:sla.ruleOverviewEmpty")} />
+          ) : (
+            rows.map((row) => (
+              <TableRow key={`${row.sla.id}-${row.rule.id}`} className={cn("hover:bg-muted/22", !row.rule.isActive && "opacity-70")}>
+                <TableCell>
+                  <div className="min-w-0">
+                    <div className="font-medium text-foreground/90">{row.sla.name}</div>
+                    <div className="mt-1 font-mono text-xs text-muted-foreground">{row.sla.code}</div>
+                  </div>
+                </TableCell>
+                <TableCell className="text-sm">{triggerLabel(row.rule.triggerType)}</TableCell>
+                <TableCell className="text-sm tabular-nums">{row.rule.level}</TableCell>
+                <TableCell className="text-sm tabular-nums">{formatMinutes(row.rule.waitMinutes, minuteUnit)}</TableCell>
+                <TableCell><RuleActionBadge>{actionLabel(row.rule.actionType)}</RuleActionBadge></TableCell>
+                <TableCell className="max-w-[300px] truncate text-sm text-muted-foreground">{row.targetSummary}</TableCell>
+                <TableCell><RiskStatus row={row} /></TableCell>
+              </TableRow>
+            ))
+          )}
+        </TableBody>
+      </Table>
+    </DataTableCard>
+  )
+}
+
+function EscalationRules({
+  sla,
+  channels,
+  priorities,
+}: {
+  sla: SLATemplateItem
+  channels: NotificationChannelOption[]
+  priorities: PriorityItem[]
+}) {
   const { t } = useTranslation(["itsm", "common"])
   const queryClient = useQueryClient()
+  const slaId = sla.id
   const [formOpen, setFormOpen] = useState(false)
   const [editing, setEditing] = useState<EscalationRuleItem | null>(null)
   const canUpdate = usePermission("itsm:sla:update")
@@ -187,17 +275,15 @@ function EscalationRules({ slaId }: { slaId: number }) {
   const escSchema = useEscalationSchema()
 
   const { data: rules = [], isLoading } = useQuery({
-    queryKey: ["itsm-escalation-rules", slaId],
+    queryKey: itsmQueryKeys.sla.escalations(slaId),
     queryFn: () => fetchEscalationRules(slaId),
   })
-  const { data: channels = [] } = useQuery({
-    queryKey: ["itsm-notification-channels"],
-    queryFn: () => fetchNotificationChannels(),
-  })
-  const { data: priorities = [] } = useQuery({
-    queryKey: ["itsm-priorities-for-sla"],
-    queryFn: () => fetchPriorities(),
-  })
+  const previewByRuleId = useMemo(() => new Map(buildSLARulePreviewRows({
+    slas: [sla],
+    rulesBySlaId: { [slaId]: rules },
+    priorities,
+    channels,
+  }).map((row) => [row.rule.id, row])), [channels, priorities, rules, sla, slaId])
 
   const form = useForm<EscalationFormValues>({
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -213,6 +299,7 @@ function EscalationRules({ slaId }: { slaId: number }) {
       bodyTemplate: defaultNotifyBody,
       assigneeCandidates: [],
       priorityId: 0,
+      isActive: true,
     },
   })
   const actionType = useWatch({ control: form.control, name: "actionType" })
@@ -232,6 +319,7 @@ function EscalationRules({ slaId }: { slaId: number }) {
           bodyTemplate: cfg.bodyTemplate ?? defaultNotifyBody,
           assigneeCandidates: cfg.assigneeCandidates ?? [],
           priorityId: cfg.priorityId ?? 0,
+          isActive: editing.isActive,
         })
       } else {
         form.reset({
@@ -244,7 +332,8 @@ function EscalationRules({ slaId }: { slaId: number }) {
           subjectTemplate: defaultNotifySubject,
           bodyTemplate: defaultNotifyBody,
           assigneeCandidates: [],
-          priorityId: priorities[0]?.id ?? 0,
+          priorityId: priorities.find((priority) => priority.isActive)?.id ?? 0,
+          isActive: true,
         })
       }
     }
@@ -252,19 +341,25 @@ function EscalationRules({ slaId }: { slaId: number }) {
 
   const createMut = useMutation({
     mutationFn: (v: EscalationFormValues) => createEscalationRule(slaId, escalationPayload(v)),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["itsm-escalation-rules", slaId] }); setFormOpen(false); toast.success(t("itsm:sla.escalation.createSuccess")) },
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: itsmQueryKeys.sla.escalations(slaId) }); setFormOpen(false); toast.success(t("itsm:sla.escalation.createSuccess")) },
     onError: (err) => toast.error(err.message),
   })
 
   const updateMut = useMutation({
-    mutationFn: (v: EscalationFormValues) => updateEscalationRule(slaId, editing!.id, escalationPayload(v)),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["itsm-escalation-rules", slaId] }); setFormOpen(false); toast.success(t("itsm:sla.escalation.updateSuccess")) },
+    mutationFn: (v: EscalationFormValues) => updateEscalationRule(slaId, editing!.id, escalationUpdatePayload(v)),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: itsmQueryKeys.sla.escalations(slaId) }); setFormOpen(false); toast.success(t("itsm:sla.escalation.updateSuccess")) },
+    onError: (err) => toast.error(err.message),
+  })
+
+  const toggleMut = useMutation({
+    mutationFn: ({ id, isActive }: { id: number; isActive: boolean }) => updateEscalationRule(slaId, id, { isActive }),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: itsmQueryKeys.sla.escalations(slaId) }); toast.success(t("itsm:sla.escalation.updateSuccess")) },
     onError: (err) => toast.error(err.message),
   })
 
   const deleteMut = useMutation({
     mutationFn: (id: number) => deleteEscalationRule(slaId, id),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["itsm-escalation-rules", slaId] }); toast.success(t("itsm:sla.escalation.deleteSuccess")) },
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: itsmQueryKeys.sla.escalations(slaId) }); toast.success(t("itsm:sla.escalation.deleteSuccess")) },
     onError: (err) => toast.error(err.message),
   })
 
@@ -280,15 +375,7 @@ function EscalationRules({ slaId }: { slaId: number }) {
   const minuteUnit = t("itsm:sla.minuteShort")
   const triggerLabel = (v: string) => v === "response_timeout" ? t("itsm:sla.escalation.responseTimeout") : t("itsm:sla.escalation.resolutionTimeout")
   const actionLabel = (v: string) => ({ notify: t("itsm:sla.escalation.notify"), reassign: t("itsm:sla.escalation.reassign"), escalate_priority: t("itsm:sla.escalation.escalatePriority") })[v] ?? v
-  const channelName = (id: number | undefined) => channels.find((channel) => channel.id === id)?.name ?? (id ? `#${id}` : "未配置")
-  const priorityName = (id: number | undefined) => priorities.find((priority) => priority.id === id)?.name ?? (id ? `#${id}` : "未配置")
-  const targetSummary = (rule: EscalationRuleItem) => {
-    const cfg = readTargetConfig(rule.targetConfig)
-    if (rule.actionType === "notify") return `${formatParticipants(cfg.recipients)} / ${channelName(cfg.channelId)}`
-    if (rule.actionType === "reassign") return formatParticipants(cfg.assigneeCandidates)
-    if (rule.actionType === "escalate_priority") return priorityName(cfg.priorityId)
-    return "未配置"
-  }
+  const targetSummary = (rule: EscalationRuleItem) => ruleTargetSummary(rule, priorities, channels)
 
   return (
     <TableRow>
@@ -323,19 +410,37 @@ function EscalationRules({ slaId }: { slaId: number }) {
                     <TableHead className="w-[72px]">{t("itsm:sla.escalation.level")}</TableHead>
                     <TableHead className="w-[132px]">{t("itsm:sla.escalation.waitMinutes")}</TableHead>
                     <TableHead>{t("itsm:sla.escalation.actionType")}</TableHead>
-                    <TableHead>{t("itsm:sla.escalation.targetConfig")}</TableHead>
-                    <DataTableActionsHead className="min-w-24">{t("common:actions")}</DataTableActionsHead>
+	                    <TableHead>{t("itsm:sla.escalation.targetConfig")}</TableHead>
+	                    <TableHead className="w-[160px]">{t("common:status")}</TableHead>
+	                    <DataTableActionsHead className="min-w-24">{t("common:actions")}</DataTableActionsHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {rules.map((rule) => (
-                    <TableRow key={rule.id}>
-                      <TableCell className="text-sm">{triggerLabel(rule.triggerType)}</TableCell>
-                      <TableCell className="text-sm tabular-nums">{rule.level}</TableCell>
-                      <TableCell className="text-sm tabular-nums">{formatMinutes(rule.waitMinutes, minuteUnit)}</TableCell>
-                      <TableCell><RuleActionBadge>{actionLabel(rule.actionType)}</RuleActionBadge></TableCell>
-                      <TableCell className="max-w-[260px] truncate text-sm text-muted-foreground">{targetSummary(rule)}</TableCell>
-                      <DataTableActionsCell>
+	                    <TableRow key={rule.id} className={!rule.isActive ? "opacity-70" : undefined}>
+	                      <TableCell className="text-sm">{triggerLabel(rule.triggerType)}</TableCell>
+	                      <TableCell className="text-sm tabular-nums">{rule.level}</TableCell>
+	                      <TableCell className="text-sm tabular-nums">{formatMinutes(rule.waitMinutes, minuteUnit)}</TableCell>
+	                      <TableCell><RuleActionBadge>{actionLabel(rule.actionType)}</RuleActionBadge></TableCell>
+	                      <TableCell className="max-w-[260px] truncate text-sm text-muted-foreground">{targetSummary(rule)}</TableCell>
+	                      <TableCell>
+	                        <div className="flex items-center gap-2">
+	                          {canUpdate ? (
+	                            <Switch
+	                              checked={rule.isActive}
+	                              onCheckedChange={(isActive) => toggleMut.mutate({ id: rule.id, isActive })}
+	                              disabled={toggleMut.isPending}
+	                              aria-label={rule.isActive ? t("itsm:sla.inactive") : t("itsm:sla.active")}
+	                            />
+	                          ) : null}
+	                          {previewByRuleId.get(rule.id) ? (
+	                            <RiskStatus row={previewByRuleId.get(rule.id)!} />
+	                          ) : (
+	                            <WorkspaceBooleanStatus active={rule.isActive} activeLabel={t("itsm:sla.active")} inactiveLabel={t("itsm:sla.inactive")} />
+	                          )}
+	                        </div>
+	                      </TableCell>
+	                      <DataTableActionsCell>
                         <DataTableActions>
                           {canUpdate && (
                             <WorkspaceIconAction
@@ -394,14 +499,26 @@ function EscalationRules({ slaId }: { slaId: number }) {
                       <FormField control={form.control} name="level" render={({ field }) => (
                         <FormItem>
                           <FormLabel>{t("itsm:sla.escalation.level")}</FormLabel>
-                          <FormControl><Input type="number" {...field} onChange={(e) => field.onChange(Number(e.target.value))} /></FormControl>
+	                          <FormControl>
+	                            <Input
+	                              type="number"
+	                              value={numberInputValue(field.value)}
+	                              onChange={(e) => field.onChange(parseIntegerInputValue(e.target.value))}
+	                            />
+	                          </FormControl>
                           <FormMessage />
                         </FormItem>
                       )} />
                       <FormField control={form.control} name="waitMinutes" render={({ field }) => (
                         <FormItem>
                           <FormLabel>{t("itsm:sla.escalation.waitMinutes")}</FormLabel>
-                          <FormControl><Input type="number" {...field} onChange={(e) => field.onChange(Number(e.target.value))} /></FormControl>
+	                          <FormControl>
+	                            <Input
+	                              type="number"
+	                              value={numberInputValue(field.value)}
+	                              onChange={(e) => field.onChange(parseIntegerInputValue(e.target.value))}
+	                            />
+	                          </FormControl>
                           <FormMessage />
                         </FormItem>
                       )} />
@@ -475,16 +592,27 @@ function EscalationRules({ slaId }: { slaId: number }) {
                           <Select value={String(field.value || "")} onValueChange={(value) => field.onChange(Number(value))}>
                             <FormControl><SelectTrigger><SelectValue placeholder={t("itsm:sla.escalation.targetPriorityPlaceholder")} /></SelectTrigger></FormControl>
                             <SelectContent>
-                              {priorities.map((priority) => (
-                                <SelectItem key={priority.id} value={String(priority.id)}>{priority.name} / {priority.code}</SelectItem>
-                              ))}
-                            </SelectContent>
+	                              {priorities.filter((priority) => priority.isActive || priority.id === field.value).map((priority) => (
+	                                <SelectItem key={priority.id} value={String(priority.id)}>
+	                                  {priority.name} / {priority.code}{priority.isActive ? "" : ` (${t("itsm:sla.inactive")})`}
+	                                </SelectItem>
+	                              ))}
+	                            </SelectContent>
                           </Select>
                           <FormMessage />
                         </FormItem>
                       )} />
                     )}
-                  </WorkspaceFormSection>
+	                    <FormField control={form.control} name="isActive" render={({ field }) => (
+	                      <FormItem>
+	                        <div className="flex h-9 items-center justify-between gap-3 rounded-md border border-border/60 bg-background/35 px-3">
+	                          <FormLabel className="text-sm font-normal">{field.value ? t("itsm:sla.active") : t("itsm:sla.inactive")}</FormLabel>
+	                          <FormControl><Switch checked={field.value} onCheckedChange={field.onChange} /></FormControl>
+	                        </div>
+	                        <FormMessage />
+	                      </FormItem>
+	                    )} />
+	                  </WorkspaceFormSection>
                   <SheetFooter>
                     <Button type="submit" size="sm" disabled={isPending}>
                       {isPending ? t("common:saving") : editing ? t("common:save") : t("common:create")}
@@ -514,8 +642,25 @@ export function Component() {
   const canDelete = usePermission("itsm:sla:delete")
 
   const { data: items = [], isLoading } = useQuery({
-    queryKey: ["itsm-sla"],
+    queryKey: itsmQueryKeys.sla.all,
     queryFn: () => fetchSLATemplates(),
+  })
+
+  const escalationQueries = useQueries({
+    queries: items.map((item) => ({
+      queryKey: itsmQueryKeys.sla.escalations(item.id),
+      queryFn: () => fetchEscalationRules(item.id),
+    })),
+  })
+
+  const { data: channels = [] } = useQuery({
+    queryKey: itsmQueryKeys.sla.notificationChannels,
+    queryFn: () => fetchNotificationChannels(),
+  })
+
+  const { data: priorities = [] } = useQuery({
+    queryKey: itsmQueryKeys.priorities.all,
+    queryFn: () => fetchPriorities(),
   })
 
   const filteredItems = useMemo(() => {
@@ -523,37 +668,66 @@ export function Component() {
     return items.filter((item) => matchesQuery(item, query))
   }, [items, search])
 
+  const rulesBySlaId = useMemo(() => {
+    const result: Record<number, EscalationRuleItem[]> = {}
+    items.forEach((item, index) => {
+      result[item.id] = escalationQueries[index]?.data ?? []
+    })
+    return result
+  }, [escalationQueries, items])
+
+  const previewRows = useMemo(() => buildSLARulePreviewRows({
+    slas: items,
+    rulesBySlaId,
+    priorities,
+    channels,
+  }), [channels, items, priorities, rulesBySlaId])
+
+  const escalationLoading = escalationQueries.some((query) => query.isLoading)
+
   const form = useForm<SLAFormValues>({
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     resolver: zodResolver(slaSchema as any),
-    defaultValues: { name: "", code: "", description: "", responseMinutes: 240, resolutionMinutes: 1440 },
+    defaultValues: { name: "", code: "", description: "", responseMinutes: 240, resolutionMinutes: 1440, isActive: true },
   })
 
   useEffect(() => {
     if (formOpen) {
       if (editing) {
-        form.reset({ name: editing.name, code: editing.code, description: editing.description, responseMinutes: editing.responseMinutes, resolutionMinutes: editing.resolutionMinutes })
+        form.reset({ name: editing.name, code: editing.code, description: editing.description, responseMinutes: editing.responseMinutes, resolutionMinutes: editing.resolutionMinutes, isActive: editing.isActive })
       } else {
-        form.reset({ name: "", code: "", description: "", responseMinutes: 240, resolutionMinutes: 1440 })
+        form.reset({ name: "", code: "", description: "", responseMinutes: 240, resolutionMinutes: 1440, isActive: true })
       }
     }
   }, [formOpen, editing, form])
 
   const createMut = useMutation({
-    mutationFn: (v: SLAFormValues) => createSLATemplate({ ...v, description: v.description ?? "" }),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["itsm-sla"] }); setFormOpen(false); toast.success(t("itsm:sla.createSuccess")) },
+    mutationFn: (v: SLAFormValues) => createSLATemplate({
+      name: v.name,
+      code: v.code,
+      responseMinutes: v.responseMinutes,
+      resolutionMinutes: v.resolutionMinutes,
+      description: v.description ?? "",
+    }),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: itsmQueryKeys.sla.all }); setFormOpen(false); toast.success(t("itsm:sla.createSuccess")) },
     onError: (err) => toast.error(err.message),
   })
 
   const updateMut = useMutation({
     mutationFn: (v: SLAFormValues) => updateSLATemplate(editing!.id, { ...v, description: v.description ?? "" }),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["itsm-sla"] }); setFormOpen(false); toast.success(t("itsm:sla.updateSuccess")) },
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: itsmQueryKeys.sla.all }); setFormOpen(false); toast.success(t("itsm:sla.updateSuccess")) },
+    onError: (err) => toast.error(err.message),
+  })
+
+  const toggleMut = useMutation({
+    mutationFn: ({ id, isActive }: { id: number; isActive: boolean }) => updateSLATemplate(id, { isActive }),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: itsmQueryKeys.sla.all }); toast.success(t("itsm:sla.updateSuccess")) },
     onError: (err) => toast.error(err.message),
   })
 
   const deleteMut = useMutation({
     mutationFn: (id: number) => deleteSLATemplate(id),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["itsm-sla"] }); toast.success(t("itsm:sla.deleteSuccess")) },
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: itsmQueryKeys.sla.all }); toast.success(t("itsm:sla.deleteSuccess")) },
     onError: (err) => toast.error(err.message),
   })
 
@@ -581,6 +755,8 @@ export function Component() {
           </Button>
         )}
       </div>
+
+      <SLARuleOverview rows={previewRows} isLoading={isLoading || escalationLoading} />
 
       <DataTableCard>
         <DataTableToolbar>
@@ -642,9 +818,20 @@ export function Component() {
                     </TableCell>
                     <TableCell className="text-sm tabular-nums">{formatMinutes(item.responseMinutes, minuteUnit)}</TableCell>
                     <TableCell className="text-sm tabular-nums">{formatMinutes(item.resolutionMinutes, minuteUnit)}</TableCell>
-                    <TableCell>
-                      <WorkspaceBooleanStatus active={item.isActive} activeLabel={t("itsm:sla.active")} inactiveLabel={t("itsm:sla.inactive")} />
-                    </TableCell>
+	                    <TableCell>
+	                      <div className="flex items-center gap-2">
+	                        {canUpdate ? (
+	                          <Switch
+	                            checked={item.isActive}
+	                            onCheckedChange={(isActive) => toggleMut.mutate({ id: item.id, isActive })}
+	                            disabled={toggleMut.isPending}
+	                            aria-label={item.isActive ? t("itsm:sla.inactive") : t("itsm:sla.active")}
+	                            onClick={(event) => event.stopPropagation()}
+	                          />
+	                        ) : null}
+	                        <WorkspaceBooleanStatus active={item.isActive} activeLabel={t("itsm:sla.active")} inactiveLabel={t("itsm:sla.inactive")} />
+	                      </div>
+	                    </TableCell>
                     <DataTableActionsCell>
                       <DataTableActions>
                         {canUpdate && (
@@ -675,9 +862,9 @@ export function Component() {
                     </DataTableActionsCell>
                   </TableRow>,
                 ]
-                if (isExpanded) {
-                  rows.push(<EscalationRules key={`esc-${item.id}`} slaId={item.id} />)
-                }
+	                if (isExpanded) {
+	                  rows.push(<EscalationRules key={`esc-${item.id}`} sla={item} channels={channels} priorities={priorities} />)
+	                }
                 return rows
               })
             )}
@@ -711,23 +898,46 @@ export function Component() {
               </WorkspaceFormSection>
               <WorkspaceFormSection title={t("itsm:sla.formCommitment")}>
                 <div className="grid grid-cols-2 gap-4">
-                  <FormField control={form.control} name="responseMinutes" render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>{t("itsm:sla.responseMinutes")}</FormLabel>
-                      <FormControl><Input type="number" {...field} onChange={(e) => field.onChange(Number(e.target.value))} /></FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )} />
-                  <FormField control={form.control} name="resolutionMinutes" render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>{t("itsm:sla.resolutionMinutes")}</FormLabel>
-                      <FormControl><Input type="number" {...field} onChange={(e) => field.onChange(Number(e.target.value))} /></FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )} />
-                </div>
-              </WorkspaceFormSection>
-              <WorkspaceFormSection title={t("itsm:sla.formDescription")}>
+	                  <FormField control={form.control} name="responseMinutes" render={({ field }) => (
+	                    <FormItem>
+	                      <FormLabel>{t("itsm:sla.responseMinutes")}</FormLabel>
+	                      <FormControl>
+	                        <Input
+	                          type="number"
+	                          value={numberInputValue(field.value)}
+	                          onChange={(e) => field.onChange(parseIntegerInputValue(e.target.value))}
+	                        />
+	                      </FormControl>
+	                      <FormMessage />
+	                    </FormItem>
+	                  )} />
+	                  <FormField control={form.control} name="resolutionMinutes" render={({ field }) => (
+	                    <FormItem>
+	                      <FormLabel>{t("itsm:sla.resolutionMinutes")}</FormLabel>
+	                      <FormControl>
+	                        <Input
+	                          type="number"
+	                          value={numberInputValue(field.value)}
+	                          onChange={(e) => field.onChange(parseIntegerInputValue(e.target.value))}
+	                        />
+	                      </FormControl>
+	                      <FormMessage />
+	                    </FormItem>
+	                  )} />
+	                </div>
+	              </WorkspaceFormSection>
+	              <WorkspaceFormSection title={t("common:status")}>
+	                <FormField control={form.control} name="isActive" render={({ field }) => (
+	                  <FormItem>
+	                    <div className="flex h-9 items-center justify-between gap-3 rounded-md border border-border/60 bg-background/35 px-3">
+	                      <FormLabel className="text-sm font-normal">{field.value ? t("itsm:sla.active") : t("itsm:sla.inactive")}</FormLabel>
+	                      <FormControl><Switch checked={field.value} onCheckedChange={field.onChange} /></FormControl>
+	                    </div>
+	                    <FormMessage />
+	                  </FormItem>
+	                )} />
+	              </WorkspaceFormSection>
+	              <WorkspaceFormSection title={t("itsm:sla.formDescription")}>
                 <FormField control={form.control} name="description" render={({ field }) => (
                   <FormItem>
                     <FormLabel>{t("itsm:sla.description")}</FormLabel>

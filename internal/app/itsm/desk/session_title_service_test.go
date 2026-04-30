@@ -24,22 +24,29 @@ func (f fakeTitleConfigProvider) SessionTitleRuntimeConfig() (config.LLMEngineRu
 }
 
 type fakeTitleLLMClient struct {
-	resp *llm.ChatResponse
-	err  error
+	responses []llm.ChatResponse
+	errs      []error
+	calls     int
 }
 
-func (f fakeTitleLLMClient) Chat(context.Context, llm.ChatRequest) (*llm.ChatResponse, error) {
-	if f.err != nil {
-		return nil, f.err
+func (f *fakeTitleLLMClient) Chat(context.Context, llm.ChatRequest) (*llm.ChatResponse, error) {
+	f.calls++
+	idx := f.calls - 1
+	if idx < len(f.errs) && f.errs[idx] != nil {
+		return nil, f.errs[idx]
 	}
-	return f.resp, nil
+	if idx < len(f.responses) {
+		resp := f.responses[idx]
+		return &resp, nil
+	}
+	return &llm.ChatResponse{}, nil
 }
 
-func (fakeTitleLLMClient) ChatStream(context.Context, llm.ChatRequest) (<-chan llm.StreamEvent, error) {
+func (*fakeTitleLLMClient) ChatStream(context.Context, llm.ChatRequest) (<-chan llm.StreamEvent, error) {
 	return nil, llm.ErrNotSupported
 }
 
-func (fakeTitleLLMClient) Embedding(context.Context, llm.EmbeddingRequest) (*llm.EmbeddingResponse, error) {
+func (*fakeTitleLLMClient) Embedding(context.Context, llm.EmbeddingRequest) (*llm.EmbeddingResponse, error) {
 	return nil, llm.ErrNotSupported
 }
 
@@ -81,7 +88,7 @@ func TestSessionTitleServiceGenerate(t *testing.T) {
 			},
 		},
 		llmClientFactory: func(string, string, string) (llm.Client, error) {
-			return fakeTitleLLMClient{resp: &llm.ChatResponse{Content: "\n\"VPN 线上支持申请\"\n"}}, nil
+			return &fakeTitleLLMClient{responses: []llm.ChatResponse{{Content: "\n\"VPN 线上支持申请\"\n"}}}, nil
 		},
 	}
 
@@ -94,6 +101,50 @@ func TestSessionTitleServiceGenerate(t *testing.T) {
 	}
 	if title != "VPN 线上支持申请" {
 		t.Fatalf("unexpected title: %q", title)
+	}
+}
+
+func TestSessionTitleServiceRetriesChatErrorsAndEmptyTitle(t *testing.T) {
+	client := &fakeTitleLLMClient{
+		errs: []error{context.DeadlineExceeded, nil, nil},
+		responses: []llm.ChatResponse{
+			{},
+			{Content: "   "},
+			{Content: "VPN 线上支持申请"},
+		},
+	}
+	svc := &SessionTitleService{
+		configSvc: fakeTitleConfigProvider{
+			intakeAgentID: 7,
+			cfg: config.LLMEngineRuntimeConfig{
+				Model:          "gpt-test",
+				Protocol:       llm.ProtocolOpenAI,
+				BaseURL:        "https://example.test",
+				APIKey:         "test",
+				Temperature:    0.2,
+				MaxTokens:      96,
+				MaxRetries:     2,
+				TimeoutSeconds: 30,
+				SystemPrompt:   "system",
+			},
+		},
+		llmClientFactory: func(string, string, string) (llm.Client, error) {
+			return client, nil
+		},
+	}
+
+	title, handled, err := svc.Generate(context.Background(), 1, 1, 7, "我想申请VPN，线上支持用")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !handled {
+		t.Fatalf("expected handled")
+	}
+	if title != "VPN 线上支持申请" {
+		t.Fatalf("unexpected title: %q", title)
+	}
+	if client.calls != 3 {
+		t.Fatalf("expected three attempts, got %d", client.calls)
 	}
 }
 

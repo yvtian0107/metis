@@ -5,6 +5,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Button } from "@/components/ui/button"
 import { X, Zap } from "lucide-react"
 import { fetchServiceActions } from "../../../api"
+import { itsmQueryKeys } from "../../../query-keys"
 
 interface ActionPickerProps {
   serviceId: number
@@ -16,7 +17,7 @@ export function ActionPicker({ serviceId, actionId, onChange }: ActionPickerProp
   const { t } = useTranslation("itsm")
 
   const { data: actions } = useQuery({
-    queryKey: ["itsm-service-actions", serviceId],
+    queryKey: itsmQueryKeys.services.actions(serviceId),
     queryFn: () => fetchServiceActions(serviceId),
     enabled: serviceId > 0,
     staleTime: 60_000,

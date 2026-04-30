@@ -2,6 +2,7 @@ package catalog
 
 import (
 	"errors"
+	. "metis/internal/app/itsm/domain"
 	"testing"
 )
 
@@ -145,5 +146,46 @@ func TestCatalogServiceTree_PreservesSortOrder(t *testing.T) {
 	}
 	if tree[0].Children[0].Code != "child-a" || tree[0].Children[1].Code != "child-b" {
 		t.Fatalf("unexpected child order: %+v", tree[0].Children)
+	}
+}
+
+func TestCatalogServiceServiceCounts_AggregatesDirectAndRootCounts(t *testing.T) {
+	db := newTestDB(t)
+	svc := newCatalogServiceForTest(t, db)
+
+	root, err := svc.Create("Root", "root", "", "", nil, 10)
+	if err != nil {
+		t.Fatalf("create root: %v", err)
+	}
+	child, err := svc.Create("Child", "child", "", "", &root.ID, 10)
+	if err != nil {
+		t.Fatalf("create child: %v", err)
+	}
+	emptyRoot, err := svc.Create("Empty", "empty", "", "", nil, 20)
+	if err != nil {
+		t.Fatalf("create empty root: %v", err)
+	}
+	services := []ServiceDefinition{
+		{Name: "Root Direct", Code: "root-direct", CatalogID: root.ID, EngineType: "classic", IsActive: true},
+		{Name: "Child Service", Code: "child-service", CatalogID: child.ID, EngineType: "classic", IsActive: true},
+	}
+	for i := range services {
+		if err := db.Create(&services[i]).Error; err != nil {
+			t.Fatalf("create service %d: %v", i, err)
+		}
+	}
+
+	counts, err := svc.ServiceCounts()
+	if err != nil {
+		t.Fatalf("service counts: %v", err)
+	}
+	if counts.Total != 2 {
+		t.Fatalf("expected total 2, got %d", counts.Total)
+	}
+	if counts.ByCatalogID[root.ID] != 1 || counts.ByCatalogID[child.ID] != 1 || counts.ByCatalogID[emptyRoot.ID] != 0 {
+		t.Fatalf("unexpected direct counts: %+v", counts.ByCatalogID)
+	}
+	if counts.ByRootCatalogID[root.ID] != 2 || counts.ByRootCatalogID[emptyRoot.ID] != 0 {
+		t.Fatalf("unexpected root counts: %+v", counts.ByRootCatalogID)
 	}
 }

@@ -32,24 +32,22 @@ PostMortem 模型：ticket_id（唯一）、root_cause、impact_summary、action
 - **AND** 旧终态工单 SHALL 根据历史活动和时间线派生 outcome
 
 ### Requirement: 工单状态枚举
-
-工单状态 SHALL 包含以下值：submitted（已提交）、waiting_human（待人工处理）、approved_decisioning（已同意，决策中）、rejected_decisioning（已驳回，决策中）、decisioning（AI 决策中）、executing_action（自动执行中）、completed（已通过或已履约）、rejected（已驳回终止）、withdrawn（已撤回）、cancelled（已取消）、failed（失败）。
+工单状态 SHALL 使用产品语义状态集合：`submitted`、`waiting_human`、`approved_decisioning`、`rejected_decisioning`、`decisioning`、`executing_action`、`completed`、`rejected`、`withdrawn`、`cancelled`、`failed`。系统 MUST 同时维护终态结果字段 `outcome`，其值 SHALL 为 `approved`、`rejected`、`fulfilled`、`withdrawn`、`cancelled`、`failed` 之一；非终态时 MUST 为空。
 
 #### Scenario: 初始状态
 - **WHEN** 工单创建
-- **THEN** 状态为 submitted
+- **THEN** 状态 SHALL 为 submitted
+- **AND** outcome SHALL 为空
 
-#### Scenario: 终态不可变
-- **WHEN** 工单状态为 completed、rejected、withdrawn、failed 或 cancelled
-- **THEN** 不允许再变更业务状态（除管理员明确执行恢复操作）
+#### Scenario: 审批通过后进入决策中
+- **WHEN** 人工审批活动提交 outcome=approved 并事务提交成功
+- **THEN** 工单状态 SHALL 变为 approved_decisioning
+- **AND** outcome SHALL 保持为空直到进入终态
 
-#### Scenario: 同意后进入决策中
-- **WHEN** 智能工单人工活动被同意
-- **THEN** 工单状态 SHALL 变更为 approved_decisioning
-
-#### Scenario: 驳回后进入决策中
-- **WHEN** 智能工单人工活动被驳回
-- **THEN** 工单状态 SHALL 变更为 rejected_decisioning
+#### Scenario: 终态一致性
+- **WHEN** 工单进入 completed、rejected、withdrawn、cancelled 或 failed
+- **THEN** outcome SHALL 与终态语义一致
+- **AND** 系统 SHALL 禁止再进入非终态
 
 ### Requirement: 工单编号自动生成
 

@@ -21,6 +21,7 @@ import {
 import {
   fetchKnowledgeDocs, uploadKnowledgeDoc, deleteKnowledgeDoc,
 } from "../api"
+import { itsmQueryKeys } from "../query-keys"
 import { WorkspaceAlertIconAction, WorkspaceStatus } from "@/components/workspace/primitives"
 
 function formatFileSize(bytes: number): string {
@@ -77,7 +78,7 @@ export function ServiceKnowledgeCard({ serviceId, title }: { serviceId: number; 
     if (!hasProcessing || serviceId <= 0) return
     const timer = window.setTimeout(() => {
       queryClient.invalidateQueries({ queryKey })
-      queryClient.invalidateQueries({ queryKey: ["itsm-service", serviceId] })
+      queryClient.invalidateQueries({ queryKey: itsmQueryKeys.services.detail(serviceId) })
     }, 2000)
     return () => window.clearTimeout(timer)
   }, [hasProcessing, serviceId, queryClient, queryKey])
@@ -87,7 +88,7 @@ export function ServiceKnowledgeCard({ serviceId, title }: { serviceId: number; 
     try {
       await uploadKnowledgeDoc(serviceId, file)
       queryClient.invalidateQueries({ queryKey })
-      queryClient.invalidateQueries({ queryKey: ["itsm-service", serviceId] })
+      queryClient.invalidateQueries({ queryKey: itsmQueryKeys.services.detail(serviceId) })
       toast.success(t("itsm:knowledge.uploadSuccess"))
     } catch (err) {
       toast.error((err as Error).message || t("itsm:knowledge.uploadError"))
@@ -100,7 +101,7 @@ export function ServiceKnowledgeCard({ serviceId, title }: { serviceId: number; 
     mutationFn: (docId: number) => deleteKnowledgeDoc(serviceId, docId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey })
-      queryClient.invalidateQueries({ queryKey: ["itsm-service", serviceId] })
+      queryClient.invalidateQueries({ queryKey: itsmQueryKeys.services.detail(serviceId) })
       toast.success(t("itsm:knowledge.deleteSuccess"))
     },
     onError: (err) => toast.error(err.message),

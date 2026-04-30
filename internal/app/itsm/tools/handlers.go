@@ -28,6 +28,8 @@ type ServiceDeskState struct {
 	ConfirmedServiceID    uint           `json:"confirmed_service_id,omitempty"`
 	ConfirmationRequired  bool           `json:"confirmation_required"`
 	LoadedServiceID       uint           `json:"loaded_service_id,omitempty"`
+	ServiceVersionID      uint           `json:"service_version_id,omitempty"`
+	ServiceVersionHash    string         `json:"service_version_hash,omitempty"`
 	DraftSummary          string         `json:"draft_summary,omitempty"`
 	DraftFormData         map[string]any `json:"draft_form_data,omitempty"`
 	RequestText           string         `json:"request_text,omitempty"`
@@ -91,14 +93,15 @@ type TicketCreator interface {
 
 // AgentTicketRequest holds the parameters for creating a ticket from an AI agent session.
 type AgentTicketRequest struct {
-	UserID       uint
-	ServiceID    uint
-	Summary      string
-	FormData     map[string]any
-	SessionID    uint
-	DraftVersion int
-	FieldsHash   string
-	RequestHash  string
+	UserID           uint
+	ServiceID        uint
+	ServiceVersionID uint
+	Summary          string
+	FormData         map[string]any
+	SessionID        uint
+	DraftVersion     int
+	FieldsHash       string
+	RequestHash      string
 }
 
 // AgentTicketResult holds the outcome of an agent-created ticket.
@@ -117,7 +120,7 @@ type ServiceDeskOperator interface {
 	MatchServices(ctx context.Context, query string) ([]ServiceMatch, MatchDecision, error)
 	LoadService(serviceID uint) (*ServiceDetail, error)
 	CreateTicket(userID uint, serviceID uint, summary string, formData map[string]any, sessionID uint) (*TicketResult, error)
-	SubmitConfirmedDraft(userID uint, serviceID uint, summary string, formData map[string]any, sessionID uint, draftVersion int, fieldsHash string, requestHash string) (*TicketResult, error)
+	SubmitConfirmedDraft(userID uint, serviceID uint, serviceVersionID uint, summary string, formData map[string]any, sessionID uint, draftVersion int, fieldsHash string, requestHash string) (*TicketResult, error)
 	ListMyTickets(userID uint, status string) ([]TicketSummary, error)
 	WithdrawTicket(userID uint, ticketCode string, reason string) error
 	ValidateParticipants(serviceID uint, formData map[string]any) (*ParticipantValidation, error)
@@ -154,6 +157,8 @@ type ServiceMatch struct {
 // ServiceDetail is the full definition of a service returned by LoadService.
 type ServiceDetail struct {
 	ServiceID          uint              `json:"service_id"`
+	ServiceVersionID   uint              `json:"service_version_id,omitempty"`
+	ServiceVersionHash string            `json:"service_version_hash,omitempty"`
 	RequestedID        uint              `json:"requested_service_id,omitempty"`
 	ResolvedFrom       string            `json:"resolved_from,omitempty"`
 	Name               string            `json:"name"`
@@ -267,128 +272,44 @@ type DraftSubmitRequest struct {
 }
 
 type DraftSubmitResult struct {
-	OK            bool                  `json:"ok"`
-	TicketID      uint                  `json:"ticketId,omitempty"`
-	TicketCode    string                `json:"ticketCode,omitempty"`
-	Status        string                `json:"status,omitempty"`
-	Message       string                `json:"message,omitempty"`
-	FailureReason string                `json:"failureReason,omitempty"`
-	NodeLabel     string                `json:"nodeLabel,omitempty"`
-	Guidance      string                `json:"guidance,omitempty"`
-	Warnings      []DraftWarning        `json:"warnings,omitempty"`
-	MissingFields []FieldCollectionItem `json:"missingRequiredFields,omitempty"`
-	State         *ServiceDeskState     `json:"state,omitempty"`
-	Surface       map[string]any        `json:"surface,omitempty"`
+	OK                 bool                  `json:"ok"`
+	TicketID           uint                  `json:"ticketId,omitempty"`
+	TicketCode         string                `json:"ticketCode,omitempty"`
+	Status             string                `json:"status,omitempty"`
+	Message            string                `json:"message,omitempty"`
+	NextExpectedAction string                `json:"nextExpectedAction,omitempty"`
+	FailureReason      string                `json:"failureReason,omitempty"`
+	NodeLabel          string                `json:"nodeLabel,omitempty"`
+	Guidance           string                `json:"guidance,omitempty"`
+	Warnings           []DraftWarning        `json:"warnings,omitempty"`
+	MissingFields      []FieldCollectionItem `json:"missingRequiredFields,omitempty"`
+	State              *ServiceDeskState     `json:"state,omitempty"`
+	Surface            map[string]any        `json:"surface,omitempty"`
+}
+
+type ServiceDeskCommandResult struct {
+	OK                 bool                  `json:"ok"`
+	Message            string                `json:"message,omitempty"`
+	NextExpectedAction string                `json:"nextExpectedAction,omitempty"`
+	State              *ServiceDeskState     `json:"state,omitempty"`
+	Surface            map[string]any        `json:"surface,omitempty"`
+	Warnings           []DraftWarning        `json:"warnings,omitempty"`
+	MissingFields      []FieldCollectionItem `json:"missingRequiredFields,omitempty"`
+	Payload            map[string]any        `json:"-"`
+}
+
+type ServiceDeskDraftSnapshot struct {
+	SessionID        uint           `json:"sessionId"`
+	ServiceID        uint           `json:"serviceId"`
+	ServiceVersionID uint           `json:"serviceVersionId"`
+	DraftVersion     int            `json:"draftVersion"`
+	FieldsHash       string         `json:"fieldsHash"`
+	Summary          string         `json:"summary"`
+	FormData         map[string]any `json:"formData"`
 }
 
 func SubmitDraft(op ServiceDeskOperator, store StateStore, sessionID uint, userID uint, req DraftSubmitRequest) (*DraftSubmitResult, error) {
-	state, err := store.GetState(sessionID)
-	if err != nil {
-		return nil, fmt.Errorf("get state: %w", err)
-	}
-	if state == nil || state.Stage != "awaiting_confirmation" {
-		return nil, fmt.Errorf("当前阶段不允许提交草稿，请先完成草稿整理")
-	}
-	if state.LoadedServiceID == 0 {
-		return nil, fmt.Errorf("请先加载服务")
-	}
-	if req.DraftVersion == 0 || req.DraftVersion != state.DraftVersion {
-		return nil, fmt.Errorf("草稿已变更（当前版本 %d，提交版本 %d），请重新确认表单", state.DraftVersion, req.DraftVersion)
-	}
-
-	detail, err := op.LoadService(state.LoadedServiceID)
-	if err != nil {
-		return nil, fmt.Errorf("load service for submit: %w", err)
-	}
-	if detail.EngineType != "smart" {
-		return nil, fmt.Errorf("仅支持 Agentic 服务提交")
-	}
-	if detail.FieldsHash != state.FieldsHash {
-		return nil, fmt.Errorf("服务表单字段已变更，请重新整理草稿")
-	}
-
-	formData := normalizeFormDataKeys(req.FormData, detail.FormFields)
-	if len(formData) == 0 && len(state.DraftFormData) > 0 {
-		formData = normalizeFormDataKeys(state.DraftFormData, detail.FormFields)
-	}
-	formData = mergePrefillFormData(formData, state.PrefillFormData)
-
-	summary := strings.TrimSpace(req.Summary)
-	if summary == "" {
-		summary = state.DraftSummary
-	}
-	validationContext := buildValidationContext(state.RequestText, summary)
-	formData = canonicalizeTimeSemanticFields(detail, validationContext, formData)
-	warnings, missingRequired, blocking := validateDraftData(detail, formData, validationContext)
-	timeWarnings, timeMissing, timeBlocking := validateDraftTimeSource(detail, validationContext, formData)
-	warnings = append(warnings, timeWarnings...)
-	missingRequired = append(missingRequired, timeMissing...)
-	blocking = blocking || timeBlocking
-	if blocking {
-		return &DraftSubmitResult{
-			OK:            false,
-			Message:       "表单还有必填项或无效值，请补充后再提交。",
-			Warnings:      warnings,
-			MissingFields: missingRequired,
-			State:         state,
-		}, nil
-	}
-
-	validation, err := op.ValidateParticipants(state.LoadedServiceID, formData)
-	if err != nil {
-		return nil, fmt.Errorf("validate participants: %w", err)
-	}
-	if validation != nil && !validation.OK {
-		return &DraftSubmitResult{
-			OK:            false,
-			Message:       "参与者预检失败，工单未创建。",
-			FailureReason: validation.FailureReason,
-			NodeLabel:     validation.NodeLabel,
-			Guidance:      validation.Guidance,
-			Warnings:      warnings,
-			State:         state,
-		}, nil
-	}
-
-	state.DraftSummary = summary
-	state.DraftFormData = formData
-	state.ConfirmedDraftVersion = state.DraftVersion
-
-	ticket, err := op.SubmitConfirmedDraft(userID, state.LoadedServiceID, summary, formData, sessionID, state.DraftVersion, state.FieldsHash, requestHash(formData))
-	if err != nil {
-		return nil, fmt.Errorf("create ticket: %w", err)
-	}
-
-	resetState := defaultState()
-	if err := store.SaveState(sessionID, resetState); err != nil {
-		return nil, fmt.Errorf("save reset state: %w", err)
-	}
-
-	surfacePayload := map[string]any{
-		"status":     "submitted",
-		"serviceId":  detail.ServiceID,
-		"title":      detail.Name,
-		"summary":    summary,
-		"values":     formData,
-		"ticketId":   ticket.TicketID,
-		"ticketCode": ticket.TicketCode,
-		"message":    "工单已提交",
-	}
-	surface := map[string]any{
-		"surfaceId":   fmt.Sprintf("itsm-draft-form-submitted-%d", ticket.TicketID),
-		"surfaceType": "itsm.draft_form",
-		"payload":     surfacePayload,
-	}
-	return &DraftSubmitResult{
-		OK:         true,
-		TicketID:   ticket.TicketID,
-		TicketCode: ticket.TicketCode,
-		Status:     ticket.Status,
-		Message:    "工单已提交",
-		Warnings:   warnings,
-		State:      resetState,
-		Surface:    surface,
-	}, nil
+	return NewServiceDeskSession(op, store).SubmitDraft(sessionID, userID, req)
 }
 
 // ---------------------------------------------------------------------------
@@ -422,28 +343,11 @@ func NewRegistry(op ServiceDeskOperator, store StateStore) *Registry {
 func currentRequestContextHandler(store StateStore) ToolHandler {
 	return func(ctx context.Context, userID uint, args json.RawMessage) (json.RawMessage, error) {
 		sid := sessionID(ctx)
-		state, err := store.GetState(sid)
+		result, err := NewServiceDeskSession(nil, store).CurrentContext(sid)
 		if err != nil {
-			return nil, fmt.Errorf("get state: %w", err)
+			return nil, err
 		}
-		if state == nil {
-			state = defaultState()
-		}
-		return mustMarshal(map[string]any{
-			"stage":                   state.Stage,
-			"candidate_service_ids":   state.CandidateServiceIDs,
-			"top_match_service_id":    state.TopMatchServiceID,
-			"confirmed_service_id":    state.ConfirmedServiceID,
-			"confirmation_required":   state.ConfirmationRequired,
-			"loaded_service_id":       state.LoadedServiceID,
-			"request_text":            state.RequestText,
-			"prefill_form_data":       state.PrefillFormData,
-			"draft_summary":           state.DraftSummary,
-			"draft_form_data":         state.DraftFormData,
-			"draft_version":           state.DraftVersion,
-			"confirmed_draft_version": state.ConfirmedDraftVersion,
-			"next_expected_action":    NextExpectedAction(state),
-		}), nil
+		return mustMarshal(commandPayload(result)), nil
 	}
 }
 
@@ -1190,102 +1094,11 @@ func serviceMatchHandler(op ServiceDeskOperator, store StateStore) ToolHandler {
 		if err := json.Unmarshal(args, &p); err != nil {
 			return nil, fmt.Errorf("invalid args: %w", err)
 		}
-		if p.Query == "" {
-			return nil, fmt.Errorf("query is required")
-		}
-		requestText := originalRequestText(ctx, p.Query)
-
-		sid := sessionID(ctx)
-		state, _ := store.GetState(sid)
-		if state == nil {
-			state = defaultState()
-		}
-		if shouldReuseLoadedService(state, p.Query) {
-			return mustMarshal(map[string]any{
-				"ok":                 true,
-				"already_loaded":     true,
-				"service_locked":     true,
-				"loaded_service_id":  state.LoadedServiceID,
-				"request_text":       state.RequestText,
-				"prefill_form_data":  state.PrefillFormData,
-				"state_stage":        state.Stage,
-				"next_required_tool": NextExpectedAction(state),
-			}), nil
-		}
-
-		matches, decision, err := op.MatchServices(ctx, p.Query)
+		result, err := NewServiceDeskSession(op, store).MatchServices(ctx, sessionID(ctx), p.Query)
 		if err != nil {
-			return nil, fmt.Errorf("match services: %w", err)
-		}
-
-		confirmationRequired := false
-		var selectedServiceID uint
-		switch decision.Kind {
-		case MatchDecisionSelectService:
-			selectedServiceID = decision.SelectedServiceID
-			if selectedServiceID == 0 && len(matches) == 1 {
-				selectedServiceID = matches[0].ID
-			}
-			if selectedServiceID == 0 {
-				return nil, fmt.Errorf("select_service decision missing selected_service_id")
-			}
-			var selectedMatch *ServiceMatch
-			for i := range matches {
-				if matches[i].ID == selectedServiceID {
-					selectedMatch = &matches[i]
-					break
-				}
-			}
-			if selectedMatch == nil {
-				return nil, fmt.Errorf("select_service decision service_id %d not found in matches", selectedServiceID)
-			}
-			matches = []ServiceMatch{*selectedMatch}
-		case MatchDecisionNeedClarification:
-			confirmationRequired = true
-		case MatchDecisionNoMatch:
-			matches = nil
-		default:
-			return nil, fmt.Errorf("unknown service match decision: %s", decision.Kind)
-		}
-
-		// Collect candidate IDs.
-		candidateIDs := make([]uint, len(matches))
-		for i, m := range matches {
-			candidateIDs[i] = m.ID
-		}
-
-		var topMatchID uint
-		if len(matches) > 0 {
-			topMatchID = matches[0].ID
-		}
-
-		// Persist state.
-		if err := state.TransitionTo("candidates_ready"); err != nil {
 			return nil, err
 		}
-		state.CandidateServiceIDs = candidateIDs
-		state.TopMatchServiceID = topMatchID
-		state.ConfirmationRequired = confirmationRequired
-		if selectedServiceID > 0 {
-			state.ConfirmedServiceID = selectedServiceID
-		} else {
-			state.ConfirmedServiceID = 0
-		}
-		state.RequestText = requestText
-		state.PrefillFormData = nil
-		if err := store.SaveState(sid, state); err != nil {
-			return nil, fmt.Errorf("save state: %w", err)
-		}
-
-		return mustMarshal(map[string]any{
-			"query":                  p.Query,
-			"matches":                matches,
-			"confirmation_required":  confirmationRequired,
-			"selected_service_id":    selectedServiceID,
-			"service_locked":         selectedServiceID > 0 && !confirmationRequired,
-			"next_required_tool":     serviceMatchNextRequiredTool(selectedServiceID, confirmationRequired, len(matches)),
-			"clarification_question": decision.ClarificationQuestion,
-		}), nil
+		return mustMarshal(commandPayload(result)), nil
 	}
 }
 
@@ -1348,40 +1161,11 @@ func serviceConfirmHandler(store StateStore) ToolHandler {
 		if err := json.Unmarshal(args, &p); err != nil {
 			return nil, fmt.Errorf("invalid args: %w", err)
 		}
-		if p.ServiceID == 0 {
-			return nil, fmt.Errorf("service_id is required")
-		}
-
-		sid := sessionID(ctx)
-		state, err := store.GetState(sid)
+		result, err := NewServiceDeskSession(nil, store).ConfirmService(sessionID(ctx), p.ServiceID)
 		if err != nil {
-			return nil, fmt.Errorf("get state: %w", err)
-		}
-		if state == nil || state.Stage != "candidates_ready" {
-			return nil, fmt.Errorf("当前阶段不允许确认服务，请先调用 service_match")
-		}
-
-		resolvedServiceID, resolvedFrom, err := resolveServiceID(state, p.ServiceID)
-		if err != nil || resolvedFrom == "loaded_service" {
-			return nil, fmt.Errorf("service_id %d 不在候选列表中，也不是合法候选序号", p.ServiceID)
-		}
-
-		state.ConfirmedServiceID = resolvedServiceID
-		if err := state.TransitionTo("service_selected"); err != nil {
 			return nil, err
 		}
-		if err := store.SaveState(sid, state); err != nil {
-			return nil, fmt.Errorf("save state: %w", err)
-		}
-
-		return mustMarshal(map[string]any{
-			"ok":                   true,
-			"service_id":           resolvedServiceID,
-			"confirmed_service_id": resolvedServiceID,
-			"requested_service_id": p.ServiceID,
-			"resolved_from":        resolvedFrom,
-			"next_required_tool":   "itsm.service_load",
-		}), nil
+		return mustMarshal(commandPayload(result)), nil
 	}
 }
 
@@ -1397,74 +1181,11 @@ func serviceLoadHandler(op ServiceDeskOperator, store StateStore) ToolHandler {
 		if err := json.Unmarshal(args, &p); err != nil {
 			return nil, fmt.Errorf("invalid args: %w", err)
 		}
-		if p.ServiceID == 0 {
-			return nil, fmt.Errorf("service_id is required")
-		}
-
-		sid := sessionID(ctx)
-		state, err := store.GetState(sid)
-		if err != nil {
-			return nil, fmt.Errorf("get state: %w", err)
-		}
-		if state == nil {
-			state = defaultState()
-		}
-		if len(state.CandidateServiceIDs) == 0 && state.ConfirmedServiceID == 0 && state.LoadedServiceID == 0 {
-			return nil, fmt.Errorf("请先调用 service_match 匹配服务，不能凭空加载服务")
-		}
-
-		// If confirmation was required but not yet given, block.
-		if state.ConfirmationRequired && state.ConfirmedServiceID == 0 {
-			return nil, fmt.Errorf("请先调用 service_confirm")
-		}
-
-		resolvedServiceID, resolvedFrom, err := resolveServiceID(state, p.ServiceID)
+		result, err := NewServiceDeskSession(op, store).LoadService(sessionID(ctx), p.ServiceID)
 		if err != nil {
 			return nil, err
 		}
-
-		detail, err := op.LoadService(resolvedServiceID)
-		if err != nil {
-			return nil, fmt.Errorf("load service: %w", err)
-		}
-		detail.RequestedID = p.ServiceID
-		detail.ResolvedFrom = resolvedFrom
-		detail.PrefillSuggestions = buildPrefillSuggestions(state.RequestText, detail.FormFields)
-		detail.FieldCollection = buildFieldCollection(detail.FormFields, detail.PrefillSuggestions, detail.RoutingFieldHint)
-		syncConversationProgress(state, detail.FieldCollection.MissingRequiredFields)
-
-		if state.LoadedServiceID == resolvedServiceID &&
-			(state.Stage == "service_loaded" || state.Stage == "awaiting_confirmation" || state.Stage == "confirmed") {
-			if state.FieldsHash != detail.FieldsHash {
-				state.FieldsHash = detail.FieldsHash
-				state.ConfirmedDraftVersion = 0
-			}
-			state.PrefillFormData = detail.PrefillSuggestions
-			if err := store.SaveState(sid, state); err != nil {
-				return nil, fmt.Errorf("save state: %w", err)
-			}
-			return mustMarshal(detail), nil
-		}
-
-		// Reset draft fields when switching to a different service.
-		if state.LoadedServiceID != resolvedServiceID {
-			state.DraftSummary = ""
-			state.DraftFormData = nil
-			state.DraftVersion = 0
-			state.ConfirmedDraftVersion = 0
-		}
-
-		state.LoadedServiceID = resolvedServiceID
-		state.FieldsHash = detail.FieldsHash
-		state.PrefillFormData = detail.PrefillSuggestions
-		if err := state.TransitionTo("service_loaded"); err != nil {
-			return nil, err
-		}
-		if err := store.SaveState(sid, state); err != nil {
-			return nil, fmt.Errorf("save state: %w", err)
-		}
-
-		return mustMarshal(detail), nil
+		return mustMarshal(commandPayload(result)), nil
 	}
 }
 
@@ -1474,15 +1195,11 @@ func serviceLoadHandler(op ServiceDeskOperator, store StateStore) ToolHandler {
 
 func newRequestHandler(store StateStore) ToolHandler {
 	return func(ctx context.Context, userID uint, args json.RawMessage) (json.RawMessage, error) {
-		sid := sessionID(ctx)
-		state := defaultState()
-		if err := store.SaveState(sid, state); err != nil {
-			return nil, fmt.Errorf("save state: %w", err)
+		result, err := NewServiceDeskSession(nil, store).Reset(sessionID(ctx))
+		if err != nil {
+			return nil, err
 		}
-		return mustMarshal(map[string]any{
-			"ok":      true,
-			"message": "已就绪，请描述您的需求",
-		}), nil
+		return mustMarshal(commandPayload(result)), nil
 	}
 }
 
@@ -1499,97 +1216,11 @@ func draftPrepareHandler(op ServiceDeskOperator, store StateStore) ToolHandler {
 		if err := json.Unmarshal(args, &p); err != nil {
 			return nil, fmt.Errorf("invalid args: %w", err)
 		}
-
-		sid := sessionID(ctx)
-		state, err := store.GetState(sid)
+		result, err := NewServiceDeskSession(op, store).PrepareDraft(sessionID(ctx), p.Summary, p.FormData)
 		if err != nil {
-			return nil, fmt.Errorf("get state: %w", err)
-		}
-		if state == nil || state.LoadedServiceID == 0 {
-			return nil, fmt.Errorf("请先调用 service_load 加载服务")
-		}
-
-		// Load field definitions for validation.
-		detail, err := op.LoadService(state.LoadedServiceID)
-		if err != nil {
-			return nil, fmt.Errorf("load service for validation: %w", err)
-		}
-		if detail.EngineType == "smart" && len(detail.FormFields) == 0 {
-			return mustMarshal(map[string]any{
-				"ok":                      false,
-				"ready_for_confirmation":  false,
-				"next_required_tool":      "generate_reference_path",
-				"recommended_next_step":   "generate_reference_path",
-				"missing_required_fields": []FieldCollectionItem{},
-				"summary":                 p.Summary,
-				"form_data":               map[string]any{},
-				"warnings": []DraftWarning{{
-					Type:    "missing_form_schema",
-					Field:   "intake_form_schema",
-					Message: "申请确认表单未生成，请由管理员先生成参考路径",
-				}},
-			}), nil
-		}
-
-		p.FormData = normalizeFormDataKeys(p.FormData, detail.FormFields)
-		p.FormData = mergePrefillFormData(p.FormData, state.PrefillFormData)
-		validationContext := buildValidationContext(state.RequestText, p.Summary)
-		p.FormData = canonicalizeTimeSemanticFields(detail, validationContext, p.FormData)
-
-		warnings, missingRequired, blocking := validateDraftData(detail, p.FormData, validationContext)
-		timeWarnings, timeMissing, timeBlocking := validateDraftTimeSource(detail, validationContext, p.FormData)
-		warnings = append(warnings, timeWarnings...)
-		missingRequired = append(missingRequired, timeMissing...)
-		blocking = blocking || timeBlocking
-		syncConversationProgress(state, missingRequired)
-
-		if blocking {
-			if err := store.SaveState(sid, state); err != nil {
-				return nil, fmt.Errorf("save state: %w", err)
-			}
-			return mustMarshal(map[string]any{
-				"ok":                      false,
-				"ready_for_confirmation":  false,
-				"next_required_tool":      "collect_missing_fields",
-				"recommended_next_step":   "ask_missing_fields",
-				"missing_required_fields": missingRequired,
-				"summary":                 p.Summary,
-				"form_data":               p.FormData,
-				"warnings":                warnings,
-			}), nil
-		}
-
-		// Determine if content changed; if so, bump draft version and reset confirmation.
-		contentChanged := state.DraftSummary != p.Summary || hashFormData(state.DraftFormData) != hashFormData(p.FormData)
-		if contentChanged {
-			state.DraftVersion++
-			state.ConfirmedDraftVersion = 0
-		}
-
-		state.DraftSummary = p.Summary
-		state.DraftFormData = p.FormData
-		if err := state.TransitionTo("awaiting_confirmation"); err != nil {
 			return nil, err
 		}
-		if err := store.SaveState(sid, state); err != nil {
-			return nil, fmt.Errorf("save state: %w", err)
-		}
-
-		return mustMarshal(map[string]any{
-			"ok":                      true,
-			"ready_for_confirmation":  true,
-			"next_required_tool":      "itsm.draft_confirm",
-			"recommended_next_step":   "show_draft_for_confirmation",
-			"missing_required_fields": []FieldCollectionItem{},
-			"draft_version":           state.DraftVersion,
-			"service_id":              detail.ServiceID,
-			"service_name":            detail.Name,
-			"service_engine_type":     detail.EngineType,
-			"summary":                 p.Summary,
-			"form_data":               p.FormData,
-			"form_schema":             detail.FormSchema,
-			"warnings":                warnings,
-		}), nil
+		return mustMarshal(commandPayload(result)), nil
 	}
 }
 
@@ -1599,51 +1230,11 @@ func draftPrepareHandler(op ServiceDeskOperator, store StateStore) ToolHandler {
 
 func draftConfirmHandler(op ServiceDeskOperator, store StateStore) ToolHandler {
 	return func(ctx context.Context, userID uint, args json.RawMessage) (json.RawMessage, error) {
-		sid := sessionID(ctx)
-		state, err := store.GetState(sid)
+		result, err := NewServiceDeskSession(op, store).ConfirmDraft(sessionID(ctx))
 		if err != nil {
-			return nil, fmt.Errorf("get state: %w", err)
-		}
-		if state == nil || state.Stage != "awaiting_confirmation" {
-			return nil, fmt.Errorf("当前阶段不允许确认草稿，请先调用 draft_prepare")
-		}
-
-		// Verify fields_hash has not changed since service was loaded.
-		if state.LoadedServiceID > 0 {
-			detail, err := op.LoadService(state.LoadedServiceID)
-			if err != nil {
-				return nil, fmt.Errorf("load service for hash check: %w", err)
-			}
-			if detail.FieldsHash != state.FieldsHash {
-				return nil, fmt.Errorf("服务表单字段已变更，请重新调用 service_load")
-			}
-			validationContext := buildValidationContext(state.RequestText, state.DraftSummary)
-			state.DraftFormData = canonicalizeTimeSemanticFields(detail, validationContext, state.DraftFormData)
-			warnings, _, blocking := validateDraftData(detail, state.DraftFormData, validationContext)
-			timeWarnings, _, timeBlocking := validateDraftTimeSource(detail, validationContext, state.DraftFormData)
-			warnings = append(warnings, timeWarnings...)
-			blocking = blocking || timeBlocking
-			if blocking {
-				if len(warnings) > 0 {
-					return nil, fmt.Errorf("草稿表单校验失败：%s", warnings[0].Message)
-				}
-				return nil, fmt.Errorf("草稿表单校验失败，请重新调用 draft_prepare")
-			}
-		}
-
-		state.ConfirmedDraftVersion = state.DraftVersion
-		if err := state.TransitionTo("confirmed"); err != nil {
 			return nil, err
 		}
-		if err := store.SaveState(sid, state); err != nil {
-			return nil, fmt.Errorf("save state: %w", err)
-		}
-
-		return mustMarshal(map[string]any{
-			"ok":                      true,
-			"draft_version":           state.DraftVersion,
-			"confirmed_draft_version": state.ConfirmedDraftVersion,
-		}), nil
+		return mustMarshal(commandPayload(result)), nil
 	}
 }
 
@@ -1660,32 +1251,11 @@ func validateParticipantsHandler(op ServiceDeskOperator, store StateStore) ToolH
 		if err := json.Unmarshal(args, &p); err != nil {
 			return nil, fmt.Errorf("invalid args: %w", err)
 		}
-		if p.ServiceID == 0 {
-			return nil, fmt.Errorf("service_id is required")
-		}
-
-		sid := sessionID(ctx)
-		state, err := store.GetState(sid)
-		if err != nil {
-			return nil, fmt.Errorf("get state: %w", err)
-		}
-		if state == nil {
-			state = defaultState()
-		}
-		resolvedServiceID, _, err := resolveServiceID(state, p.ServiceID)
+		result, err := NewServiceDeskSession(op, store).ValidateParticipants(sessionID(ctx), p.ServiceID, p.FormData)
 		if err != nil {
 			return nil, err
 		}
-		if len(p.FormData) == 0 && len(state.DraftFormData) > 0 {
-			p.FormData = state.DraftFormData
-		}
-
-		result, err := op.ValidateParticipants(resolvedServiceID, p.FormData)
-		if err != nil {
-			return nil, fmt.Errorf("validate participants: %w", err)
-		}
-
-		return mustMarshal(result), nil
+		return mustMarshal(commandPayload(result)), nil
 	}
 }
 
@@ -1703,63 +1273,11 @@ func ticketCreateHandler(op ServiceDeskOperator, store StateStore) ToolHandler {
 		if err := json.Unmarshal(args, &p); err != nil {
 			return nil, fmt.Errorf("invalid args: %w", err)
 		}
-		if p.ServiceID == 0 {
-			return nil, fmt.Errorf("service_id is required")
-		}
-
-		sid := sessionID(ctx)
-		state, err := store.GetState(sid)
-		if err != nil {
-			return nil, fmt.Errorf("get state: %w", err)
-		}
-		if state == nil {
-			state = defaultState()
-		}
-
-		resolvedServiceID, _, err := resolveServiceID(state, p.ServiceID)
+		result, err := NewServiceDeskSession(op, store).CreateTicket(sessionID(ctx), userID, p.ServiceID, p.Summary, p.FormData)
 		if err != nil {
 			return nil, err
 		}
-
-		// Guard: loaded service must match.
-		if state.LoadedServiceID != resolvedServiceID {
-			return nil, fmt.Errorf("service_id %d 与已加载的服务 %d 不一致，请先调用 service_load", p.ServiceID, state.LoadedServiceID)
-		}
-
-		// Guard: draft must be confirmed and versions must match.
-		if state.ConfirmedDraftVersion == 0 {
-			return nil, fmt.Errorf("草稿未确认，请先调用 draft_confirm")
-		}
-		if state.ConfirmedDraftVersion != state.DraftVersion {
-			return nil, fmt.Errorf("草稿已变更（当前版本 %d，已确认版本 %d），请重新调用 draft_confirm", state.DraftVersion, state.ConfirmedDraftVersion)
-		}
-
-		if state.ConfirmedDraftVersion > 0 {
-			if state.DraftSummary != "" {
-				p.Summary = state.DraftSummary
-			}
-			if len(state.DraftFormData) > 0 {
-				p.FormData = state.DraftFormData
-			}
-		}
-
-		result, err := op.CreateTicket(userID, resolvedServiceID, p.Summary, p.FormData, sid)
-		if err != nil {
-			return nil, fmt.Errorf("create ticket: %w", err)
-		}
-
-		// Reset state to idle after successful creation.
-		resetState := defaultState()
-		if err := store.SaveState(sid, resetState); err != nil {
-			return nil, fmt.Errorf("save state: %w", err)
-		}
-
-		return mustMarshal(map[string]any{
-			"ok":          true,
-			"ticket_id":   result.TicketID,
-			"ticket_code": result.TicketCode,
-			"status":      result.Status,
-		}), nil
+		return mustMarshal(commandPayload(result)), nil
 	}
 }
 

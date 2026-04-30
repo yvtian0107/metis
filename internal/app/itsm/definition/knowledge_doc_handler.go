@@ -1,6 +1,7 @@
 package definition
 
 import (
+	"errors"
 	. "metis/internal/app/itsm/domain"
 	"net/http"
 	"strconv"
@@ -49,6 +50,10 @@ func (h *KnowledgeDocHandler) Upload(c *gin.Context) {
 
 	doc, err := h.svc.Upload(serviceID, header.Filename, header.Size, file)
 	if err != nil {
+		if errors.Is(err, ErrServiceDefNotFound) {
+			handler.Fail(c, http.StatusNotFound, err.Error())
+			return
+		}
 		handler.Fail(c, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -67,6 +72,10 @@ func (h *KnowledgeDocHandler) List(c *gin.Context) {
 
 	docs, err := h.svc.List(serviceID)
 	if err != nil {
+		if errors.Is(err, ErrServiceDefNotFound) {
+			handler.Fail(c, http.StatusNotFound, err.Error())
+			return
+		}
 		handler.Fail(c, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -82,6 +91,11 @@ func (h *KnowledgeDocHandler) List(c *gin.Context) {
 }
 
 func (h *KnowledgeDocHandler) Delete(c *gin.Context) {
+	serviceID, err := ParseID(c)
+	if err != nil {
+		handler.Fail(c, http.StatusBadRequest, "invalid service id")
+		return
+	}
 	docID, err := strconv.ParseUint(c.Param("docId"), 10, 64)
 	if err != nil {
 		handler.Fail(c, http.StatusBadRequest, "invalid document id")
@@ -92,7 +106,11 @@ func (h *KnowledgeDocHandler) Delete(c *gin.Context) {
 	c.Set("audit_resource", "service_knowledge_document")
 	c.Set("audit_resource_id", c.Param("docId"))
 
-	if err := h.svc.Delete(uint(docID)); err != nil {
+	if err := h.svc.Delete(serviceID, uint(docID)); err != nil {
+		if errors.Is(err, ErrServiceDefNotFound) || errors.Is(err, ErrKnowledgeDocNotFound) {
+			handler.Fail(c, http.StatusNotFound, err.Error())
+			return
+		}
 		handler.Fail(c, http.StatusInternalServerError, err.Error())
 		return
 	}

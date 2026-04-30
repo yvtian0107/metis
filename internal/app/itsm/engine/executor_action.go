@@ -13,17 +13,8 @@ import (
 	"time"
 
 	"gorm.io/gorm"
+	"metis/internal/app/itsm/domain"
 )
-
-// ActionConfig represents the HTTP webhook configuration for a ServiceAction.
-type ActionConfig struct {
-	URL     string            `json:"url"`
-	Method  string            `json:"method"`
-	Headers map[string]string `json:"headers"`
-	Body    string            `json:"body"`    // template with {{ticket.*}} variables
-	Timeout int               `json:"timeout"` // seconds, default 30
-	Retries int               `json:"retries"` // default 3
-}
 
 // ActionExecutor handles HTTP webhook execution for action nodes.
 type ActionExecutor struct {
@@ -46,18 +37,17 @@ func (e *ActionExecutor) Execute(ctx context.Context, ticketID, activityID, acti
 		return fmt.Errorf("action %d not found: %w", actionID, err)
 	}
 
-	var config ActionConfig
-	if err := json.Unmarshal([]byte(action.ConfigJSON), &config); err != nil {
+	return e.ExecuteWithConfig(ctx, ticketID, activityID, actionID, action.ActionType, action.ConfigJSON)
+}
+
+func (e *ActionExecutor) ExecuteWithConfig(ctx context.Context, ticketID, activityID, actionID uint, actionType, configJSON string) error {
+	normalized, err := domain.NormalizeServiceActionConfig(actionType, domain.JSONField(configJSON))
+	if err != nil {
 		return fmt.Errorf("invalid action config: %w", err)
 	}
-	if config.Method == "" {
-		config.Method = "POST"
-	}
-	if config.Timeout == 0 {
-		config.Timeout = 30
-	}
-	if config.Retries == 0 {
-		config.Retries = 3
+	var config domain.ServiceActionHTTPConfig
+	if err := json.Unmarshal(normalized, &config); err != nil {
+		return fmt.Errorf("invalid action config: %w", err)
 	}
 
 	// Load ticket for template variable substitution
@@ -67,7 +57,7 @@ func (e *ActionExecutor) Execute(ctx context.Context, ticketID, activityID, acti
 	}
 
 	// Replace template variables in body
-	body := replaceTemplateVars(config.Body, &ticket)
+	body := replaceTemplateVars(actionConfigBody(config.Body), &ticket)
 
 	// Execute with retry
 	var lastErr error
@@ -121,7 +111,7 @@ func (e *ActionExecutor) Execute(ctx context.Context, ticketID, activityID, acti
 	return lastErr
 }
 
-func (e *ActionExecutor) doHTTPRequest(ctx context.Context, config ActionConfig, body string) (int, string, error) {
+func (e *ActionExecutor) doHTTPRequest(ctx context.Context, config domain.ServiceActionHTTPConfig, body string) (int, string, error) {
 	client := &http.Client{Timeout: time.Duration(config.Timeout) * time.Second}
 
 	var reqBody io.Reader
@@ -176,6 +166,17 @@ func replaceTemplateVars(template string, ticket *ticketModel) string {
 	return strings.NewReplacer(pairs...).Replace(template)
 }
 
+func actionConfigBody(raw json.RawMessage) string {
+	if len(raw) == 0 || string(raw) == "null" {
+		return ""
+	}
+	var s string
+	if err := json.Unmarshal(raw, &s); err == nil {
+		return s
+	}
+	return string(raw)
+}
+
 // --- DB model for action execution records ---
 
 type serviceActionModel struct {
@@ -184,6 +185,7 @@ type serviceActionModel struct {
 	Code       string `gorm:"column:code"`
 	ServiceID  uint   `gorm:"column:service_id"`
 	IsActive   bool   `gorm:"column:is_active"`
+	ActionType string `gorm:"column:action_type"`
 	ConfigJSON string `gorm:"column:config_json;type:text"`
 }
 

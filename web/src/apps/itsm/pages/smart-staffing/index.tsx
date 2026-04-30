@@ -59,12 +59,27 @@ function EmptyAgentsAlert() {
     <Alert>
       <AlertDescription className="flex items-center justify-between gap-4">
         <span>{t("engineConfig.noAgents")}</span>
-        <Button variant="link" size="sm" className="h-auto p-0" onClick={() => navigate("/ai/agents")}>
+        <Button variant="link" size="sm" className="h-auto p-0" onClick={() => navigate("/ai/assistant-agents")}>
           {t("engineConfig.goToAgents")}
           <ExternalLink className="ml-1 h-3 w-3" />
         </Button>
       </AlertDescription>
     </Alert>
+  )
+}
+
+function ConfigErrorState({ message, onRetry }: { message: string; onRetry: () => void }) {
+  const { t } = useTranslation(["itsm", "common"])
+  return (
+    <div className="flex items-center justify-center py-12">
+      <div className="workspace-surface w-full max-w-xl rounded-lg p-6 text-center">
+        <p className="text-sm font-medium text-foreground">{t("itsm:engineConfig.configLoadErrorTitle")}</p>
+        <p className="mt-2 text-sm text-muted-foreground">{message}</p>
+        <Button type="button" variant="outline" className="mt-4" onClick={onRetry}>
+          {t("common:refresh")}
+        </Button>
+      </div>
+    </div>
   )
 }
 
@@ -255,10 +270,14 @@ function SmartStaffingForm({ config }: { config: SmartStaffingConfig }) {
 export function Component() {
   const { t } = useTranslation("common")
 
-  const { data: config, isLoading } = useQuery({
+  const { data: config, error, isError, isLoading, refetch } = useQuery({
     queryKey: ["itsm-smart-staffing-config"],
     queryFn: fetchSmartStaffingConfig,
   })
+
+  if (isError) {
+    return <ConfigErrorState message={error.message} onRetry={() => { void refetch() }} />
+  }
 
   if (isLoading || !config) {
     return (

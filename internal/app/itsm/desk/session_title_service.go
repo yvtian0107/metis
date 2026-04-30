@@ -56,30 +56,48 @@ func (s *SessionTitleService) Generate(ctx context.Context, _ uint, _ uint, agen
 	if timeoutSec <= 0 {
 		timeoutSec = 30
 	}
-	callCtx, cancel := context.WithTimeout(ctx, time.Duration(timeoutSec)*time.Second)
-	defer cancel()
-
 	temp := float32(runtimeCfg.Temperature)
-	resp, err := client.Chat(callCtx, llm.ChatRequest{
-		Model: runtimeCfg.Model,
-		Messages: []llm.Message{
-			{Role: llm.RoleSystem, Content: runtimeCfg.SystemPrompt},
-			{Role: llm.RoleUser, Content: fmt.Sprintf("用户首条问题：%s\n\n请输出会话标题。", firstUserMessage)},
-		},
-		Temperature: &temp,
-		MaxTokens:   runtimeCfg.MaxTokens,
-	})
-	if err != nil {
-		return "", true, err
+	maxRetries := runtimeCfg.MaxRetries
+	if maxRetries < 0 {
+		maxRetries = 0
 	}
-	title := normalizeSessionTitle(resp.Content)
-	if title == "" {
-		return "", true, fmt.Errorf("标题生成结果为空")
+	var lastErr error
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		callCtx, cancel := context.WithTimeout(ctx, time.Duration(timeoutSec)*time.Second)
+		resp, err := client.Chat(callCtx, llm.ChatRequest{
+			Model: runtimeCfg.Model,
+			Messages: []llm.Message{
+				{Role: llm.RoleSystem, Content: runtimeCfg.SystemPrompt},
+				{Role: llm.RoleUser, Content: fmt.Sprintf("用户首条问题：%s\n\n请输出会话标题。", firstUserMessage)},
+			},
+			Temperature: &temp,
+			MaxTokens:   runtimeCfg.MaxTokens,
+		})
+		cancel()
+		if err != nil {
+			lastErr = err
+			if attempt < maxRetries {
+				continue
+			}
+			return "", true, lastErr
+		}
+		title := normalizeSessionTitle(resp.Content)
+		if title == "" {
+			lastErr = fmt.Errorf("标题生成结果为空")
+			if attempt < maxRetries {
+				continue
+			}
+			return "", true, lastErr
+		}
+		if len(title) > 100 {
+			title = title[:100] + "..."
+		}
+		return title, true, nil
 	}
-	if len(title) > 100 {
-		title = title[:100] + "..."
+	if lastErr != nil {
+		return "", true, lastErr
 	}
-	return title, true, nil
+	return "", true, fmt.Errorf("标题生成结果为空")
 }
 
 func normalizeSessionTitle(raw string) string {

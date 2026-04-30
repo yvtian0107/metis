@@ -33,8 +33,18 @@ func (r *KnowledgeDocRepo) GetByID(id uint) (*ServiceKnowledgeDocument, error) {
 	return &doc, err
 }
 
+func (r *KnowledgeDocRepo) GetByServiceAndID(serviceID, id uint) (*ServiceKnowledgeDocument, error) {
+	var doc ServiceKnowledgeDocument
+	err := r.db.Where("service_id = ? AND id = ?", serviceID, id).First(&doc).Error
+	return &doc, err
+}
+
 func (r *KnowledgeDocRepo) Delete(id uint) error {
 	return r.db.Delete(&ServiceKnowledgeDocument{}, id).Error
+}
+
+func (r *KnowledgeDocRepo) DeleteByService(serviceID, id uint) error {
+	return r.db.Where("service_id = ? AND id = ?", serviceID, id).Delete(&ServiceKnowledgeDocument{}).Error
 }
 
 func (r *KnowledgeDocRepo) UpdateParseResult(id uint, status, parsedText, parseError string) error {

@@ -28,6 +28,14 @@ func (r *ServiceActionRepo) FindByID(id uint) (*ServiceAction, error) {
 	return &a, nil
 }
 
+func (r *ServiceActionRepo) FindByServiceAndID(serviceID, id uint) (*ServiceAction, error) {
+	var a ServiceAction
+	if err := r.db.Where("service_id = ? AND id = ?", serviceID, id).First(&a).Error; err != nil {
+		return nil, err
+	}
+	return &a, nil
+}
+
 func (r *ServiceActionRepo) FindByServiceAndCode(serviceID uint, code string) (*ServiceAction, error) {
 	var a ServiceAction
 	if err := r.db.Where("service_id = ? AND code = ?", serviceID, code).First(&a).Error; err != nil {
@@ -40,8 +48,16 @@ func (r *ServiceActionRepo) Update(id uint, updates map[string]any) error {
 	return r.db.Model(&ServiceAction{}).Where("id = ?", id).Updates(updates).Error
 }
 
+func (r *ServiceActionRepo) UpdateByService(serviceID, id uint, updates map[string]any) error {
+	return r.db.Model(&ServiceAction{}).Where("service_id = ? AND id = ?", serviceID, id).Updates(updates).Error
+}
+
 func (r *ServiceActionRepo) Delete(id uint) error {
 	return r.db.Delete(&ServiceAction{}, id).Error
+}
+
+func (r *ServiceActionRepo) DeleteByService(serviceID, id uint) error {
+	return r.db.Where("service_id = ? AND id = ?", serviceID, id).Delete(&ServiceAction{}).Error
 }
 
 func (r *ServiceActionRepo) ListByService(serviceID uint) ([]ServiceAction, error) {

@@ -12,6 +12,7 @@ type ticketModel struct {
 	Status                string     `gorm:"column:status"`
 	Outcome               string     `gorm:"column:outcome"`
 	ServiceID             uint       `gorm:"column:service_id"`
+	ServiceVersionID      *uint      `gorm:"column:service_version_id"`
 	EngineType            string     `gorm:"column:engine_type"`
 	WorkflowJSON          string     `gorm:"column:workflow_json;type:text"`
 	CurrentActivityID     *uint      `gorm:"column:current_activity_id"`

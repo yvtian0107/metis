@@ -231,11 +231,12 @@ func (s *EngineConfigService) UpdateSmartStaffingConfig(req *UpdateSmartStaffing
 		return err
 	}
 
-	s.setConfigValue(SmartTicketIntakeAgentKey, strconv.FormatUint(uint64(req.Posts.Intake.AgentID), 10))
-	s.setConfigValue(SmartTicketDecisionAgentKey, strconv.FormatUint(uint64(req.Posts.Decision.AgentID), 10))
-	s.setConfigValue(SmartTicketSLAAssuranceAgentKey, strconv.FormatUint(uint64(req.Posts.SLAAssurance.AgentID), 10))
-	s.setConfigValue(SmartTicketDecisionModeKey, req.Posts.Decision.Mode)
-	return nil
+	return s.setConfigValues([]configValue{
+		{key: SmartTicketIntakeAgentKey, value: strconv.FormatUint(uint64(req.Posts.Intake.AgentID), 10)},
+		{key: SmartTicketDecisionAgentKey, value: strconv.FormatUint(uint64(req.Posts.Decision.AgentID), 10)},
+		{key: SmartTicketSLAAssuranceAgentKey, value: strconv.FormatUint(uint64(req.Posts.SLAAssurance.AgentID), 10)},
+		{key: SmartTicketDecisionModeKey, value: req.Posts.Decision.Mode},
+	})
 }
 
 func (s *EngineConfigService) GetEngineSettingsConfig() (*EngineSettingsConfig, error) {
@@ -312,24 +313,25 @@ func (s *EngineConfigService) UpdateEngineSettingsConfig(req *UpdateEngineSettin
 		}
 	}
 
-	s.setConfigValue(SmartTicketPathModelKey, strconv.FormatUint(uint64(req.Runtime.PathBuilder.ModelID), 10))
-	s.setConfigValue(SmartTicketPathTemperatureKey, formatFloat(req.Runtime.PathBuilder.Temperature))
-	s.setConfigValue(SmartTicketPathMaxRetriesKey, strconv.Itoa(req.Runtime.PathBuilder.MaxRetries))
-	s.setConfigValue(SmartTicketPathTimeoutKey, strconv.Itoa(req.Runtime.PathBuilder.TimeoutSeconds))
-	s.setConfigValue(SmartTicketPathSystemPromptKey, strings.TrimSpace(req.Runtime.PathBuilder.SystemPrompt))
-	s.setConfigValue(SmartTicketSessionTitleModelKey, strconv.FormatUint(uint64(req.Runtime.TitleBuilder.ModelID), 10))
-	s.setConfigValue(SmartTicketSessionTitleTemperatureKey, formatFloat(req.Runtime.TitleBuilder.Temperature))
-	s.setConfigValue(SmartTicketSessionTitleMaxRetriesKey, strconv.Itoa(req.Runtime.TitleBuilder.MaxRetries))
-	s.setConfigValue(SmartTicketSessionTitleTimeoutKey, strconv.Itoa(req.Runtime.TitleBuilder.TimeoutSeconds))
-	s.setConfigValue(SmartTicketSessionTitlePromptKey, strings.TrimSpace(req.Runtime.TitleBuilder.SystemPrompt))
-	s.setConfigValue(SmartTicketPublishHealthModelKey, strconv.FormatUint(uint64(req.Runtime.HealthChecker.ModelID), 10))
-	s.setConfigValue(SmartTicketPublishHealthTemperatureKey, formatFloat(req.Runtime.HealthChecker.Temperature))
-	s.setConfigValue(SmartTicketPublishHealthMaxRetriesKey, strconv.Itoa(req.Runtime.HealthChecker.MaxRetries))
-	s.setConfigValue(SmartTicketPublishHealthTimeoutKey, strconv.Itoa(req.Runtime.HealthChecker.TimeoutSeconds))
-	s.setConfigValue(SmartTicketPublishHealthPromptKey, strings.TrimSpace(req.Runtime.HealthChecker.SystemPrompt))
-	s.setConfigValue(SmartTicketGuardAuditLevelKey, req.Runtime.Guard.AuditLevel)
-	s.setConfigValue(SmartTicketGuardFallbackKey, strconv.FormatUint(uint64(req.Runtime.Guard.FallbackAssignee), 10))
-	return nil
+	return s.setConfigValues([]configValue{
+		{key: SmartTicketPathModelKey, value: strconv.FormatUint(uint64(req.Runtime.PathBuilder.ModelID), 10)},
+		{key: SmartTicketPathTemperatureKey, value: formatFloat(req.Runtime.PathBuilder.Temperature)},
+		{key: SmartTicketPathMaxRetriesKey, value: strconv.Itoa(req.Runtime.PathBuilder.MaxRetries)},
+		{key: SmartTicketPathTimeoutKey, value: strconv.Itoa(req.Runtime.PathBuilder.TimeoutSeconds)},
+		{key: SmartTicketPathSystemPromptKey, value: strings.TrimSpace(req.Runtime.PathBuilder.SystemPrompt)},
+		{key: SmartTicketSessionTitleModelKey, value: strconv.FormatUint(uint64(req.Runtime.TitleBuilder.ModelID), 10)},
+		{key: SmartTicketSessionTitleTemperatureKey, value: formatFloat(req.Runtime.TitleBuilder.Temperature)},
+		{key: SmartTicketSessionTitleMaxRetriesKey, value: strconv.Itoa(req.Runtime.TitleBuilder.MaxRetries)},
+		{key: SmartTicketSessionTitleTimeoutKey, value: strconv.Itoa(req.Runtime.TitleBuilder.TimeoutSeconds)},
+		{key: SmartTicketSessionTitlePromptKey, value: strings.TrimSpace(req.Runtime.TitleBuilder.SystemPrompt)},
+		{key: SmartTicketPublishHealthModelKey, value: strconv.FormatUint(uint64(req.Runtime.HealthChecker.ModelID), 10)},
+		{key: SmartTicketPublishHealthTemperatureKey, value: formatFloat(req.Runtime.HealthChecker.Temperature)},
+		{key: SmartTicketPublishHealthMaxRetriesKey, value: strconv.Itoa(req.Runtime.HealthChecker.MaxRetries)},
+		{key: SmartTicketPublishHealthTimeoutKey, value: strconv.Itoa(req.Runtime.HealthChecker.TimeoutSeconds)},
+		{key: SmartTicketPublishHealthPromptKey, value: strings.TrimSpace(req.Runtime.HealthChecker.SystemPrompt)},
+		{key: SmartTicketGuardAuditLevelKey, value: req.Runtime.Guard.AuditLevel},
+		{key: SmartTicketGuardFallbackKey, value: strconv.FormatUint(uint64(req.Runtime.Guard.FallbackAssignee), 10)},
+	})
 }
 
 func (s *EngineConfigService) PathBuilderRuntimeConfig() (LLMEngineRuntimeConfig, error) {
@@ -558,13 +560,30 @@ func (s *EngineConfigService) getConfigFloat(key string, defaultVal float64) flo
 	return n
 }
 
-func (s *EngineConfigService) setConfigValue(key, value string) {
-	cfg, err := s.sysConfigRepo.Get(key)
-	if err != nil {
-		cfg = &model.SystemConfig{Key: key}
+type configValue struct {
+	key   string
+	value string
+}
+
+func (s *EngineConfigService) setConfigValues(values []configValue) error {
+	return s.db.Transaction(func(tx *gorm.DB) error {
+		for _, item := range values {
+			if err := s.setConfigValueTx(tx, item.key, item.value); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+func (s *EngineConfigService) setConfigValueTx(tx *gorm.DB, key, value string) error {
+	cfg := &model.SystemConfig{Key: key}
+	result := tx.Where("\"key\" = ?", key).Limit(1).Find(cfg)
+	if result.Error != nil {
+		return result.Error
 	}
 	cfg.Value = value
-	_ = s.sysConfigRepo.Set(cfg)
+	return tx.Save(cfg).Error
 }
 
 func (s *EngineConfigService) buildSmartStaffingHealth(cfg *SmartStaffingConfig) EngineHealth {

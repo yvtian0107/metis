@@ -79,6 +79,51 @@ func TestAgenticSystemPromptGuardsServerAccessLexicalRouting(t *testing.T) {
 	}
 }
 
+func TestLooksLikeDBBackupWhitelistSpecMatchesNaturalSpec(t *testing.T) {
+	spec := `员工在 IT 服务台申请生产数据库备份白名单临时放行时，服务台需要确认目标数据库、发起备份访问的来源 IP、白名单放行时间窗，以及这次临时放行的申请原因。
+申请资料收齐后，系统会先做一次白名单参数预检，确认数据库、来源 IP、放行窗口和申请原因满足放行前置条件。预检通过后，交给信息部数据库管理员处理。
+数据库管理员完成处理后，系统执行备份白名单放行；放行成功后流程结束。驳回时不进入补充或返工，流程按驳回结果结束。`
+
+	if !looksLikeDBBackupWhitelistSpec(spec) {
+		t.Fatalf("expected natural db backup whitelist spec to enable deterministic guard")
+	}
+}
+
+func TestLooksLikeBossSerialChangeSpecMatchesNaturalSpec(t *testing.T) {
+	spec := `员工在 IT 服务台提交高风险变更协同申请时，服务台需要确认申请主题、申请类别、风险等级、期望完成时间、变更窗口、影响范围、回滚要求、影响模块，以及每一项变更明细。
+申请类别包括生产变更、访问授权和应急支持；风险等级包括低、中、高；回滚要求包括需要和不需要；影响模块可选择网关、支付、监控和订单。变更明细需要说明系统、资源、权限级别、生效时段和变更理由，权限级别包括只读和读写。
+申请提交后，先交给总部处理人处理；总部处理人完成后，再交给信息部运维管理员处理。运维管理员完成处理后流程结束。`
+
+	if !looksLikeBossSerialChangeSpec(spec) {
+		t.Fatalf("expected natural boss serial change spec to enable deterministic guard")
+	}
+}
+
+func TestTicketActionSucceededAcceptsLegacyDBBackupActionCode(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	if err := db.AutoMigrate(&serviceActionModel{}, &actionExecutionModel{}); err != nil {
+		t.Fatalf("migrate action tables: %v", err)
+	}
+	action := serviceActionModel{ID: 7, Name: "旧预检", Code: "backup_whitelist_precheck", ServiceID: 3, IsActive: true}
+	if err := db.Create(&action).Error; err != nil {
+		t.Fatalf("create legacy action: %v", err)
+	}
+	if err := db.Create(&actionExecutionModel{TicketID: 42, ServiceActionID: action.ID, Status: "success"}).Error; err != nil {
+		t.Fatalf("create action execution: %v", err)
+	}
+
+	ok, err := ticketActionSucceeded(db, 42, "db_backup_whitelist_precheck")
+	if err != nil {
+		t.Fatalf("ticketActionSucceeded: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected canonical db backup action lookup to match legacy successful execution")
+	}
+}
+
 func TestBuildInitialSeedIncludesRejectedActivityPolicy(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
 	if err != nil {
@@ -183,7 +228,7 @@ func (f fakeDecisionDataProvider) GetCurrentActivities(uint) ([]CurrentActivityI
 func (f fakeDecisionDataProvider) GetExecutedActions(uint) ([]ExecutedActionInfo, error) {
 	return f.executed, nil
 }
-func (f fakeDecisionDataProvider) CountActiveServiceActions(uint) (int64, error) {
+func (f fakeDecisionDataProvider) CountActiveServiceActions(uint, uint) (int64, error) {
 	return f.totalActions, nil
 }
 func (f fakeDecisionDataProvider) GetCurrentAssignment(uint) (*CurrentAssignmentInfo, error) {
@@ -213,10 +258,10 @@ func (f fakeDecisionDataProvider) CountTicketActivities(uint) (int64, error) {
 func (f fakeDecisionDataProvider) GetSLAData(uint) (*SLATicketData, error) {
 	return nil, nil
 }
-func (f fakeDecisionDataProvider) ListActiveServiceActions(uint) ([]ServiceActionRow, error) {
+func (f fakeDecisionDataProvider) ListActiveServiceActions(uint, uint) ([]ServiceActionRow, error) {
 	return nil, nil
 }
-func (f fakeDecisionDataProvider) GetServiceAction(uint, uint) (*ServiceActionRow, error) {
+func (f fakeDecisionDataProvider) GetServiceAction(uint, uint, uint) (*ServiceActionRow, error) {
 	return nil, nil
 }
 func (f fakeDecisionDataProvider) ResolveForTool(*ParticipantResolver, uint, json.RawMessage) ([]uint, error) {

@@ -88,6 +88,9 @@ func (a *ITSMApp) BuildAgentRuntimeContext(ctx context.Context, _ string, sessio
 		"draft_form_data":         state.DraftFormData,
 		"draft_version":           state.DraftVersion,
 		"confirmed_draft_version": state.ConfirmedDraftVersion,
+		"missing_fields":          state.MissingFields,
+		"asked_fields":            state.AskedFields,
+		"min_decision_ready":      state.MinDecisionReady,
 		"next_expected_action":    tools.NextExpectedAction(state),
 	}
 	b, err := json.MarshalIndent(payload, "", "  ")
@@ -108,6 +111,7 @@ func (a *ITSMApp) Models() []any {
 		// Configuration models
 		&domain.ServiceCatalog{},
 		&domain.ServiceDefinition{},
+		&domain.ServiceDefinitionVersion{},
 		&domain.ServiceAction{},
 		&domain.Priority{},
 		&domain.SLATemplate{},
@@ -291,6 +295,7 @@ func (a *ITSMApp) Routes(api *gin.RouterGroup) {
 		// Service Catalogs
 		g.POST("/catalogs", catalogH.Create)
 		g.GET("/catalogs/tree", catalogH.Tree)
+		g.GET("/catalogs/service-counts", catalogH.ServiceCounts)
 		g.PUT("/catalogs/:id", catalogH.Update)
 		g.DELETE("/catalogs/:id", catalogH.Delete)
 
@@ -351,6 +356,7 @@ func (a *ITSMApp) Routes(api *gin.RouterGroup) {
 		g.GET("/tickets/approvals/history", ticketH.ApprovalHistory)
 		g.GET("/tickets/monitor", ticketH.Monitor)
 		g.GET("/tickets/decision-quality", ticketH.DecisionQuality)
+		g.POST("/tickets", ticketH.Create)
 		g.GET("/tickets", ticketH.List)
 		g.GET("/tickets/:id", ticketH.Get)
 		g.PUT("/tickets/:id/assign", ticketH.Assign)

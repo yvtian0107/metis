@@ -29,14 +29,15 @@ var (
 
 // escalationRuleModel is the engine-internal projection of itsm_escalation_rules.
 type escalationRuleModel struct {
-	ID           uint   `gorm:"primaryKey"`
-	SLAID        uint   `gorm:"column:sla_id"`
-	TriggerType  string `gorm:"column:trigger_type"`
-	Level        int    `gorm:"column:level"`
-	WaitMinutes  int    `gorm:"column:wait_minutes"`
-	ActionType   string `gorm:"column:action_type"`
-	TargetConfig string `gorm:"column:target_config;type:text"`
-	IsActive     bool   `gorm:"column:is_active"`
+	ID           uint           `gorm:"primaryKey"`
+	SLAID        uint           `gorm:"column:sla_id"`
+	TriggerType  string         `gorm:"column:trigger_type"`
+	Level        int            `gorm:"column:level"`
+	WaitMinutes  int            `gorm:"column:wait_minutes"`
+	ActionType   string         `gorm:"column:action_type"`
+	TargetConfig string         `gorm:"column:target_config;type:text"`
+	IsActive     bool           `gorm:"column:is_active"`
+	DeletedAt    gorm.DeletedAt `gorm:"column:deleted_at;index"`
 }
 
 func (escalationRuleModel) TableName() string { return "itsm_escalation_rules" }
@@ -78,53 +79,67 @@ func HandleSLACheck(db *gorm.DB, configProvider SLAAssuranceConfigProvider, exec
 
 		slog.Info("sla-check: scanning tickets", "count", len(tickets))
 
+		var ticketErrs []error
 		for i := range tickets {
 			t := &tickets[i]
-			checkTicketSLA(ctx, db, t, now, configProvider, executor, resolver, notifier)
+			if err := checkTicketSLA(ctx, db, t, now, configProvider, executor, resolver, notifier); err != nil {
+				wrapped := fmt.Errorf("ticket %d(%s): %w", t.ID, t.Code, err)
+				slog.Error("sla-check: failed to check ticket", "ticketID", t.ID, "code", t.Code, "error", err)
+				ticketErrs = append(ticketErrs, wrapped)
+			}
 		}
 
-		return nil
+		return errors.Join(ticketErrs...)
 	}
 }
 
 // checkTicketSLA checks a single ticket for SLA breaches and executes escalation.
-func checkTicketSLA(ctx context.Context, db *gorm.DB, t *ticketModel, now time.Time, configProvider SLAAssuranceConfigProvider, executor app.AIDecisionExecutor, resolver *ParticipantResolver, notifier NotificationSender) {
-	if t.SLAResponseDeadline != nil && now.After(*t.SLAResponseDeadline) {
-		if t.SLAStatus != slaBreachedResponse && t.SLAStatus != slaBreachedResolve {
-			db.Model(&ticketModel{}).Where("id = ?", t.ID).Update("sla_status", slaBreachedResponse)
-			t.SLAStatus = slaBreachedResponse
-			slog.Warn("sla-check: response SLA breached", "ticketID", t.ID, "code", t.Code,
-				"deadline", t.SLAResponseDeadline.Format(time.RFC3339))
-			executeEscalation(ctx, db, t, "response_timeout", now, configProvider, executor, resolver, notifier)
-		}
-	}
+func checkTicketSLA(ctx context.Context, db *gorm.DB, t *ticketModel, now time.Time, configProvider SLAAssuranceConfigProvider, executor app.AIDecisionExecutor, resolver *ParticipantResolver, notifier NotificationSender) error {
+	responseBreached := t.SLAResponseDeadline != nil && now.After(*t.SLAResponseDeadline)
+	resolutionBreached := t.SLAResolutionDeadline != nil && now.After(*t.SLAResolutionDeadline)
 
-	if t.SLAResolutionDeadline != nil && now.After(*t.SLAResolutionDeadline) {
+	if resolutionBreached {
 		if t.SLAStatus != slaBreachedResolve {
-			db.Model(&ticketModel{}).Where("id = ?", t.ID).Update("sla_status", slaBreachedResolve)
+			if err := recordSLABreach(db, t, slaBreachedResolve, "sla_resolution_breached", "SLA 解决时限已超时"); err != nil {
+				return err
+			}
 			t.SLAStatus = slaBreachedResolve
 			slog.Warn("sla-check: resolution SLA breached", "ticketID", t.ID, "code", t.Code,
 				"deadline", t.SLAResolutionDeadline.Format(time.RFC3339))
-			executeEscalation(ctx, db, t, "resolution_timeout", now, configProvider, executor, resolver, notifier)
+		}
+	} else if responseBreached {
+		if t.SLAStatus != slaBreachedResponse {
+			if err := recordSLABreach(db, t, slaBreachedResponse, "sla_response_breached", "SLA 响应时限已超时"); err != nil {
+				return err
+			}
+			t.SLAStatus = slaBreachedResponse
+			slog.Warn("sla-check: response SLA breached", "ticketID", t.ID, "code", t.Code,
+				"deadline", t.SLAResponseDeadline.Format(time.RFC3339))
 		}
 	}
+
+	if responseBreached {
+		if err := executeEscalation(ctx, db, t, "response_timeout", now, configProvider, executor, resolver, notifier); err != nil {
+			return err
+		}
+	}
+	if resolutionBreached {
+		if err := executeEscalation(ctx, db, t, "resolution_timeout", now, configProvider, executor, resolver, notifier); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // executeEscalation loads and executes matching escalation rules for a ticket's SLA breach.
-func executeEscalation(ctx context.Context, db *gorm.DB, t *ticketModel, triggerType string, now time.Time, configProvider SLAAssuranceConfigProvider, executor app.AIDecisionExecutor, resolver *ParticipantResolver, notifier NotificationSender) {
-	slaID, ok := loadTicketSLAID(db, t.ID)
-	if !ok {
-		slog.Warn("sla-check: ticket has no SLA template, skipping escalation", "ticketID", t.ID)
-		return
-	}
-
-	var rules []escalationRuleModel
-	err := db.Where("sla_id = ? AND trigger_type = ? AND is_active = ?", slaID, triggerType, true).
-		Order("level ASC").
-		Find(&rules).Error
+func executeEscalation(ctx context.Context, db *gorm.DB, t *ticketModel, triggerType string, now time.Time, configProvider SLAAssuranceConfigProvider, executor app.AIDecisionExecutor, resolver *ParticipantResolver, notifier NotificationSender) error {
+	rules, err := loadTicketEscalationRules(db, t.ID, triggerType)
 	if err != nil {
-		slog.Error("sla-check: failed to load escalation rules", "error", err, "ticketID", t.ID)
-		return
+		return err
+	}
+	if len(rules) == 0 {
+		slog.Warn("sla-check: ticket has no SLA template, skipping escalation", "ticketID", t.ID)
+		return nil
 	}
 
 	var deadline *time.Time
@@ -134,7 +149,7 @@ func executeEscalation(ctx context.Context, db *gorm.DB, t *ticketModel, trigger
 		deadline = t.SLAResolutionDeadline
 	}
 	if deadline == nil {
-		return
+		return nil
 	}
 
 	for _, rule := range rules {
@@ -173,18 +188,55 @@ func executeEscalation(ctx context.Context, db *gorm.DB, t *ticketModel, trigger
 			recordEscalationPending(db, t, &rule, triggerType, agentID, agentName, fmt.Sprintf("SLA 保障岗运行失败，升级动作待人工处理：%v", err))
 		}
 	}
+	return nil
 }
 
-func loadTicketSLAID(db *gorm.DB, ticketID uint) (uint, bool) {
-	var row struct{ SLAID *uint }
-	if err := db.Table("itsm_tickets").
-		Select("itsm_service_definitions.sla_id").
-		Joins("JOIN itsm_service_definitions ON itsm_service_definitions.id = itsm_tickets.service_id").
-		Where("itsm_tickets.id = ?", ticketID).
-		Scan(&row).Error; err != nil || row.SLAID == nil || *row.SLAID == 0 {
-		return 0, false
+func loadTicketEscalationRules(db *gorm.DB, ticketID uint, triggerType string) ([]escalationRuleModel, error) {
+	var row struct {
+		ServiceVersionID    *uint
+		SLAID               *uint
+		EscalationRulesJSON string
 	}
-	return *row.SLAID, true
+	if err := db.Table("itsm_tickets").
+		Select("itsm_tickets.service_version_id, itsm_service_definition_versions.sla_id, itsm_service_definition_versions.escalation_rules_json").
+		Joins("JOIN itsm_service_definition_versions ON itsm_service_definition_versions.id = itsm_tickets.service_version_id").
+		Where("itsm_tickets.id = ?", ticketID).
+		Scan(&row).Error; err != nil {
+		return nil, err
+	}
+	if row.ServiceVersionID == nil || row.SLAID == nil || *row.SLAID == 0 || strings.TrimSpace(row.EscalationRulesJSON) == "" {
+		return nil, nil
+	}
+	var snapshots []struct {
+		ID           uint            `json:"id"`
+		SLAID        uint            `json:"slaId"`
+		TriggerType  string          `json:"triggerType"`
+		Level        int             `json:"level"`
+		WaitMinutes  int             `json:"waitMinutes"`
+		ActionType   string          `json:"actionType"`
+		TargetConfig json.RawMessage `json:"targetConfig"`
+		IsActive     bool            `json:"isActive"`
+	}
+	if err := json.Unmarshal([]byte(row.EscalationRulesJSON), &snapshots); err != nil {
+		return nil, err
+	}
+	rules := make([]escalationRuleModel, 0, len(snapshots))
+	for _, snapshot := range snapshots {
+		if !snapshot.IsActive || snapshot.TriggerType != triggerType {
+			continue
+		}
+		rules = append(rules, escalationRuleModel{
+			ID:           snapshot.ID,
+			SLAID:        snapshot.SLAID,
+			TriggerType:  snapshot.TriggerType,
+			Level:        snapshot.Level,
+			WaitMinutes:  snapshot.WaitMinutes,
+			ActionType:   snapshot.ActionType,
+			TargetConfig: string(snapshot.TargetConfig),
+			IsActive:     snapshot.IsActive,
+		})
+	}
+	return rules, nil
 }
 
 func loadAgentName(db *gorm.DB, agentID uint) string {
@@ -325,7 +377,24 @@ func executeEscalationAction(ctx context.Context, db *gorm.DB, t *ticketModel, r
 			return nil
 		}
 		newAssignee := candidateIDs[0]
-		if err := db.Model(&ticketModel{}).Where("id = ?", t.ID).Update("assignee_id", newAssignee).Error; err != nil {
+		if t.CurrentActivityID == nil || *t.CurrentActivityID == 0 {
+			recordEscalationResult(db, t, rule, triggerType, agentID, agentName, "SLA 升级转派失败：工单没有当前活动", reasoning, map[string]any{
+				"candidate_user_ids": candidateIDs,
+				"selected_user_id":   newAssignee,
+				"warnings":           warnings,
+			})
+			return nil
+		}
+		if err := reassignCurrentActivity(db, t, newAssignee); err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				recordEscalationResult(db, t, rule, triggerType, agentID, agentName, "SLA 升级转派失败：当前任务无可改派处理人", reasoning, map[string]any{
+					"activity_id":        *t.CurrentActivityID,
+					"candidate_user_ids": candidateIDs,
+					"selected_user_id":   newAssignee,
+					"warnings":           warnings,
+				})
+				return nil
+			}
 			return err
 		}
 		slog.Info("sla-check: escalation reassign", "ticketID", t.ID, "level", rule.Level, "newAssignee", newAssignee)
@@ -368,6 +437,29 @@ func executeEscalationAction(ctx context.Context, db *gorm.DB, t *ticketModel, r
 		slog.Warn("sla-check: unknown escalation action", "actionType", rule.ActionType, "ticketID", t.ID)
 		return fmt.Errorf("未知 SLA 升级动作: %s", rule.ActionType)
 	}
+}
+
+func reassignCurrentActivity(db *gorm.DB, t *ticketModel, newAssignee uint) error {
+	return db.Transaction(func(tx *gorm.DB) error {
+		updates := map[string]any{
+			"user_id":          newAssignee,
+			"assignee_id":      newAssignee,
+			"participant_type": "user",
+			"position_id":      nil,
+			"department_id":    nil,
+		}
+		result := tx.Model(&assignmentModel{}).
+			Where("ticket_id = ? AND activity_id = ? AND status = ? AND is_current = ?",
+				t.ID, *t.CurrentActivityID, "pending", true).
+			Updates(updates)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return gorm.ErrRecordNotFound
+		}
+		return tx.Model(&ticketModel{}).Where("id = ?", t.ID).Update("assignee_id", newAssignee).Error
+	})
 }
 
 func recordEscalationPending(db *gorm.DB, t *ticketModel, rule *escalationRuleModel, triggerType string, agentID uint, agentName string, reasoning string) {
@@ -468,6 +560,38 @@ func renderSLANotificationTemplate(template string, t *ticketModel) string {
 		result = strings.ReplaceAll(result, key, value)
 	}
 	return result
+}
+
+func recordSLABreach(db *gorm.DB, t *ticketModel, status string, eventType string, message string) error {
+	deadline := ""
+	if eventType == "sla_response_breached" && t.SLAResponseDeadline != nil {
+		deadline = t.SLAResponseDeadline.Format(time.RFC3339)
+	}
+	if eventType == "sla_resolution_breached" && t.SLAResolutionDeadline != nil {
+		deadline = t.SLAResolutionDeadline.Format(time.RFC3339)
+	}
+	details, err := json.Marshal(map[string]any{
+		"ticket_id":           t.ID,
+		"ticket_code":         t.Code,
+		"previous_sla_status": t.SLAStatus,
+		"sla_status":          status,
+		"deadline":            deadline,
+	})
+	if err != nil {
+		return err
+	}
+	return db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&ticketModel{}).Where("id = ?", t.ID).Update("sla_status", status).Error; err != nil {
+			return err
+		}
+		return tx.Create(&timelineModel{
+			TicketID:   t.ID,
+			OperatorID: 0,
+			EventType:  eventType,
+			Message:    message,
+			Details:    string(details),
+		}).Error
+	})
 }
 
 func recordEscalationResult(db *gorm.DB, t *ticketModel, rule *escalationRuleModel, triggerType string, agentID uint, agentName string, message string, reasoning string, extra map[string]any) {

@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -151,6 +152,9 @@ func (e *ClassicEngine) Progress(ctx context.Context, tx *gorm.DB, params Progre
 
 	now := time.Now()
 	if completedAssignment, completed, err := completePendingAssignment(tx, e.resolver, activity.ID, params.OperatorID, params.Outcome, now, params.OperatorPositionIDs, params.OperatorDepartmentIDs, params.OperatorOrgScopeReady); err != nil {
+		if errors.Is(err, ErrNoActiveAssignment) && activityBecameInactive(tx, params.ActivityID) {
+			return ErrActivityNotActive
+		}
 		return err
 	} else if completed && completedAssignment != nil {
 		if completedAssignment.DelegatedFrom != nil {

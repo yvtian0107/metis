@@ -57,12 +57,20 @@ func (h *ServiceActionHandler) Create(c *gin.Context) {
 
 	result, err := h.svc.Create(action)
 	if err != nil {
-		if errors.Is(err, ErrActionCodeExists) {
+		switch {
+		case errors.Is(err, ErrServiceDefNotFound):
+			handler.Fail(c, http.StatusNotFound, err.Error())
+			return
+		case errors.Is(err, ErrInvalidActionConfig):
+			handler.Fail(c, http.StatusBadRequest, err.Error())
+			return
+		case errors.Is(err, ErrActionCodeExists):
 			handler.Fail(c, http.StatusConflict, err.Error())
 			return
+		default:
+			handler.Fail(c, http.StatusInternalServerError, err.Error())
+			return
 		}
-		handler.Fail(c, http.StatusInternalServerError, err.Error())
-		return
 	}
 
 	c.Set("audit_summary", "created service action: "+result.Name)
@@ -78,6 +86,10 @@ func (h *ServiceActionHandler) List(c *gin.Context) {
 
 	items, err := h.svc.ListByService(serviceID)
 	if err != nil {
+		if errors.Is(err, ErrServiceDefNotFound) {
+			handler.Fail(c, http.StatusNotFound, err.Error())
+			return
+		}
 		handler.Fail(c, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -100,6 +112,11 @@ type UpdateServiceActionRequest struct {
 }
 
 func (h *ServiceActionHandler) Update(c *gin.Context) {
+	serviceID, err := ParseID(c)
+	if err != nil {
+		handler.Fail(c, http.StatusBadRequest, "invalid service id")
+		return
+	}
 	actionID, err := ParseParamID(c, "actionId")
 	if err != nil {
 		handler.Fail(c, http.StatusBadRequest, "invalid action id")
@@ -138,11 +155,13 @@ func (h *ServiceActionHandler) Update(c *gin.Context) {
 		updates["is_active"] = *req.IsActive
 	}
 
-	result, err := h.svc.Update(actionID, updates)
+	result, err := h.svc.Update(serviceID, actionID, updates)
 	if err != nil {
 		switch {
-		case errors.Is(err, ErrServiceActionNotFound):
+		case errors.Is(err, ErrServiceDefNotFound), errors.Is(err, ErrServiceActionNotFound):
 			handler.Fail(c, http.StatusNotFound, err.Error())
+		case errors.Is(err, ErrInvalidActionConfig):
+			handler.Fail(c, http.StatusBadRequest, err.Error())
 		case errors.Is(err, ErrActionCodeExists):
 			handler.Fail(c, http.StatusConflict, err.Error())
 		default:
@@ -156,6 +175,11 @@ func (h *ServiceActionHandler) Update(c *gin.Context) {
 }
 
 func (h *ServiceActionHandler) Delete(c *gin.Context) {
+	serviceID, err := ParseID(c)
+	if err != nil {
+		handler.Fail(c, http.StatusBadRequest, "invalid service id")
+		return
+	}
 	actionID, err := ParseParamID(c, "actionId")
 	if err != nil {
 		handler.Fail(c, http.StatusBadRequest, "invalid action id")
@@ -165,8 +189,8 @@ func (h *ServiceActionHandler) Delete(c *gin.Context) {
 	c.Set("audit_action", "itsm.action.delete")
 	c.Set("audit_resource", "service_action")
 
-	if err := h.svc.Delete(actionID); err != nil {
-		if errors.Is(err, ErrServiceActionNotFound) {
+	if err := h.svc.Delete(serviceID, actionID); err != nil {
+		if errors.Is(err, ErrServiceDefNotFound) || errors.Is(err, ErrServiceActionNotFound) {
 			handler.Fail(c, http.StatusNotFound, err.Error())
 			return
 		}

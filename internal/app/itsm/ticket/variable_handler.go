@@ -17,12 +17,14 @@ import (
 
 // VariableHandler exposes process variable APIs.
 type VariableHandler struct {
-	svc *VariableService
+	svc       *VariableService
+	ticketSvc *TicketService
 }
 
 func NewVariableHandler(i do.Injector) (*VariableHandler, error) {
 	svc := do.MustInvoke[*VariableService](i)
-	return &VariableHandler{svc: svc}, nil
+	ticketSvc := do.MustInvoke[*TicketService](i)
+	return &VariableHandler{svc: svc, ticketSvc: ticketSvc}, nil
 }
 
 // List returns all process variables for a ticket.
@@ -31,6 +33,11 @@ func (h *VariableHandler) List(c *gin.Context) {
 	ticketID, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
 		handler.Fail(c, http.StatusBadRequest, "invalid ticket id")
+		return
+	}
+
+	if err := h.ticketSvc.EnsureCanViewTicket(uint(ticketID), currentUserID(c), currentUserRole(c)); err != nil {
+		respondTicketAccessError(c, err)
 		return
 	}
 

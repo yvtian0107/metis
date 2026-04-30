@@ -11,7 +11,7 @@ export function TicketStatusBadge({ ticket }: { ticket: TicketItem }) {
 
   return (
     <Badge variant={status.variant}>
-      {t(`tickets.${status.key}`, { defaultValue: status.label || ticket.status })}
+      {status.key ? t(`tickets.${status.key}`, { defaultValue: status.label }) : status.label}
     </Badge>
   )
 }

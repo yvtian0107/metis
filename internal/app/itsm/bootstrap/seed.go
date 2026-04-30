@@ -1,8 +1,10 @@
 package bootstrap
 
 import (
+	"fmt"
 	"log/slog"
 	. "metis/internal/app/itsm/config"
+	"metis/internal/app/itsm/definition"
 	. "metis/internal/app/itsm/domain"
 	"metis/internal/app/itsm/prompts"
 	"strconv"
@@ -49,7 +51,41 @@ func SeedITSM(db *gorm.DB, enforcer *casbin.Enforcer) error {
 	if err := seedServiceDefinitions(db); err != nil {
 		return err
 	}
+	if err := migrateServiceRuntimeVersions(db); err != nil {
+		return err
+	}
 	return RepairCompletedHumanAssignments(db)
+}
+
+func migrateServiceRuntimeVersions(db *gorm.DB) error {
+	if err := db.AutoMigrate(&ServiceDefinitionVersion{}, &Ticket{}); err != nil {
+		return err
+	}
+	var services []ServiceDefinition
+	if err := db.Find(&services).Error; err != nil {
+		return err
+	}
+	for _, svc := range services {
+		if _, err := definition.GetOrCreateServiceRuntimeVersion(db, svc.ID); err != nil {
+			return err
+		}
+	}
+
+	var tickets []Ticket
+	if err := db.Where("service_version_id IS NULL").Find(&tickets).Error; err != nil {
+		return err
+	}
+	for _, ticket := range tickets {
+		version, err := definition.GetOrCreateServiceRuntimeVersion(db, ticket.ServiceID)
+		if err != nil {
+			return err
+		}
+		if err := db.Model(&Ticket{}).Where("id = ? AND service_version_id IS NULL", ticket.ID).
+			Update("service_version_id", version.ID).Error; err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func MigrateTicketStatusModel(db *gorm.DB) error {
@@ -666,6 +702,7 @@ func seedPolicies(enforcer *casbin.Enforcer) error {
 		// Catalogs
 		{"admin", "/api/v1/itsm/catalogs", "POST"},
 		{"admin", "/api/v1/itsm/catalogs/tree", "GET"},
+		{"admin", "/api/v1/itsm/catalogs/service-counts", "GET"},
 		{"admin", "/api/v1/itsm/catalogs/:id", "PUT"},
 		{"admin", "/api/v1/itsm/catalogs/:id", "DELETE"},
 		// Services
@@ -692,8 +729,19 @@ func seedPolicies(enforcer *casbin.Enforcer) error {
 		// Workflow Generate
 		{"admin", "/api/v1/itsm/workflows/generate", "POST"},
 		// Service Desk
+		{"user", "/api/v1/itsm/smart-staffing/config", "GET"},
 		{"admin", "/api/v1/itsm/service-desk/sessions/:sid/state", "GET"},
 		{"admin", "/api/v1/itsm/service-desk/sessions/:sid/draft/submit", "POST"},
+		{"user", "/api/v1/itsm/service-desk/sessions/:sid/state", "GET"},
+		{"user", "/api/v1/itsm/service-desk/sessions/:sid/draft/submit", "POST"},
+		{"user", "/api/v1/ai/sessions", "GET"},
+		{"user", "/api/v1/ai/sessions", "POST"},
+		{"user", "/api/v1/ai/sessions/:sid", "GET"},
+		{"user", "/api/v1/ai/sessions/:sid", "DELETE"},
+		{"user", "/api/v1/ai/sessions/:sid/chat", "POST"},
+		{"user", "/api/v1/ai/sessions/:sid/stream", "GET"},
+		{"user", "/api/v1/ai/sessions/:sid/cancel", "POST"},
+		{"user", "/api/v1/ai/sessions/:sid/images", "POST"},
 		// Priorities
 		{"admin", "/api/v1/itsm/priorities", "POST"},
 		{"admin", "/api/v1/itsm/priorities", "GET"},
@@ -712,30 +760,45 @@ func seedPolicies(enforcer *casbin.Enforcer) error {
 		{"admin", "/api/v1/itsm/sla/:id/escalations/:escalationId", "DELETE"},
 		// Tickets
 		{"admin", "/api/v1/itsm/tickets", "GET"},
+		{"admin", "/api/v1/itsm/tickets", "POST"},
 		{"admin", "/api/v1/itsm/tickets/mine", "GET"},
+		{"user", "/api/v1/itsm/tickets/mine", "GET"},
+		{"user", "/api/v1/itsm/tickets", "POST"},
 		{"admin", "/api/v1/itsm/tickets/approvals/pending", "GET"},
 		{"admin", "/api/v1/itsm/tickets/approvals/history", "GET"},
+		{"user", "/api/v1/itsm/tickets/approvals/pending", "GET"},
+		{"user", "/api/v1/itsm/tickets/approvals/history", "GET"},
 		{"admin", "/api/v1/itsm/tickets/monitor", "GET"},
 		{"admin", "/api/v1/itsm/tickets/decision-quality", "GET"},
 		{"admin", "/api/v1/itsm/tickets/:id", "GET"},
+		{"user", "/api/v1/itsm/tickets/:id", "GET"},
 		{"admin", "/api/v1/itsm/tickets/:id/assign", "PUT"},
 		{"admin", "/api/v1/itsm/tickets/:id/cancel", "PUT"},
 		{"admin", "/api/v1/itsm/tickets/:id/timeline", "GET"},
+		{"user", "/api/v1/itsm/tickets/:id/timeline", "GET"},
 		// Classic engine routes
 		{"admin", "/api/v1/itsm/tickets/:id/progress", "POST"},
+		{"user", "/api/v1/itsm/tickets/:id/progress", "POST"},
 		{"admin", "/api/v1/itsm/tickets/:id/signal", "POST"},
 		{"admin", "/api/v1/itsm/tickets/:id/activities", "GET"},
+		{"user", "/api/v1/itsm/tickets/:id/activities", "GET"},
 		// Process variables
 		{"admin", "/api/v1/itsm/tickets/:id/variables", "GET"},
+		{"user", "/api/v1/itsm/tickets/:id/variables", "GET"},
 		{"admin", "/api/v1/itsm/tickets/:id/override/jump", "POST"},
 		{"admin", "/api/v1/itsm/tickets/:id/override/reassign", "POST"},
 		{"admin", "/api/v1/itsm/tickets/:id/override/retry-ai", "POST"},
 		{"admin", "/api/v1/itsm/tickets/:id/recovery", "POST"},
+		{"admin", "/api/v1/itsm/tickets/:id/tokens", "GET"},
+		{"user", "/api/v1/itsm/tickets/:id/tokens", "GET"},
+		{"user", "/api/v1/itsm/tickets/:id/claim", "POST"},
 	}
 
 	menuPerms := [][]string{
 		{"admin", "itsm", "read"},
 		{"admin", "itsm:service-desk:use", "read"},
+		{"user", "itsm", "read"},
+		{"user", "itsm:service-desk:use", "read"},
 		{"admin", "itsm:catalog:create", "read"},
 		{"admin", "itsm:catalog:update", "read"},
 		{"admin", "itsm:catalog:delete", "read"},
@@ -749,8 +812,11 @@ func seedPolicies(enforcer *casbin.Enforcer) error {
 		{"admin", "itsm:ticket:cancel", "read"},
 		{"admin", "itsm:ticket:override", "read"},
 		{"admin", "itsm:ticket:mine", "read"},
+		{"user", "itsm:ticket:mine", "read"},
 		{"admin", "itsm:ticket:approval:pending", "read"},
 		{"admin", "itsm:ticket:approval:history", "read"},
+		{"user", "itsm:ticket:approval:pending", "read"},
+		{"user", "itsm:ticket:approval:history", "read"},
 		{"admin", "itsm:priority:list", "read"},
 		{"admin", "itsm:priority:create", "read"},
 		{"admin", "itsm:priority:update", "read"},
@@ -850,6 +916,7 @@ func seedServiceDefinitions(db *gorm.DB) error {
 
 	serviceRequestFormSchema := `{"version":1,"fields":[{"key":"title","type":"text","label":"请求标题","required":true,"validation":[{"rule":"required","message":"请输入请求标题"}],"width":"full"},{"key":"description","type":"textarea","label":"请求描述","required":true,"validation":[{"rule":"required","message":"请输入请求描述"}],"width":"full","props":{"rows":4}},{"key":"expected_date","type":"date","label":"期望完成日期","width":"half"},{"key":"remarks","type":"textarea","label":"备注","width":"full","props":{"rows":3}}],"layout":{"columns":2,"sections":[{"title":"请求信息","fields":["title","description"]},{"title":"补充信息","fields":["expected_date","remarks"]}]}}`
 	bossSerialChangeFormSchema := `{"version":1,"fields":[{"key":"subject","type":"text","label":"申请主题","required":true,"validation":[{"rule":"required","message":"请输入申请主题"}],"width":"full"},{"key":"request_category","type":"select","label":"申请类别","required":true,"validation":[{"rule":"required","message":"请选择申请类别"}],"width":"half","options":[{"label":"生产变更","value":"prod_change"},{"label":"访问授权","value":"access_grant"},{"label":"应急支持","value":"emergency_support"}]},{"key":"risk_level","type":"radio","label":"风险等级","required":true,"validation":[{"rule":"required","message":"请选择风险等级"}],"width":"half","options":[{"label":"低","value":"low"},{"label":"中","value":"medium"},{"label":"高","value":"high"}]},{"key":"expected_finish_time","type":"datetime","label":"期望完成时间","width":"half"},{"key":"change_window","type":"date_range","label":"变更窗口","required":true,"validation":[{"rule":"required","message":"请选择变更窗口"}],"width":"half"},{"key":"impact_scope","type":"textarea","label":"影响范围","required":true,"validation":[{"rule":"required","message":"请输入影响范围"}],"width":"full","props":{"rows":3}},{"key":"rollback_required","type":"select","label":"回滚要求","required":true,"validation":[{"rule":"required","message":"请选择回滚要求"}],"width":"half","options":[{"label":"需要","value":"required"},{"label":"不需要","value":"not_required"}]},{"key":"impact_modules","type":"multi_select","label":"影响模块","required":true,"validation":[{"rule":"required","message":"请选择影响模块"}],"width":"half","options":[{"label":"网关","value":"gateway"},{"label":"支付","value":"payment"},{"label":"监控","value":"monitoring"},{"label":"订单","value":"order"}]},{"key":"change_items","type":"table","label":"变更明细表","required":true,"validation":[{"rule":"required","message":"请填写变更明细"}],"width":"full","props":{"columns":[{"key":"system","type":"text","label":"系统","required":true,"validation":[{"rule":"required","message":"请输入系统"}]},{"key":"resource","type":"text","label":"资源","required":true,"validation":[{"rule":"required","message":"请输入资源"}]},{"key":"permission_level","type":"select","label":"权限级别","required":true,"validation":[{"rule":"required","message":"请选择权限级别"}],"options":[{"label":"只读","value":"read"},{"label":"读写","value":"read_write"}]},{"key":"effective_range","type":"date_range","label":"生效时段","required":true,"validation":[{"rule":"required","message":"请选择生效时段"}]},{"key":"reason","type":"text","label":"变更理由","required":true,"validation":[{"rule":"required","message":"请输入变更理由"}]}]}}],"layout":{"columns":2,"sections":[{"title":"基础信息","fields":["subject","request_category","risk_level","expected_finish_time","change_window"]},{"title":"影响与回滚","fields":["impact_scope","rollback_required","impact_modules"]},{"title":"变更明细","fields":["change_items"]}]}}`
+	dbBackupWhitelistFormSchema := `{"version":1,"fields":[{"key":"database_name","type":"text","label":"目标数据库","description":"填写需要临时加入备份白名单的生产数据库实例、库名或连接标识。","placeholder":"例如：prod-mysql-01","required":true,"validation":[{"rule":"required","message":"请输入目标数据库"}],"width":"half"},{"key":"source_ip","type":"text","label":"来源 IP","description":"填写发起备份访问的服务器、跳板机或备份任务来源 IP。","placeholder":"例如：10.20.30.50","required":true,"validation":[{"rule":"required","message":"请输入来源 IP"}],"width":"half"},{"key":"whitelist_window","type":"text","label":"白名单放行时间窗","description":"填写明确的开始和结束时间；系统会拒绝明天晚上、维护窗口等模糊时段。","placeholder":"例如：2026-05-01 22:00:00 ~ 2026-05-01 23:00:00","required":true,"validation":[{"rule":"required","message":"请输入白名单放行时间窗"}],"width":"full"},{"key":"access_reason","type":"textarea","label":"申请原因","description":"说明为什么本次生产数据库备份需要临时放行白名单。","placeholder":"例如：生产备份任务需要从备份服务器临时访问目标数据库","required":true,"validation":[{"rule":"required","message":"请输入申请原因"}],"width":"full","props":{"rows":4}}],"layout":{"columns":2,"sections":[{"title":"白名单放行信息","fields":["database_name","source_ip","whitelist_window"]},{"title":"申请原因","fields":["access_reason"]}]}}`
 	vpnAccessFormSchema := `{"version":1,"fields":[{"key":"vpn_account","type":"text","label":"VPN账号","description":"用于登录 VPN 的账号；用户给出的邮箱可直接作为 VPN 账号。","placeholder":"例如：wenhaowu@dev.com","required":true,"validation":[{"rule":"required","message":"请输入 VPN 账号"}],"width":"half"},{"key":"device_usage","type":"textarea","label":"设备与用途说明","description":"说明访问 VPN 的设备或用途；用户已经说明用途时不必额外追问设备型号。","placeholder":"例如：线上支持用、长期远程办公访问内网","required":true,"validation":[{"rule":"required","message":"请输入设备与用途说明"}],"width":"full","props":{"rows":3}},{"key":"request_kind","type":"select","label":"访问原因","description":"选择 VPN 访问原因；系统按该字段路由到网络管理员或信息安全管理员。","placeholder":"请选择访问原因","required":true,"validation":[{"rule":"required","message":"请选择访问原因"}],"width":"half","options":[{"label":"线上支持","value":"online_support"},{"label":"故障排查","value":"troubleshooting"},{"label":"生产应急","value":"production_emergency"},{"label":"网络接入问题","value":"network_access_issue"},{"label":"外部协作","value":"external_collaboration"},{"label":"长期远程办公","value":"long_term_remote_work"},{"label":"跨境访问","value":"cross_border_access"},{"label":"安全合规事项","value":"security_compliance"}]}],"layout":{"columns":2,"sections":[{"title":"VPN 开通信息","fields":["vpn_account","device_usage","request_kind"]}]}}`
 	vpnAccessWorkflowJSON := `{"nodes":[{"id":"start","type":"start","position":{"x":400,"y":50},"data":{"label":"开始","nodeType":"start"}},{"id":"request","type":"form","position":{"x":400,"y":200},"data":{"label":"填写 VPN 开通申请","nodeType":"form","participants":[{"type":"requester"}],"formSchema":{"fields":[{"key":"vpn_account","type":"text","label":"VPN账号"},{"key":"device_usage","type":"textarea","label":"设备与用途说明"},{"key":"request_kind","type":"select","label":"访问原因","options":["online_support","troubleshooting","production_emergency","network_access_issue","external_collaboration","long_term_remote_work","cross_border_access","security_compliance"]}]}}},{"id":"route","type":"exclusive","position":{"x":400,"y":380},"data":{"label":"访问原因路由","nodeType":"exclusive"}},{"id":"network_process","type":"process","position":{"x":160,"y":560},"data":{"label":"网络管理员处理","nodeType":"process","participants":[{"type":"position_department","department_code":"it","position_code":"network_admin"}]}},{"id":"security_process","type":"process","position":{"x":640,"y":560},"data":{"label":"信息安全管理员处理","nodeType":"process","participants":[{"type":"position_department","department_code":"it","position_code":"security_admin"}]}},{"id":"end","type":"end","position":{"x":400,"y":760},"data":{"label":"结束","nodeType":"end"}}],"edges":[{"id":"edge_start_request","source":"start","target":"request"},{"id":"edge_request_route","source":"request","target":"route"},{"id":"edge_route_network","source":"route","target":"network_process","data":{"condition":{"field":"form.request_kind","operator":"contains_any","value":["online_support","troubleshooting","production_emergency","network_access_issue"],"edge_id":"edge_route_network"}}},{"id":"edge_route_security","source":"route","target":"security_process","data":{"condition":{"field":"form.request_kind","operator":"contains_any","value":["external_collaboration","long_term_remote_work","cross_border_access","security_compliance"],"edge_id":"edge_route_security"}}},{"id":"edge_network_end","source":"network_process","target":"end"},{"id":"edge_security_end","source":"security_process","target":"end"}]}`
 
@@ -867,30 +934,35 @@ func seedServiceDefinitions(db *gorm.DB) error {
 			CollaborationSpec: "收集提单用户的 Github 账号信息和申请理由（可选），交给信息部 IT管理员处理。处理任务完成后结束流程。",
 		},
 		{
-			Name:              "高风险变更协同申请（Boss）",
-			Code:              "boss-serial-change-request",
-			Description:       "用于在系统内直接查看复杂表单、表格明细与两级串行处理流程图的 Boss 级内置服务。",
-			CatalogCode:       "application-platform:release",
-			SLACode:           "infra-change",
-			IntakeFormSchema:  bossSerialChangeFormSchema,
-			CollaborationSpec: `用户在 IT 服务台提交高风险变更协同申请。服务台需要收集申请主题、申请类别、风险等级、期望完成时间、变更开始时间、变更结束时间、影响范围、回滚要求、影响模块以及变更明细表。申请类别必须支持：生产变更(prod_change)、访问授权(access_grant)、应急支持(emergency_support)。风险等级必须支持：低(low)、中(medium)、高(high)。回滚要求必须支持：需要(required)、不需要(not_required)。影响模块必须支持多选：网关(gateway)、支付(payment)、监控(monitoring)、订单(order)。变更明细表至少包含系统、资源、权限级别、生效时段、变更理由。权限级别必须支持：只读(read)、读写(read_write)。申请提交后，先交给总部处理人岗位处理，参与者类型必须使用 position_department，部门编码使用 headquarters，岗位编码使用 serial_reviewer。总部处理人完成处理后，再交给信息部运维管理员岗位处理，参与者类型必须使用 position_department，部门编码使用 it，岗位编码使用 ops_admin。运维管理员完成处理后直接结束流程。`,
+			Name:             "高风险变更协同申请（Boss）",
+			Code:             "boss-serial-change-request",
+			Description:      "用于在系统内直接查看复杂表单、表格明细与两级串行处理流程图的 Boss 级内置服务。",
+			CatalogCode:      "application-platform:release",
+			SLACode:          "infra-change",
+			IntakeFormSchema: bossSerialChangeFormSchema,
+			CollaborationSpec: `员工在 IT 服务台提交高风险变更协同申请时，服务台需要确认申请主题、申请类别、风险等级、期望完成时间、变更窗口、影响范围、回滚要求、影响模块，以及每一项变更明细。
+申请类别包括生产变更、访问授权和应急支持；风险等级包括低、中、高；回滚要求包括需要和不需要；影响模块可选择网关、支付、监控和订单。变更明细需要说明系统、资源、权限级别、生效时段和变更理由，权限级别包括只读和读写。
+申请提交后，先交给总部处理人处理；总部处理人完成后，再交给信息部运维管理员处理。运维管理员完成处理后流程结束。`,
 		},
 		{
-			Name:              "生产数据库备份白名单临时放行申请",
-			Code:              "db-backup-whitelist-action-flow",
-			Description:       "用于验证请求节点预检动作、处理后自动放行动作与工单闭环。",
-			CatalogCode:       "application-platform:database",
-			SLACode:           "infra-change",
-			CollaborationSpec: `用户提交生产数据库备份白名单临时放行申请。系统先进入申请人请求节点，并在进入节点时自动执行预检动作，校验目标数据库、运维来源 IP 和放行时间窗信息是否齐备。申请人提交后，交给信息部数据库管理员岗位处理，参与者类型必须使用 position_department，部门编码使用 it，岗位编码使用 db_admin。数据库管理员完成处理后，在离开处理节点时自动执行白名单放行动作，并在动作成功后直接结束流程。`,
+			Name:             "生产数据库备份白名单临时放行申请",
+			Code:             "db-backup-whitelist-action-flow",
+			Description:      "用于验证请求节点预检动作、处理后自动放行动作与工单闭环。",
+			CatalogCode:      "application-platform:database",
+			SLACode:          "infra-change",
+			IntakeFormSchema: dbBackupWhitelistFormSchema,
+			CollaborationSpec: `员工在 IT 服务台申请生产数据库备份白名单临时放行时，服务台需要确认目标数据库、发起备份访问的来源 IP、白名单放行时间窗，以及这次临时放行的申请原因。
+申请资料收齐后，系统会先做一次白名单参数预检，确认数据库、来源 IP、放行窗口和申请原因满足放行前置条件。预检通过后，交给信息部数据库管理员处理。
+数据库管理员完成处理后，系统执行备份白名单放行；放行成功后流程结束。驳回时不进入补充或返工，流程按驳回结果结束。`,
 			Actions: []ServiceAction{
 				{
-					Name: "备份白名单预检", Code: "backup_whitelist_precheck",
+					Name: "备份白名单预检", Code: "db_backup_whitelist_precheck",
 					Description: "在申请人提交前校验数据库、时间窗与来源 IP 是否齐备。",
 					ActionType:  "http", IsActive: true,
 					ConfigJSON: JSONField(`{"url":"/precheck","method":"POST","timeout_seconds":5}`),
 				},
 				{
-					Name: "执行备份白名单放行", Code: "backup_whitelist_apply",
+					Name: "执行备份白名单放行", Code: "db_backup_whitelist_apply",
 					Description: "处理完成后自动执行数据库备份白名单放行。",
 					ActionType:  "http", IsActive: true,
 					ConfigJSON: JSONField(`{"url":"/apply","method":"POST","timeout_seconds":5}`),
@@ -951,6 +1023,10 @@ func seedServiceDefinitions(db *gorm.DB) error {
 					slog.Info("seed: updated service workflow json", "code", s.Code)
 				}
 			}
+			seedServiceActions(db, s.Code, existing.ID, s.Actions)
+			if s.Code == "db-backup-whitelist-action-flow" {
+				seedDBBackupWhitelistWorkflow(db, existing.ID)
+			}
 			continue
 		}
 
@@ -992,17 +1068,9 @@ func seedServiceDefinitions(db *gorm.DB) error {
 		}
 		slog.Info("seed: created service definition", "code", s.Code, "name", s.Name)
 
-		for _, action := range s.Actions {
-			var existingAction ServiceAction
-			if err := db.Where("service_id = ? AND code = ?", svc.ID, action.Code).First(&existingAction).Error; err == nil {
-				continue
-			}
-			action.ServiceID = svc.ID
-			if err := db.Create(&action).Error; err != nil {
-				slog.Error("seed: failed to create service action", "serviceCode", s.Code, "actionCode", action.Code, "error", err)
-				continue
-			}
-			slog.Info("seed: created service action", "serviceCode", s.Code, "actionCode", action.Code)
+		seedServiceActions(db, s.Code, svc.ID, s.Actions)
+		if s.Code == "db-backup-whitelist-action-flow" {
+			seedDBBackupWhitelistWorkflow(db, svc.ID)
 		}
 	}
 
@@ -1014,6 +1082,100 @@ func seedServiceDefinitions(db *gorm.DB) error {
 	}
 
 	return nil
+}
+
+func seedServiceActions(db *gorm.DB, serviceCode string, serviceID uint, actions []ServiceAction) {
+	for _, action := range actions {
+		if strings.TrimSpace(action.Code) == "" {
+			continue
+		}
+		var existingAction ServiceAction
+		if err := db.Where("service_id = ? AND code = ?", serviceID, action.Code).First(&existingAction).Error; err == nil {
+			continue
+		}
+
+		migrated := false
+		for _, legacyCode := range legacyActionCodesForCanonical(action.Code) {
+			var legacyAction ServiceAction
+			if err := db.Where("service_id = ? AND code = ?", serviceID, legacyCode).First(&legacyAction).Error; err != nil {
+				continue
+			}
+			updates := map[string]any{
+				"code":        action.Code,
+				"name":        action.Name,
+				"description": action.Description,
+				"action_type": action.ActionType,
+				"is_active":   action.IsActive,
+			}
+			if len(legacyAction.ConfigJSON) == 0 && len(action.ConfigJSON) > 0 {
+				updates["config_json"] = action.ConfigJSON
+			}
+			if err := db.Model(&legacyAction).Updates(updates).Error; err != nil {
+				slog.Error("seed: failed to migrate legacy service action", "serviceCode", serviceCode, "legacyCode", legacyCode, "actionCode", action.Code, "error", err)
+			} else {
+				slog.Info("seed: migrated legacy service action", "serviceCode", serviceCode, "legacyCode", legacyCode, "actionCode", action.Code)
+			}
+			migrated = true
+			break
+		}
+		if migrated {
+			continue
+		}
+
+		action.ServiceID = serviceID
+		if err := db.Create(&action).Error; err != nil {
+			slog.Error("seed: failed to create service action", "serviceCode", serviceCode, "actionCode", action.Code, "error", err)
+			continue
+		}
+		slog.Info("seed: created service action", "serviceCode", serviceCode, "actionCode", action.Code)
+	}
+}
+
+func seedDBBackupWhitelistWorkflow(db *gorm.DB, serviceID uint) {
+	var actions []ServiceAction
+	if err := db.Where("service_id = ? AND code IN ? AND is_active = ?", serviceID, []string{
+		"db_backup_whitelist_precheck",
+		"db_backup_whitelist_apply",
+	}, true).Find(&actions).Error; err != nil {
+		slog.Error("seed: failed to load db backup whitelist actions for workflow", "serviceID", serviceID, "error", err)
+		return
+	}
+
+	var precheckActionID, applyActionID uint
+	for _, action := range actions {
+		switch action.Code {
+		case "db_backup_whitelist_precheck":
+			precheckActionID = action.ID
+		case "db_backup_whitelist_apply":
+			applyActionID = action.ID
+		}
+	}
+	if precheckActionID == 0 || applyActionID == 0 {
+		slog.Warn("seed: db backup whitelist workflow skipped because actions are missing", "serviceID", serviceID, "precheckActionID", precheckActionID, "applyActionID", applyActionID)
+		return
+	}
+
+	workflowJSON := dbBackupWhitelistWorkflowJSON(precheckActionID, applyActionID)
+	if err := db.Model(&ServiceDefinition{}).Where("id = ?", serviceID).Update("workflow_json", JSONField(workflowJSON)).Error; err != nil {
+		slog.Error("seed: failed to update db backup whitelist workflow json", "serviceID", serviceID, "error", err)
+		return
+	}
+	slog.Info("seed: updated db backup whitelist workflow json", "serviceID", serviceID)
+}
+
+func dbBackupWhitelistWorkflowJSON(precheckActionID, applyActionID uint) string {
+	return fmt.Sprintf(`{"nodes":[{"id":"start","type":"start","position":{"x":120,"y":120},"data":{"label":"开始","nodeType":"start"}},{"id":"request","type":"form","position":{"x":380,"y":120},"data":{"label":"填写数据库备份白名单临时放行申请","nodeType":"form","participants":[{"type":"requester"}],"formSchema":{"fields":[{"key":"database_name","type":"text","label":"目标数据库"},{"key":"source_ip","type":"text","label":"来源 IP"},{"key":"whitelist_window","type":"text","label":"白名单放行时间窗"},{"key":"access_reason","type":"textarea","label":"申请原因"}]}}},{"id":"db_precheck_action","type":"action","position":{"x":680,"y":120},"data":{"label":"备份白名单预检","nodeType":"action","action_id":%d}},{"id":"db_process","type":"process","position":{"x":980,"y":120},"data":{"label":"数据库管理员处理","nodeType":"process","participants":[{"type":"position_department","department_code":"it","position_code":"db_admin"}]}},{"id":"db_apply_action","type":"action","position":{"x":1280,"y":120},"data":{"label":"执行备份白名单放行","nodeType":"action","action_id":%d}},{"id":"end","type":"end","position":{"x":1580,"y":120},"data":{"label":"结束","nodeType":"end"}}],"edges":[{"id":"edge_start_request","source":"start","target":"request","data":{}},{"id":"edge_request_precheck","source":"request","target":"db_precheck_action","data":{"outcome":"submitted"}},{"id":"edge_precheck_db","source":"db_precheck_action","target":"db_process","data":{"outcome":"success"}},{"id":"edge_db_apply_ok","source":"db_process","target":"db_apply_action","data":{"outcome":"approved"}},{"id":"edge_apply_end","source":"db_apply_action","target":"end","data":{"outcome":"success"}},{"id":"edge_db_end_reject","source":"db_process","target":"end","data":{"outcome":"rejected"}}]}`, precheckActionID, applyActionID)
+}
+
+func legacyActionCodesForCanonical(code string) []string {
+	switch code {
+	case "db_backup_whitelist_precheck":
+		return []string{"backup_whitelist_precheck"}
+	case "db_backup_whitelist_apply":
+		return []string{"backup_whitelist_apply"}
+	default:
+		return nil
+	}
 }
 
 // SeedEngineConfig creates default SystemConfig for smart staffing and engine settings.

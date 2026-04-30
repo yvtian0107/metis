@@ -353,7 +353,7 @@ export default function WorkflowPreview({
 
             {selectedNode.data.action_id && (
               <div className="flex items-center gap-2">
-                <span className="text-muted-foreground">Action ID:</span>
+                <span className="text-muted-foreground">绑定动作 ID:</span>
                 <span>{selectedNode.data.action_id}</span>
               </div>
             )}

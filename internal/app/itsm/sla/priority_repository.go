@@ -36,6 +36,14 @@ func (r *PriorityRepo) FindByCode(code string) (*Priority, error) {
 	return &p, nil
 }
 
+func (r *PriorityRepo) FindActiveByCode(code string) (*Priority, error) {
+	var p Priority
+	if err := r.db.Where("code = ? AND is_active = ?", code, true).First(&p).Error; err != nil {
+		return nil, err
+	}
+	return &p, nil
+}
+
 func (r *PriorityRepo) Update(id uint, updates map[string]any) error {
 	return r.db.Model(&Priority{}).Where("id = ?", id).Updates(updates).Error
 }

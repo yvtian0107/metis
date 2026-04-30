@@ -127,6 +127,8 @@ func (h *SLATemplateHandler) Update(c *gin.Context) {
 			handler.Fail(c, http.StatusNotFound, err.Error())
 		case errors.Is(err, ErrSLACodeExists):
 			handler.Fail(c, http.StatusConflict, err.Error())
+		case errors.Is(err, ErrSLATemplateInUse):
+			handler.Fail(c, http.StatusBadRequest, err.Error())
 		default:
 			handler.Fail(c, http.StatusInternalServerError, err.Error())
 		}
@@ -151,6 +153,10 @@ func (h *SLATemplateHandler) Delete(c *gin.Context) {
 	if err := h.svc.Delete(id); err != nil {
 		if errors.Is(err, ErrSLATemplateNotFound) {
 			handler.Fail(c, http.StatusNotFound, err.Error())
+			return
+		}
+		if errors.Is(err, ErrSLATemplateInUse) {
+			handler.Fail(c, http.StatusBadRequest, err.Error())
 			return
 		}
 		handler.Fail(c, http.StatusInternalServerError, err.Error())

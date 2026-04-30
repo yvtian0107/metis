@@ -79,15 +79,12 @@ func (h *ServiceDeskHandler) State(c *gin.Context) {
 		return
 	}
 
-	state, err := h.stateStore.GetState(sid)
+	result, err := tools.NewServiceDeskSession(h.operator, h.stateStore).StateView(sid)
 	if err != nil {
 		handler.Fail(c, http.StatusInternalServerError, err.Error())
 		return
 	}
-	handler.OK(c, gin.H{
-		"state":              state,
-		"nextExpectedAction": tools.NextExpectedAction(state),
-	})
+	handler.OK(c, tools.CommandPayload(result))
 }
 
 func (h *ServiceDeskHandler) SubmitDraft(c *gin.Context) {

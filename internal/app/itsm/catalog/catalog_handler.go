@@ -70,6 +70,15 @@ func (h *CatalogHandler) Tree(c *gin.Context) {
 	handler.OK(c, tree)
 }
 
+func (h *CatalogHandler) ServiceCounts(c *gin.Context) {
+	counts, err := h.svc.ServiceCounts()
+	if err != nil {
+		handler.Fail(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+	handler.OK(c, counts)
+}
+
 type UpdateCatalogRequest struct {
 	Name        *string `json:"name" binding:"omitempty,max=128"`
 	Code        *string `json:"code" binding:"omitempty,max=64"`

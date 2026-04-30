@@ -25,10 +25,11 @@ const TONE_VARIANT: Record<string, BadgeVariant> = {
 }
 
 export function getTicketStatusView(ticket: TicketItem) {
-  const option = TICKET_STATUS_OPTIONS[ticket.status] ?? { variant: "secondary" as const, key: "statusSubmitted" }
+  const option = TICKET_STATUS_OPTIONS[ticket.status]
+  const variant = TONE_VARIANT[ticket.statusTone] ?? option?.variant ?? "secondary"
   return {
-    ...option,
-    variant: TONE_VARIANT[ticket.statusTone] ?? option.variant,
-    label: ticket.statusLabel,
+    key: option?.key,
+    variant,
+    label: ticket.statusLabel || ticket.status,
   }
 }

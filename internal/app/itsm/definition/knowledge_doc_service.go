@@ -2,6 +2,7 @@ package definition
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	. "metis/internal/app/itsm/domain"
@@ -24,6 +25,8 @@ type KnowledgeDocService struct {
 	db          *gorm.DB
 	serviceDefs *ServiceDefService
 }
+
+var ErrKnowledgeDocNotFound = errors.New("knowledge document not found")
 
 func NewKnowledgeDocService(i do.Injector) (*KnowledgeDocService, error) {
 	repo := do.MustInvoke[*KnowledgeDocRepo](i)
@@ -52,6 +55,9 @@ func IsAllowedExtension(filename string) bool {
 }
 
 func (s *KnowledgeDocService) Upload(serviceID uint, fileName string, fileSize int64, reader io.Reader) (*ServiceKnowledgeDocument, error) {
+	if err := s.ensureServiceExists(serviceID); err != nil {
+		return nil, err
+	}
 	ext := strings.ToLower(filepath.Ext(fileName))
 	mime, ok := AllowedExtensions[ext]
 	if !ok {
@@ -115,19 +121,38 @@ func (s *KnowledgeDocService) Upload(serviceID uint, fileName string, fileSize i
 }
 
 func (s *KnowledgeDocService) List(serviceID uint) ([]ServiceKnowledgeDocument, error) {
+	if err := s.ensureServiceExists(serviceID); err != nil {
+		return nil, err
+	}
 	return s.repo.ListByServiceID(serviceID)
 }
 
-func (s *KnowledgeDocService) Delete(id uint) error {
-	doc, err := s.repo.GetByID(id)
-	if err != nil {
+func (s *KnowledgeDocService) Delete(serviceID, id uint) error {
+	if err := s.ensureServiceExists(serviceID); err != nil {
 		return err
 	}
-	if err := s.repo.Delete(id); err != nil {
+	doc, err := s.repo.GetByServiceAndID(serviceID, id)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return ErrKnowledgeDocNotFound
+		}
+		return err
+	}
+	if err := s.repo.DeleteByService(serviceID, id); err != nil {
 		return err
 	}
 	if s.serviceDefs != nil {
 		return s.serviceDefs.RefreshPublishHealthCheckIfPresent(doc.ServiceID)
+	}
+	return nil
+}
+
+func (s *KnowledgeDocService) ensureServiceExists(serviceID uint) error {
+	if s.serviceDefs == nil {
+		return nil
+	}
+	if _, err := s.serviceDefs.Get(serviceID); err != nil {
+		return err
 	}
 	return nil
 }

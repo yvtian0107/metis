@@ -22,6 +22,7 @@ import { toast } from "sonner"
 import { withActiveMenuPermission } from "@/lib/navigation-state"
 import { cn } from "@/lib/utils"
 import { usePermission } from "@/hooks/use-permission"
+import { useAuthStore } from "@/stores/auth"
 import { Button } from "@/components/ui/button"
 import { ButtonGroup } from "@/components/ui/button-group"
 import {
@@ -59,6 +60,7 @@ import { WorkspaceSearchField, WorkspaceStatus } from "@/components/workspace/pr
 import {
   assignTicket,
   cancelTicket,
+  fetchDecisionQuality,
   fetchPriorities,
   fetchServiceDefs,
   fetchTicket,
@@ -67,8 +69,7 @@ import {
   fetchTicketTimeline,
   fetchUsers,
   progressTicket,
-  type ActivityItem,
-  type TicketMonitorSummary,
+  type DecisionQualityItem,
   type TicketMonitorItem,
   type TimelineItem,
 } from "../../api"
@@ -76,17 +77,18 @@ import { OverrideActions } from "../../components/override-actions"
 import { SLABadge } from "../../components/sla-badge"
 import { TicketStatusBadge } from "../../components/ticket-status-badge"
 import { TICKET_STATUS_OPTIONS } from "../../components/ticket-status"
-import { TICKET_MENU_PERMISSION } from "./navigation"
+import { itsmQueryKeys } from "../../query-keys"
+import { buildTicketActionContext } from "./[id]/ticket-action-context"
 import {
   AUDIT_METRICS,
-  auditEvidenceEntries,
-  auditMetricFilter,
+  auditMetricValue,
+  auditReasonRows,
+  nextAuditMetricSelection,
   type AuditMetricCode,
 } from "./monitor-audit"
+import { TICKET_MENU_PERMISSION } from "./navigation"
 
 const PAGE_SIZE = 20
-const ACTIVE_STATUSES = new Set(["submitted", "waiting_human", "approved_decisioning", "rejected_decisioning", "decisioning", "executing_action"])
-const HUMAN_ACTIVITY_TYPES = new Set(["approve", "form", "process"])
 
 const RISK_OPTIONS = [
   { value: "all", labelKey: "monitor.riskAll" },
@@ -107,6 +109,18 @@ function formatWaiting(minutes: number) {
   return m > 0 ? `${h}h ${m}m` : `${h}h`
 }
 
+function formatPercent(value: number) {
+  return `${Math.round(value * 100)}%`
+}
+
+function formatSeconds(value: number) {
+  if (!value || value < 1) return "<1s"
+  if (value < 60) return `${Math.round(value)}s`
+  const minutes = Math.floor(value / 60)
+  const seconds = Math.round(value % 60)
+  return seconds > 0 ? `${minutes}m ${seconds}s` : `${minutes}m`
+}
+
 function riskTone(riskLevel: string): "danger" | "warning" | "neutral" {
   if (riskLevel === "blocked") return "danger"
   if (riskLevel === "risk") return "warning"
@@ -123,52 +137,43 @@ function engineLabel(engineType: string, t: (key: string) => string) {
   return engineType === "smart" ? t("monitor.engineSmart") : t("monitor.engineClassic")
 }
 
-function metricValue(summary: TicketMonitorSummary | undefined, code: AuditMetricCode) {
-  if (!summary) return 0
-  switch (code) {
-  case "active_total":
-    return summary.activeTotal
-  case "blocked_total":
-    return summary.stuckTotal
-  case "risk_total":
-    return summary.riskTotal
-  case "sla_risk_total":
-    return summary.slaRiskTotal
-  case "ai_incident_total":
-    return summary.aiIncidentTotal
-  case "completed_today_total":
-    return summary.completedTodayTotal
-  case "smart_active_total":
-    return summary.smartActiveTotal
-  case "classic_active_total":
-    return summary.classicActiveTotal
-  }
-}
-
-function metricTone(code: AuditMetricCode, value: number): "neutral" | "danger" | "warning" | "success" | "info" {
-  if (code === "active_total") return "info"
-  if (code === "completed_today_total") return "success"
-  if (code === "blocked_total" || code === "ai_incident_total") return value > 0 ? "danger" : "neutral"
-  if (code === "risk_total" || code === "sla_risk_total") return value > 0 ? "warning" : "neutral"
+function metricTone(metricCode: AuditMetricCode, value: number): "neutral" | "danger" | "warning" | "success" | "info" {
+  if (metricCode === "active_total") return "info"
+  if (metricCode === "blocked_total" || metricCode === "ai_incident_total") return value > 0 ? "danger" : "neutral"
+  if (metricCode === "risk_total" || metricCode === "sla_risk_total") return value > 0 ? "warning" : "neutral"
+  if (metricCode === "completed_today_total") return "success"
   return "neutral"
 }
 
-function activeHumanActivity(activities: ActivityItem[], currentActivityId?: number | null) {
-  return activities.find((a) => a.id === currentActivityId && ["pending", "in_progress"].includes(a.status) && HUMAN_ACTIVITY_TYPES.has(a.activityType))
-    ?? activities.find((a) => ["pending", "in_progress"].includes(a.status) && HUMAN_ACTIVITY_TYPES.has(a.activityType))
+function reasonToneClass(severity: string) {
+  if (severity === "risk") return "border-amber-200/70 bg-amber-50/65 text-amber-800"
+  if (severity === "info") return "border-sky-200/70 bg-sky-50/65 text-sky-800"
+  return "border-red-200/70 bg-red-50/65 text-red-800"
 }
 
 function MetricStrip({
   label,
   value,
   tone = "neutral",
+  active = false,
+  onClick,
 }: {
   label: string
   value: number
   tone?: "neutral" | "danger" | "warning" | "success" | "info"
+  active?: boolean
+  onClick?: () => void
 }) {
   return (
-    <div className="flex min-w-[8rem] items-center justify-between gap-3 border-b border-border/45 py-2 sm:border-b-0 sm:border-r sm:pr-4 last:border-r-0">
+    <button
+      type="button"
+      aria-pressed={active}
+      onClick={onClick}
+      className={cn(
+        "flex min-w-[8rem] items-center justify-between gap-3 border-b border-border/45 py-2 text-left transition hover:bg-muted/25 sm:border-b-0 sm:border-r sm:pr-4 last:border-r-0",
+        active && "bg-primary/5 text-primary",
+      )}
+    >
       <span className="text-xs font-medium text-muted-foreground">{label}</span>
       <span className={cn(
         "font-mono text-lg font-semibold tabular-nums",
@@ -179,7 +184,7 @@ function MetricStrip({
       )}>
         {value}
       </span>
-    </div>
+    </button>
   )
 }
 
@@ -193,6 +198,7 @@ export function Component() {
   const [priorityFilter, setPriorityFilter] = useState("all")
   const [serviceFilter, setServiceFilter] = useState("all")
   const [qualityDimension, setQualityDimension] = useState<"service" | "department">("service")
+  const [activeMetricCode, setActiveMetricCode] = useState<AuditMetricCode | null>(null)
   const [page, setPage] = useState(1)
   const [selectedTicket, setSelectedTicket] = useState<TicketMonitorItem | null>(null)
 
@@ -203,9 +209,10 @@ export function Component() {
     status: statusFilter === "all" ? undefined : statusFilter,
     priorityId: priorityFilter === "all" ? undefined : Number(priorityFilter),
     serviceId: serviceFilter === "all" ? undefined : Number(serviceFilter),
+    metricCode: activeMetricCode ?? undefined,
     page,
     pageSize: PAGE_SIZE,
-  }), [engineFilter, page, priorityFilter, riskFilter, serviceFilter, statusFilter, submittedKeyword])
+  }), [activeMetricCode, engineFilter, page, priorityFilter, riskFilter, serviceFilter, statusFilter, submittedKeyword])
 
   const { data, isLoading, isFetching, refetch } = useQuery({
     queryKey: ["itsm-ticket-monitor", monitorParams],
@@ -220,7 +227,7 @@ export function Component() {
   }, [refetch])
 
   const { data: priorities = [] } = useQuery({
-    queryKey: ["itsm-priorities"],
+    queryKey: itsmQueryKeys.priorities.all,
     queryFn: () => fetchPriorities(),
   })
 
@@ -264,33 +271,40 @@ export function Component() {
 
       <section className="workspace-surface rounded-[1.25rem] px-4 py-3">
         <div className="grid gap-x-4 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-8">
-          <MetricStrip label={t("monitor.activeTotal")} value={summary?.activeTotal ?? 0} tone="info" />
-          <MetricStrip label={t("monitor.stuckTotal")} value={summary?.stuckTotal ?? 0} tone={(summary?.stuckTotal ?? 0) > 0 ? "danger" : "success"} />
-          <MetricStrip label={t("monitor.riskTotal")} value={summary?.riskTotal ?? 0} tone={(summary?.riskTotal ?? 0) > 0 ? "warning" : "neutral"} />
-          <MetricStrip label={t("monitor.slaRiskTotal")} value={summary?.slaRiskTotal ?? 0} tone={(summary?.slaRiskTotal ?? 0) > 0 ? "warning" : "neutral"} />
-          <MetricStrip label={t("monitor.aiIncidentTotal")} value={summary?.aiIncidentTotal ?? 0} tone={(summary?.aiIncidentTotal ?? 0) > 0 ? "danger" : "neutral"} />
-          <MetricStrip label={t("monitor.completedTodayTotal")} value={summary?.completedTodayTotal ?? 0} tone="success" />
-          <MetricStrip label={t("monitor.smartActiveTotal")} value={summary?.smartActiveTotal ?? 0} />
-          <MetricStrip label={t("monitor.classicActiveTotal")} value={summary?.classicActiveTotal ?? 0} />
+          {AUDIT_METRICS.map((metric) => {
+            const value = auditMetricValue(summary, metric.code)
+            return (
+              <MetricStrip
+                key={metric.code}
+                label={t(metric.labelKey)}
+                value={value}
+                tone={metricTone(metric.code, value)}
+                active={activeMetricCode === metric.code}
+                onClick={() => resetPageAnd(() => {
+                  setActiveMetricCode((current) => nextAuditMetricSelection(current, metric.code))
+                })}
+              />
+            )
+          })}
         </div>
       </section>
 
       <section className="workspace-surface rounded-[1.25rem] px-4 py-3">
         <div className="mb-3 flex items-center justify-between gap-3">
           <div>
-            <p className="text-sm font-semibold">{t("monitor.qualityTitle", { defaultValue: "决策质量 (30 天)" })}</p>
+            <p className="text-sm font-semibold">{t("monitor.qualityTitle")}</p>
             <p className="text-xs text-muted-foreground">
               {decisionQuality?.version
-                ? `${t("monitor.qualityVersion", { defaultValue: "口径版本" })}: ${decisionQuality.version} · ${t("monitor.qualityTrendHint", { defaultValue: "基于流程活动结果与时间线事件聚合，仅用于趋势观察" })}`
-                : t("monitor.qualityTrendHint", { defaultValue: "基于流程活动结果与时间线事件聚合，仅用于趋势观察" })}
+                ? `${t("monitor.qualityVersion")}: ${decisionQuality.version} · ${t("monitor.qualityTrendHint")}`
+                : t("monitor.qualityTrendHint")}
             </p>
           </div>
           <ButtonGroup>
             <Button size="sm" variant={qualityDimension === "service" ? "default" : "outline"} onClick={() => setQualityDimension("service")}>
-              {t("monitor.qualityByService", { defaultValue: "按服务" })}
+              {t("monitor.qualityByService")}
             </Button>
             <Button size="sm" variant={qualityDimension === "department" ? "default" : "outline"} onClick={() => setQualityDimension("department")}>
-              {t("monitor.qualityByDepartment", { defaultValue: "按部门" })}
+              {t("monitor.qualityByDepartment")}
             </Button>
           </ButtonGroup>
         </div>
@@ -298,18 +312,18 @@ export function Component() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>{t("monitor.qualityDimension", { defaultValue: "维度" })}</TableHead>
-                <TableHead>{t("monitor.qualityApprovalRate", { defaultValue: "通过率" })}</TableHead>
-                <TableHead>{t("monitor.qualityRejectionRate", { defaultValue: "驳回率" })}</TableHead>
-                <TableHead>{t("monitor.qualityRetryRate", { defaultValue: "重试率" })}</TableHead>
-                <TableHead>{t("monitor.qualityLatency", { defaultValue: "平均决策时延" })}</TableHead>
-                <TableHead>{t("monitor.qualityRecoveryRate", { defaultValue: "恢复成功率" })}</TableHead>
-                <TableHead>{t("monitor.qualityDecisionCount", { defaultValue: "决策量" })}</TableHead>
+                <TableHead>{t("monitor.qualityDimension")}</TableHead>
+                <TableHead>{t("monitor.qualityApprovalRate")}</TableHead>
+                <TableHead>{t("monitor.qualityRejectionRate")}</TableHead>
+                <TableHead>{t("monitor.qualityRetryRate")}</TableHead>
+                <TableHead>{t("monitor.qualityLatency")}</TableHead>
+                <TableHead>{t("monitor.qualityRecoveryRate")}</TableHead>
+                <TableHead>{t("monitor.qualityDecisionCount")}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {qualityItems.length === 0 ? (
-                <DataTableEmptyRow colSpan={7} icon={Ticket} title={t("monitor.qualityEmpty", { defaultValue: "暂无决策质量数据" })} />
+                <DataTableEmptyRow colSpan={7} icon={Ticket} title={t("monitor.qualityEmpty")} />
               ) : (
                 qualityItems.map((item: DecisionQualityItem) => (
                   <TableRow key={`${item.dimensionType}-${item.dimensionId}`}>
@@ -503,10 +517,23 @@ function MonitorTicketSheet({
   const canAssign = usePermission("itsm:ticket:assign")
   const canCancel = usePermission("itsm:ticket:cancel")
   const canOverride = usePermission("itsm:ticket:override")
-  const [assigneeId, setAssigneeId] = useState("")
-  const [opinion, setOpinion] = useState("")
-  const [cancelReason, setCancelReason] = useState("")
+  const currentUserId = useAuthStore((s) => s.user?.id ?? 0)
   const ticketId = monitorItem?.id ?? null
+  const [actionDraft, setActionDraft] = useState({
+    ticketId: null as number | null,
+    assigneeId: "",
+    opinion: "",
+    cancelReason: "",
+  })
+  const scopedDraft = actionDraft.ticketId === ticketId
+    ? actionDraft
+    : { ticketId, assigneeId: "", opinion: "", cancelReason: "" }
+  const updateDraft = (patch: Partial<Omit<typeof actionDraft, "ticketId">>) => {
+    setActionDraft({ ...scopedDraft, ...patch, ticketId })
+  }
+  const resetDraft = () => {
+    setActionDraft({ ticketId: null, assigneeId: "", opinion: "", cancelReason: "" })
+  }
 
   const enabled = open && ticketId != null
   const { data: ticket } = useQuery({
@@ -530,13 +557,18 @@ function MonitorTicketSheet({
     enabled,
   })
 
-  const currentActivity = ticket ? activeHumanActivity(activities, ticket.currentActivityId) : undefined
-  const isActive = ticket ? ACTIVE_STATUSES.has(ticket.status) : false
+  const actionContext = buildTicketActionContext({
+    ticket,
+    activities,
+    currentUserId,
+    canAssignPermission: canAssign,
+    canCancelPermission: canCancel,
+  })
+  const displayActivity = actionContext.displayHumanActivity
+  const actionableActivity = actionContext.selectedActionableActivity
+  const reasonRows = auditReasonRows(monitorItem?.monitorReasons, monitorItem?.stuckReasons)
   const reasonTitle = monitorItem?.riskLevel === "risk" ? t("monitor.riskReasons") : t("monitor.blockingReasons")
   const emptyReasonText = monitorItem?.riskLevel === "risk" ? t("monitor.noRiskReasons") : t("monitor.noBlockingReasons")
-  const reasonClassName = monitorItem?.riskLevel === "risk"
-    ? "flex gap-2 rounded-lg border border-amber-200/70 bg-amber-50/65 px-3 py-2 text-sm text-amber-800"
-    : "flex gap-2 rounded-lg border border-red-200/70 bg-red-50/65 px-3 py-2 text-sm text-red-800"
 
   function invalidate() {
     if (!ticketId) return
@@ -547,10 +579,10 @@ function MonitorTicketSheet({
   }
 
   const assignMut = useMutation({
-    mutationFn: () => assignTicket(ticketId!, Number(assigneeId)),
+    mutationFn: () => assignTicket(ticketId!, Number(scopedDraft.assigneeId)),
     onSuccess: () => {
       toast.success(t("itsm:tickets.assignSuccess"))
-      setAssigneeId("")
+      updateDraft({ assigneeId: "" })
       invalidate()
     },
     onError: (err) => toast.error(err.message),
@@ -558,30 +590,33 @@ function MonitorTicketSheet({
 
   const progressMut = useMutation({
     mutationFn: (outcome: "approved" | "rejected") => progressTicket(ticketId!, {
-      activityId: currentActivity!.id,
+      activityId: actionableActivity!.id,
       outcome,
-      opinion,
+      opinion: scopedDraft.opinion,
     }),
     onSuccess: () => {
       toast.success(t("itsm:tickets.progressSuccess"))
-      setOpinion("")
+      updateDraft({ opinion: "" })
       invalidate()
     },
     onError: (err) => toast.error(err.message),
   })
 
   const cancelMut = useMutation({
-    mutationFn: () => cancelTicket(ticketId!, cancelReason.trim()),
+    mutationFn: () => cancelTicket(ticketId!, scopedDraft.cancelReason.trim()),
     onSuccess: () => {
       toast.success(t("itsm:tickets.cancelSuccess"))
-      setCancelReason("")
+      updateDraft({ cancelReason: "" })
       invalidate()
     },
     onError: (err) => toast.error(err.message),
   })
 
   return (
-    <Sheet open={open} onOpenChange={onOpenChange}>
+    <Sheet open={open} onOpenChange={(nextOpen) => {
+      if (!nextOpen) resetDraft()
+      onOpenChange(nextOpen)
+    }}>
       <SheetContent className="w-full border-l-border/70 bg-background shadow-none backdrop-blur-none sm:max-w-[560px]">
         <SheetHeader className="border-b border-border/55 pr-12">
           <SheetTitle className="flex items-center gap-2">
@@ -605,52 +640,72 @@ function MonitorTicketSheet({
                   <WorkspaceStatus tone={ticket.engineType === "smart" ? "info" : "neutral"} label={engineLabel(ticket.engineType, t)} />
                   <SLABadge slaStatus={ticket.slaStatus} slaResolutionDeadline={ticket.slaResolutionDeadline} />
                 </div>
-                <div className="grid gap-3 text-sm sm:grid-cols-2">
-                  <Fact label={t("tickets.service")} value={ticket.serviceName || "-"} />
-                  <Fact label={t("monitor.owner")} value={ticket.currentOwnerName || ticket.assigneeName || "-"} />
-                  <Fact label={t("monitor.currentStep")} value={currentActivity?.name || monitorItem?.currentActivityName || ticket.nextStepSummary || "-"} />
-                  <Fact label={t("tickets.updatedAt")} value={formatDate(ticket.updatedAt)} />
-                </div>
-              </section>
+	                <div className="grid gap-3 text-sm sm:grid-cols-2">
+	                  <Fact label={t("tickets.service")} value={ticket.serviceName || "-"} />
+	                  <Fact label={t("monitor.owner")} value={ticket.currentOwnerName || ticket.assigneeName || "-"} />
+	                  <Fact label={t("monitor.currentStep")} value={displayActivity?.name || monitorItem?.currentActivityName || ticket.nextStepSummary || "-"} />
+	                  <Fact label={t("tickets.updatedAt")} value={formatDate(ticket.updatedAt)} />
+	                </div>
+	              </section>
 
-              <section className="space-y-2 border-b border-border/50 pb-4">
-                <h3 className="text-sm font-semibold">{reasonTitle}</h3>
-                {monitorItem?.stuckReasons?.length ? (
-                  <div className="space-y-2">
-                    {monitorItem.stuckReasons.map((reason) => (
-                      <p key={reason} className={reasonClassName}>
-                        <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-                        <span>{reason}</span>
-                      </p>
-                    ))}
-                  </div>
-                ) : (
+	              <section className="space-y-2 border-b border-border/50 pb-4">
+	                <h3 className="text-sm font-semibold">{reasonTitle}</h3>
+	                {reasonRows.length ? (
+	                  <div className="space-y-2">
+	                    {reasonRows.map((reason, index) => (
+	                      <div key={`${reason.ruleCode || reason.message}-${index}`} className={cn("rounded-lg border px-3 py-2 text-sm", reasonToneClass(reason.severity))}>
+	                        <div className="flex gap-2">
+	                          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+	                          <div className="min-w-0 flex-1">
+	                            <p>{reason.message}</p>
+	                            {reason.type === "structured" && (
+	                              <p className="mt-1 break-all font-mono text-[11px] opacity-75">
+	                                {t("monitor.metricCode")}: {reason.metricCode} · {t("monitor.ruleCode")}: {reason.ruleCode}
+	                              </p>
+	                            )}
+	                          </div>
+	                        </div>
+	                        {reason.evidence.length > 0 && (
+	                          <div className="mt-2 grid gap-1 border-t border-current/15 pt-2 text-[11px]">
+	                            <p className="font-medium opacity-75">{t("monitor.evidence")}</p>
+	                            {reason.evidence.map((entry) => (
+	                              <div key={entry.field} className="grid grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)] gap-2 font-mono opacity-80">
+	                                <span className="truncate">{entry.field}</span>
+	                                <span className="break-all">{entry.value}</span>
+	                              </div>
+	                            ))}
+	                          </div>
+	                        )}
+	                      </div>
+	                    ))}
+	                  </div>
+	                ) : (
                   <p className="rounded-lg border border-border/50 bg-background/35 px-3 py-2 text-sm text-muted-foreground">
                     {emptyReasonText}
                   </p>
                 )}
               </section>
 
-              {isActive && (
-                <section className="space-y-3 border-b border-border/50 pb-4">
-                  <h3 className="text-sm font-semibold">{t("monitor.manualActions")}</h3>
-                  {currentActivity ? (
-                    <div className="space-y-2">
-                      <Textarea
-                        value={opinion}
-                        onChange={(event) => setOpinion(event.target.value)}
+	              {actionContext.isActive && (
+	                <section className="space-y-3 border-b border-border/50 pb-4">
+	                  <h3 className="text-sm font-semibold">{t("monitor.manualActions")}</h3>
+	                  {actionContext.canProcess && actionableActivity ? (
+	                    <div className="space-y-2">
+	                      <Textarea
+	                        value={scopedDraft.opinion}
+	                        onChange={(event) => updateDraft({ opinion: event.target.value })}
                         rows={3}
                         placeholder={t("tickets.approvalOpinionPlaceholder")}
                       />
-                      <div className="grid grid-cols-2 gap-2">
-                        <Button size="sm" disabled={progressMut.isPending} onClick={() => progressMut.mutate("approved")}>
-                          <CheckCircle2 className="h-4 w-4" />
-                          {t("tickets.approve")}
-                        </Button>
-                        <Button size="sm" variant="outline" className="text-destructive" disabled={progressMut.isPending} onClick={() => progressMut.mutate("rejected")}>
-                          <CircleX className="h-4 w-4" />
-                          {t("tickets.reject")}
-                        </Button>
+	                      <div className="grid grid-cols-2 gap-2">
+	                        <Button size="sm" disabled={progressMut.isPending || !actionableActivity} onClick={() => progressMut.mutate("approved")}>
+	                          <CheckCircle2 className="h-4 w-4" />
+	                          {t("tickets.approve")}
+	                        </Button>
+	                        <Button size="sm" variant="outline" className="text-destructive" disabled={progressMut.isPending || !actionableActivity} onClick={() => progressMut.mutate("rejected")}>
+	                          <CircleX className="h-4 w-4" />
+	                          {t("tickets.reject")}
+	                        </Button>
                       </div>
                     </div>
                   ) : (
@@ -659,9 +714,9 @@ function MonitorTicketSheet({
                     </p>
                   )}
 
-                  {canAssign && (
+	                  {actionContext.canAssign && (
                     <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
-                      <Select value={assigneeId} onValueChange={setAssigneeId}>
+	                      <Select value={scopedDraft.assigneeId} onValueChange={(value) => updateDraft({ assigneeId: value })}>
                         <SelectTrigger><SelectValue placeholder={t("tickets.assigneePlaceholder")} /></SelectTrigger>
                         <SelectContent>
                           {users.map((user) => (
@@ -669,7 +724,7 @@ function MonitorTicketSheet({
                           ))}
                         </SelectContent>
                       </Select>
-                      <Button size="sm" variant="outline" disabled={!assigneeId || assignMut.isPending} onClick={() => assignMut.mutate()}>
+	                      <Button size="sm" variant="outline" disabled={!scopedDraft.assigneeId || assignMut.isPending} onClick={() => assignMut.mutate()}>
                         <UserPlus className="h-4 w-4" />
                         {t("tickets.assign")}
                       </Button>
@@ -686,11 +741,11 @@ function MonitorTicketSheet({
                     />
                   )}
 
-                  {canCancel && (
+	                  {actionContext.canCancel && (
                     <div className="space-y-2">
-                      <Textarea
-                        value={cancelReason}
-                        onChange={(event) => setCancelReason(event.target.value)}
+	                      <Textarea
+	                        value={scopedDraft.cancelReason}
+	                        onChange={(event) => updateDraft({ cancelReason: event.target.value })}
                         rows={2}
                         placeholder={t("tickets.cancelReasonPlaceholder")}
                       />

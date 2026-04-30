@@ -62,6 +62,7 @@ var (
 	ErrInvalidNodeType         = errors.New("workflow: invalid node type")
 	ErrActivityNotFound        = errors.New("workflow: activity not found")
 	ErrActivityNotActive       = errors.New("workflow: activity is not in an active state")
+	ErrNoActiveAssignment      = errors.New("workflow: no active pending assignment for this activity")
 	ErrNodeNotFound            = errors.New("workflow: referenced node not found in workflow")
 	ErrTokenNotFound           = errors.New("workflow: execution token not found")
 	ErrTokenNotActive          = errors.New("workflow: execution token is not in active state")

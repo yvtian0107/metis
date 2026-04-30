@@ -21,6 +21,12 @@ type CatalogService struct {
 	repo *CatalogRepo
 }
 
+type CatalogServiceCounts struct {
+	Total           int64          `json:"total"`
+	ByCatalogID     map[uint]int64 `json:"byCatalogId"`
+	ByRootCatalogID map[uint]int64 `json:"byRootCatalogId"`
+}
+
 func NewCatalogService(i do.Injector) (*CatalogService, error) {
 	repo := do.MustInvoke[*CatalogRepo](i)
 	return &CatalogService{repo: repo}, nil
@@ -123,6 +129,43 @@ func (s *CatalogService) Tree() ([]ServiceCatalogResponse, error) {
 		return nil, err
 	}
 	return buildTree(all, nil), nil
+}
+
+func (s *CatalogService) ServiceCounts() (*CatalogServiceCounts, error) {
+	catalogs, err := s.repo.FindAll()
+	if err != nil {
+		return nil, err
+	}
+	directCounts, total, err := s.repo.ServiceCountsByCatalog()
+	if err != nil {
+		return nil, err
+	}
+
+	counts := &CatalogServiceCounts{
+		Total:           total,
+		ByCatalogID:     make(map[uint]int64, len(catalogs)),
+		ByRootCatalogID: make(map[uint]int64, len(catalogs)),
+	}
+	catalogByID := make(map[uint]ServiceCatalog, len(catalogs))
+	for _, catalog := range catalogs {
+		catalogByID[catalog.ID] = catalog
+		counts.ByCatalogID[catalog.ID] = directCounts[catalog.ID]
+		if catalog.ParentID == nil {
+			counts.ByRootCatalogID[catalog.ID] = 0
+		}
+	}
+	for catalogID, directCount := range directCounts {
+		catalog, ok := catalogByID[catalogID]
+		if !ok {
+			continue
+		}
+		rootID := catalog.ID
+		if catalog.ParentID != nil {
+			rootID = *catalog.ParentID
+		}
+		counts.ByRootCatalogID[rootID] += directCount
+	}
+	return counts, nil
 }
 
 func buildTree(catalogs []ServiceCatalog, parentID *uint) []ServiceCatalogResponse {

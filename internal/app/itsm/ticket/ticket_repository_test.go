@@ -480,3 +480,55 @@ func TestListDateRangeFiltersByCreatedAt(t *testing.T) {
 		t.Fatalf("expected TICK-DATE-2, got %s", items[0].Code)
 	}
 }
+
+func TestWorkspaceListsClampPageSizeToOneHundred(t *testing.T) {
+	db := migrateTicketHistoryTestDB(t)
+	operatorID := uint(77)
+	priority := Priority{Name: "普通", Code: "normal-page-size", Value: 10, Color: "#666"}
+	if err := db.Create(&priority).Error; err != nil {
+		t.Fatalf("create priority: %v", err)
+	}
+	for i := 0; i < 120; i++ {
+		ticket := Ticket{
+			Code:        "TICK-CLAMP-" + string(rune('A'+(i%26))) + string(rune('A'+(i/26))),
+			Title:       "分页上限",
+			ServiceID:   1,
+			EngineType:  "smart",
+			Status:      TicketStatusWaitingHuman,
+			PriorityID:  priority.ID,
+			RequesterID: operatorID,
+		}
+		if err := db.Create(&ticket).Error; err != nil {
+			t.Fatalf("create ticket %d: %v", i, err)
+		}
+		activity := TicketActivity{TicketID: ticket.ID, Name: "处理", ActivityType: "process", Status: "pending"}
+		if err := db.Create(&activity).Error; err != nil {
+			t.Fatalf("create activity %d: %v", i, err)
+		}
+		if err := db.Create(&TicketAssignment{
+			TicketID:   ticket.ID,
+			ActivityID: activity.ID,
+			UserID:     &operatorID,
+			AssigneeID: &operatorID,
+			Status:     AssignmentPending,
+		}).Error; err != nil {
+			t.Fatalf("create assignment %d: %v", i, err)
+		}
+	}
+
+	repo := &TicketRepo{db: db}
+	mine, total, err := repo.List(TicketListParams{RequesterID: &operatorID, Page: 1, PageSize: 100000})
+	if err != nil {
+		t.Fatalf("list mine: %v", err)
+	}
+	if total != 120 || len(mine) != 100 {
+		t.Fatalf("expected mine page size clamp to 100, total=%d len=%d", total, len(mine))
+	}
+	pending, total, err := repo.ListPendingApprovals(TicketApprovalListParams{Page: 1, PageSize: 100000}, operatorID, nil, nil)
+	if err != nil {
+		t.Fatalf("list pending: %v", err)
+	}
+	if total != 120 || len(pending) != 100 {
+		t.Fatalf("expected pending page size clamp to 100, total=%d len=%d", total, len(pending))
+	}
+}

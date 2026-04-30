@@ -2,6 +2,7 @@ package definition
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	. "metis/internal/app/itsm/catalog"
@@ -103,6 +104,49 @@ func TestServiceDefServiceList_FiltersByEngineType(t *testing.T) {
 	}
 }
 
+func TestServiceDefServiceList_FiltersByRootCatalog(t *testing.T) {
+	db := newTestDB(t)
+	svc := newServiceDefServiceForTest(t, db)
+	catSvc := newCatalogServiceForTest(t, db)
+
+	root, err := catSvc.Create("Root", "root", "", "", nil, 10)
+	if err != nil {
+		t.Fatalf("create root: %v", err)
+	}
+	child, err := catSvc.Create("Child", "child", "", "", &root.ID, 10)
+	if err != nil {
+		t.Fatalf("create child: %v", err)
+	}
+	otherRoot, err := catSvc.Create("Other", "other", "", "", nil, 20)
+	if err != nil {
+		t.Fatalf("create other root: %v", err)
+	}
+	if _, err := svc.Create(&ServiceDefinition{Name: "Root Direct", Code: "root-direct", CatalogID: root.ID, EngineType: "classic"}); err != nil {
+		t.Fatalf("create root direct service: %v", err)
+	}
+	if _, err := svc.Create(&ServiceDefinition{Name: "Child Service", Code: "child-service", CatalogID: child.ID, EngineType: "classic"}); err != nil {
+		t.Fatalf("create child service: %v", err)
+	}
+	if _, err := svc.Create(&ServiceDefinition{Name: "Other Service", Code: "other-service", CatalogID: otherRoot.ID, EngineType: "classic"}); err != nil {
+		t.Fatalf("create other service: %v", err)
+	}
+
+	items, total, err := svc.List(ServiceDefListParams{RootCatalogID: &root.ID, Page: 1, PageSize: 20})
+	if err != nil {
+		t.Fatalf("list by root catalog: %v", err)
+	}
+	if total != 2 || len(items) != 2 {
+		t.Fatalf("expected root direct and child services only, total=%d items=%+v", total, items)
+	}
+	codes := map[string]bool{}
+	for _, item := range items {
+		codes[item.Code] = true
+	}
+	if !codes["root-direct"] || !codes["child-service"] || codes["other-service"] {
+		t.Fatalf("unexpected root catalog result: %+v", codes)
+	}
+}
+
 func TestServiceDefServiceCreate_AllowsWorkflowJSONOnSmartService(t *testing.T) {
 	db := newTestDB(t)
 	svc := newServiceDefServiceForTest(t, db)
@@ -121,6 +165,80 @@ func TestServiceDefServiceCreate_AllowsWorkflowJSONOnSmartService(t *testing.T) 
 	}
 	if created.ID == 0 {
 		t.Fatal("expected created service to have ID")
+	}
+}
+
+func TestServiceRuntimeVersionSnapshotsSLAAndEscalationRules(t *testing.T) {
+	db := newTestDB(t)
+	catSvc := newCatalogServiceForTest(t, db)
+	root, err := catSvc.Create("Root", "root-sla-snapshot", "", "", nil, 10)
+	if err != nil {
+		t.Fatalf("create catalog: %v", err)
+	}
+	sla := SLATemplate{Name: "Gold SLA", Code: "gold-sla", ResponseMinutes: 5, ResolutionMinutes: 60, IsActive: true}
+	if err := db.Create(&sla).Error; err != nil {
+		t.Fatalf("create sla: %v", err)
+	}
+	service := ServiceDefinition{Name: "VPN", Code: "vpn-sla-snapshot", CatalogID: root.ID, EngineType: "smart", SLAID: &sla.ID, IsActive: true}
+	if err := db.Create(&service).Error; err != nil {
+		t.Fatalf("create service: %v", err)
+	}
+	rule := EscalationRule{
+		SLAID:        sla.ID,
+		TriggerType:  "response_timeout",
+		Level:        1,
+		WaitMinutes:  0,
+		ActionType:   "notify",
+		TargetConfig: JSONField(`{"recipients":[{"type":"user","value":"10"}],"channelId":5}`),
+		IsActive:     true,
+	}
+	if err := db.Create(&rule).Error; err != nil {
+		t.Fatalf("create escalation rule: %v", err)
+	}
+
+	version, err := GetOrCreateServiceRuntimeVersion(db, service.ID)
+	if err != nil {
+		t.Fatalf("create runtime version: %v", err)
+	}
+	if len(version.SLATemplateJSON) == 0 {
+		t.Fatal("expected runtime version to snapshot SLA template")
+	}
+	if len(version.EscalationRulesJSON) == 0 {
+		t.Fatal("expected runtime version to snapshot escalation rules")
+	}
+	var slaSnapshot SLATemplateResponse
+	if err := json.Unmarshal(version.SLATemplateJSON, &slaSnapshot); err != nil {
+		t.Fatalf("decode sla snapshot: %v", err)
+	}
+	if slaSnapshot.ID != sla.ID || slaSnapshot.ResponseMinutes != 5 || slaSnapshot.ResolutionMinutes != 60 {
+		t.Fatalf("unexpected sla snapshot: %+v", slaSnapshot)
+	}
+	var ruleSnapshots []EscalationRuleResponse
+	if err := json.Unmarshal(version.EscalationRulesJSON, &ruleSnapshots); err != nil {
+		t.Fatalf("decode rule snapshot: %v", err)
+	}
+	if len(ruleSnapshots) != 1 || ruleSnapshots[0].ID != rule.ID || ruleSnapshots[0].TriggerType != "response_timeout" {
+		t.Fatalf("unexpected rule snapshots: %+v", ruleSnapshots)
+	}
+
+	if err := db.Model(&SLATemplate{}).Where("id = ?", sla.ID).Updates(map[string]any{
+		"response_minutes":   99,
+		"resolution_minutes": 199,
+	}).Error; err != nil {
+		t.Fatalf("mutate sla: %v", err)
+	}
+	if err := db.Model(&EscalationRule{}).Where("id = ?", rule.ID).Updates(map[string]any{
+		"wait_minutes": 42,
+		"action_type":  "reassign",
+	}).Error; err != nil {
+		t.Fatalf("mutate rule: %v", err)
+	}
+	var reloaded ServiceDefinitionVersion
+	if err := db.First(&reloaded, version.ID).Error; err != nil {
+		t.Fatalf("reload runtime version: %v", err)
+	}
+	if strings.Contains(string(reloaded.SLATemplateJSON), "99") || strings.Contains(string(reloaded.EscalationRulesJSON), "reassign") {
+		t.Fatalf("runtime version SLA snapshot drifted after live mutation: sla=%s rules=%s", reloaded.SLATemplateJSON, reloaded.EscalationRulesJSON)
 	}
 }
 
@@ -417,11 +535,6 @@ func TestServiceDefServiceRefreshPublishHealthCheck_CoreFailures(t *testing.T) {
 		{name: "empty collaboration spec", setup: func(t *testing.T, db *gorm.DB, service *ServiceDefinition, serviceAgent *ai.Agent, decisionAgent *ai.Agent) {
 			service.CollaborationSpec = ""
 		}, wantKey: "collaboration_spec", wantStatus: "fail"},
-		{name: "inactive service agent", setup: func(t *testing.T, db *gorm.DB, service *ServiceDefinition, serviceAgent *ai.Agent, decisionAgent *ai.Agent) {
-			if err := db.Model(serviceAgent).Update("is_active", false).Error; err != nil {
-				t.Fatalf("deactivate service agent: %v", err)
-			}
-		}, wantKey: "service_agent", wantStatus: "fail"},
 		{name: "inactive decision agent", setup: func(t *testing.T, db *gorm.DB, service *ServiceDefinition, serviceAgent *ai.Agent, decisionAgent *ai.Agent) {
 			if err := db.Model(decisionAgent).Update("is_active", false).Error; err != nil {
 				t.Fatalf("deactivate decision agent: %v", err)
@@ -465,6 +578,41 @@ func TestServiceDefServiceRefreshPublishHealthCheck_CoreFailures(t *testing.T) {
 				t.Fatalf("expected %s item with status %s, got %+v", tt.wantKey, tt.wantStatus, check.Items)
 			}
 		})
+	}
+}
+
+func TestServiceDefServiceRefreshPublishHealthCheck_DoesNotRequireServiceAgent(t *testing.T) {
+	db := newTestDB(t)
+	svc := newServiceDefServiceForTest(t, db)
+	svc.engineConfigSvc = fakePublishHealthConfigProvider{cfg: testPublishHealthRuntimeConfig()}
+	catSvc := newCatalogServiceForTest(t, db)
+	root, _ := catSvc.Create("Root", "root", "", "", nil, 10)
+	user := createServiceHealthUser(t, db, "operator", true)
+	decisionAgent := createServiceHealthAgent(t, db, "decision-agent", true)
+	setServiceHealthDecisionAgent(t, db, decisionAgent.ID)
+	seedServiceHealthPathEngine(t, db)
+	service, err := svc.Create(&ServiceDefinition{
+		Name:              "Smart",
+		Code:              "smart-no-service-agent",
+		CatalogID:         root.ID,
+		EngineType:        "smart",
+		IntakeFormSchema:  serviceHealthIntakeFormSchema(),
+		CollaborationSpec: "route the request to the handler",
+		WorkflowJSON:      JSONField(validServiceHealthWorkflow(user.ID)),
+	})
+	if err != nil {
+		t.Fatalf("create service: %v", err)
+	}
+
+	check, err := svc.RefreshPublishHealthCheck(service.ID)
+	if err != nil {
+		t.Fatalf("refresh health check: %v", err)
+	}
+	if serviceHealthHasItem(check, "service_agent", "fail") {
+		t.Fatalf("service agent should not be required, got %+v", check.Items)
+	}
+	if serviceHealthHasItem(check, "decision_agent", "fail") {
+		t.Fatalf("decision agent should remain healthy, got %+v", check.Items)
 	}
 }
 

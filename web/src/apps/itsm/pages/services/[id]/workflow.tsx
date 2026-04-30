@@ -7,6 +7,7 @@ import { ArrowLeft } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { ClassicWorkflowWorkbench } from "./classic-workflow-workbench"
 import { fetchCatalogTree, fetchServiceDef, fetchSLATemplates } from "../../../api"
+import { itsmQueryKeys } from "../../../query-keys"
 
 export function Component() {
   const { t } = useTranslation("itsm")
@@ -15,18 +16,18 @@ export function Component() {
   const serviceId = Number(id)
 
   const { data: service, isLoading } = useQuery({
-    queryKey: ["itsm-service", serviceId],
+    queryKey: itsmQueryKeys.services.detail(serviceId),
     queryFn: () => fetchServiceDef(serviceId),
     enabled: !!serviceId,
   })
 
   const { data: catalogs } = useQuery({
-    queryKey: ["itsm-catalogs"],
+    queryKey: itsmQueryKeys.catalogs.tree(),
     queryFn: () => fetchCatalogTree(),
   })
 
   const { data: slaTemplates } = useQuery({
-    queryKey: ["itsm-sla"],
+    queryKey: itsmQueryKeys.sla.all,
     queryFn: () => fetchSLATemplates(),
   })
 

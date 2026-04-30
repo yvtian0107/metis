@@ -43,6 +43,8 @@ type stubOperator struct {
 	createdServiceID    uint
 	createdSummary      string
 	createdFormData     map[string]any
+	createTicketCalls   int
+	submitDraftCalls    int
 	createdDraftVersion int
 	createdFieldsHash   string
 	createdRequestHash  string
@@ -64,12 +66,14 @@ func (s *stubOperator) LoadService(serviceID uint) (*ServiceDetail, error) {
 	return s.detail, nil
 }
 func (s *stubOperator) CreateTicket(userID uint, serviceID uint, summary string, formData map[string]any, sessionID uint) (*TicketResult, error) {
+	s.createTicketCalls++
 	s.createdServiceID = serviceID
 	s.createdSummary = summary
 	s.createdFormData = formData
 	return &TicketResult{TicketID: 123, TicketCode: "TICK-000123", Status: "in_progress"}, nil
 }
-func (s *stubOperator) SubmitConfirmedDraft(userID uint, serviceID uint, summary string, formData map[string]any, sessionID uint, draftVersion int, fieldsHash string, requestHash string) (*TicketResult, error) {
+func (s *stubOperator) SubmitConfirmedDraft(userID uint, serviceID uint, serviceVersionID uint, summary string, formData map[string]any, sessionID uint, draftVersion int, fieldsHash string, requestHash string) (*TicketResult, error) {
+	s.submitDraftCalls++
 	s.createdServiceID = serviceID
 	s.createdSummary = summary
 	s.createdFormData = formData
@@ -381,6 +385,9 @@ func TestCurrentRequestContext_ReturnsStateAndNextExpectedAction(t *testing.T) {
 			"device_usage": "线上支持用",
 			"request_kind": "online_support",
 		},
+		MissingFields:    []string{"vpn_account", "device_usage"},
+		AskedFields:      []string{"vpn_account"},
+		MinDecisionReady: false,
 	}
 	ctx := context.WithValue(context.Background(), app.SessionIDKey, uint(1))
 
@@ -408,8 +415,8 @@ func TestCurrentRequestContext_ReturnsStateAndNextExpectedAction(t *testing.T) {
 	if resp.RequestText == "" || resp.PrefillFormData["vpn_account"] != "wenhaowu@dev.com" {
 		t.Fatalf("expected request text and prefill data, got %+v", resp)
 	}
-	if resp.MinDecisionReady || len(resp.MissingFields) != 0 || len(resp.AskedFields) != 0 {
-		t.Fatalf("expected no missing/asked fields in prefilled state, got %+v", resp)
+	if resp.MinDecisionReady || !containsAll(resp.MissingFields, "vpn_account") || !containsAll(resp.MissingFields, "device_usage") || !containsAll(resp.AskedFields, "vpn_account") {
+		t.Fatalf("expected conversation progress fields in context response, got %+v", resp)
 	}
 }
 
@@ -1280,6 +1287,12 @@ func TestServiceDeskFlow_UsesLoadedServiceAndConfirmedDraftWhenModelFallsBackToI
 	}
 	if op.createdFormData["request_kind"] != "online_support" {
 		t.Fatalf("expected confirmed draft form data to be used, got %+v", op.createdFormData)
+	}
+	if op.createTicketCalls != 0 || op.submitDraftCalls != 1 {
+		t.Fatalf("expected confirmed draft submission path only, create=%d submit=%d", op.createTicketCalls, op.submitDraftCalls)
+	}
+	if op.createdDraftVersion != 1 || op.createdFieldsHash != "vpn123" || op.createdRequestHash == "" {
+		t.Fatalf("expected draft identity to be submitted, version=%d fields=%q request=%q", op.createdDraftVersion, op.createdFieldsHash, op.createdRequestHash)
 	}
 }
 

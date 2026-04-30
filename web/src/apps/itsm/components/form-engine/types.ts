@@ -1,3 +1,5 @@
+import type { ReactNode } from "react"
+
 // Form Schema v1 TypeScript types — mirrors Go form.FormSchema
 
 export interface FormSchema {
@@ -97,4 +99,5 @@ export interface FormRendererProps {
   onSubmit?: (data: Record<string, unknown>) => void
   onChange?: (data: Record<string, unknown>) => void
   disabled?: boolean
+  footer?: ReactNode
 }

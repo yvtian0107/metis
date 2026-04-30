@@ -37,7 +37,7 @@ func newSeedAlignmentDB(t *testing.T) *gorm.DB {
 		t.Fatalf("open db: %v", err)
 	}
 	if err := db.AutoMigrate(
-		&ServiceCatalog{}, &ServiceDefinition{}, &ServiceAction{}, &Priority{}, &SLATemplate{},
+		&ServiceCatalog{}, &ServiceDefinition{}, &ServiceDefinitionVersion{}, &ServiceAction{}, &Priority{}, &SLATemplate{}, &EscalationRule{},
 		&org.Department{}, &org.Position{}, &org.DepartmentPosition{}, &org.UserPosition{},
 		&coremodel.User{}, &coremodel.Role{}, &coremodel.Menu{}, &coremodel.SystemConfig{},
 		&aiapp.Provider{}, &aiapp.AIModel{}, &aiapp.Agent{}, &aiapp.Tool{}, &aiapp.AgentTool{},
@@ -93,6 +93,10 @@ func TestBuiltInSmartSeedsAlignParticipantsAndInstallAdminIdentity(t *testing.T)
 	if err := db.Create(&adminRole).Error; err != nil {
 		t.Fatalf("create admin role: %v", err)
 	}
+	userRole := coremodel.Role{Name: "User", Code: coremodel.RoleUser}
+	if err := db.Create(&userRole).Error; err != nil {
+		t.Fatalf("create user role: %v", err)
+	}
 	admin := coremodel.User{Username: "admin", IsActive: true, RoleID: adminRole.ID}
 	if err := db.Create(&admin).Error; err != nil {
 		t.Fatalf("create admin user: %v", err)
@@ -105,6 +109,40 @@ func TestBuiltInSmartSeedsAlignParticipantsAndInstallAdminIdentity(t *testing.T)
 	if err := SeedITSM(db, enforcer); err != nil {
 		t.Fatalf("seed itsm: %v", err)
 	}
+
+	t.Run("user role can access service desk self-service", func(t *testing.T) {
+		for _, tc := range []struct {
+			obj string
+			act string
+		}{
+			{obj: "itsm", act: "read"},
+			{obj: "itsm:service-desk:use", act: "read"},
+			{obj: "itsm:ticket:mine", act: "read"},
+			{obj: "itsm:ticket:approval:pending", act: "read"},
+			{obj: "itsm:ticket:approval:history", act: "read"},
+			{obj: "/api/v1/itsm/service-desk/sessions/:sid/state", act: "GET"},
+			{obj: "/api/v1/itsm/service-desk/sessions/:sid/draft/submit", act: "POST"},
+			{obj: "/api/v1/itsm/tickets/mine", act: "GET"},
+			{obj: "/api/v1/itsm/tickets", act: "POST"},
+			{obj: "/api/v1/itsm/tickets/approvals/pending", act: "GET"},
+			{obj: "/api/v1/itsm/tickets/approvals/history", act: "GET"},
+			{obj: "/api/v1/itsm/tickets/:id", act: "GET"},
+			{obj: "/api/v1/itsm/tickets/:id/timeline", act: "GET"},
+			{obj: "/api/v1/itsm/tickets/:id/activities", act: "GET"},
+			{obj: "/api/v1/itsm/tickets/:id/tokens", act: "GET"},
+			{obj: "/api/v1/itsm/tickets/:id/variables", act: "GET"},
+			{obj: "/api/v1/itsm/tickets/:id/progress", act: "POST"},
+			{obj: "/api/v1/itsm/tickets/:id/claim", act: "POST"},
+		} {
+			allowed, err := enforcer.Enforce(coremodel.RoleUser, tc.obj, tc.act)
+			if err != nil {
+				t.Fatalf("enforce %s %s: %v", tc.obj, tc.act, err)
+			}
+			if !allowed {
+				t.Fatalf("expected user role to access %s %s", tc.act, tc.obj)
+			}
+		}
+	})
 
 	var dept org.Department
 	if err := db.Where("code = ?", "it").First(&dept).Error; err != nil {
@@ -151,13 +189,13 @@ func TestBuiltInSmartSeedsAlignParticipantsAndInstallAdminIdentity(t *testing.T)
 			t.Fatalf("load smart services: %v", err)
 		}
 		wanted := map[string][]string{
-			"boss-serial-change-request":      {"headquarters", "serial_reviewer", "ops_admin"},
-			"db-backup-whitelist-action-flow": {"db_admin"},
-			"copilot-account-request":         {"IT管理员"},
+			"copilot-account-request": {"IT管理员"},
 		}
 		workflowWanted := map[string][]string{
-			"prod-server-temporary-access": {"target_servers", "access_window", "operation_purpose", "access_reason", "ops_admin", "network_admin", "security_admin"},
-			"vpn-access-request":           {"vpn_account", "device_usage", "request_kind", "network_admin", "security_admin"},
+			"boss-serial-change-request":      {"subject", "request_category", "prod_change", "risk_level", "rollback_required", "impact_modules", "gateway", "change_items", "permission_level", "read_write"},
+			"db-backup-whitelist-action-flow": {"database_name", "source_ip", "whitelist_window", "access_reason", `"type":"action"`, "db_precheck_action", "db_apply_action", "db_backup_whitelist_precheck", "db_backup_whitelist_apply"},
+			"prod-server-temporary-access":    {"target_servers", "access_window", "operation_purpose", "access_reason", "ops_admin", "network_admin", "security_admin"},
+			"vpn-access-request":              {"vpn_account", "device_usage", "request_kind", "network_admin", "security_admin"},
 		}
 		for _, svc := range services {
 			if needles, ok := wanted[svc.Code]; ok {
@@ -168,7 +206,14 @@ func TestBuiltInSmartSeedsAlignParticipantsAndInstallAdminIdentity(t *testing.T)
 				}
 			}
 			if needles, ok := workflowWanted[svc.Code]; ok {
+				var actions []ServiceAction
+				if err := db.Where("service_id = ?", svc.ID).Find(&actions).Error; err != nil {
+					t.Fatalf("load service %s actions: %v", svc.Code, err)
+				}
 				structured := string(svc.IntakeFormSchema) + string(svc.WorkflowJSON)
+				for _, action := range actions {
+					structured += action.Code
+				}
 				for _, needle := range needles {
 					if !strings.Contains(structured, needle) {
 						t.Fatalf("service %s missing structured marker %q in schema/workflow", svc.Code, needle)
@@ -271,6 +316,52 @@ func TestBuiltInSmartSeedsAlignParticipantsAndInstallAdminIdentity(t *testing.T)
 			t.Fatalf("expected 6 admin identities after repeat seed, got %d", count)
 		}
 	})
+}
+
+func TestSeedITSMGrantsUserServiceDeskSessionPolicies(t *testing.T) {
+	db := newSeedAlignmentDB(t)
+	enforcer := newTestEnforcer(t)
+
+	if err := SeedITSM(db, enforcer); err != nil {
+		t.Fatalf("seed itsm: %v", err)
+	}
+
+	required := [][]string{
+		{coremodel.RoleUser, "/api/v1/itsm/smart-staffing/config", "GET"},
+		{coremodel.RoleUser, "/api/v1/ai/sessions", "GET"},
+		{coremodel.RoleUser, "/api/v1/ai/sessions", "POST"},
+		{coremodel.RoleUser, "/api/v1/ai/sessions/:sid", "GET"},
+		{coremodel.RoleUser, "/api/v1/ai/sessions/:sid", "DELETE"},
+		{coremodel.RoleUser, "/api/v1/ai/sessions/:sid/chat", "POST"},
+		{coremodel.RoleUser, "/api/v1/ai/sessions/:sid/stream", "GET"},
+		{coremodel.RoleUser, "/api/v1/ai/sessions/:sid/cancel", "POST"},
+		{coremodel.RoleUser, "/api/v1/ai/sessions/:sid/images", "POST"},
+	}
+	for _, policy := range required {
+		ok, err := enforcer.HasPolicy(policy)
+		if err != nil {
+			t.Fatalf("check policy %v: %v", policy, err)
+		}
+		if !ok {
+			t.Fatalf("expected user service desk policy %v", policy)
+		}
+	}
+
+	forbidden := [][]string{
+		{coremodel.RoleUser, "/api/v1/itsm/smart-staffing/config", "PUT"},
+		{coremodel.RoleUser, "/api/v1/ai/agents", "GET"},
+		{coremodel.RoleUser, "/api/v1/ai/sessions/:sid/messages/:mid", "PUT"},
+		{coremodel.RoleUser, "/api/v1/ai/sessions/:sid/continue", "POST"},
+	}
+	for _, policy := range forbidden {
+		ok, err := enforcer.HasPolicy(policy)
+		if err != nil {
+			t.Fatalf("check forbidden policy %v: %v", policy, err)
+		}
+		if ok {
+			t.Fatalf("user should not receive privileged policy %v", policy)
+		}
+	}
 }
 
 func TestMigratePriorityCommitmentColumnsDropsLegacyColumns(t *testing.T) {

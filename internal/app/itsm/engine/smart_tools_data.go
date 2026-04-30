@@ -2,9 +2,11 @@ package engine
 
 import (
 	"encoding/json"
+	"fmt"
 	"time"
 
 	"gorm.io/gorm"
+	"metis/internal/app/itsm/domain"
 )
 
 // --- Result structs for DecisionDataProvider queries ---
@@ -95,6 +97,8 @@ type ServiceActionRow struct {
 	Code        string
 	Name        string
 	Description string
+	ActionType  string
+	ConfigJSON  string
 	IsActive    bool
 }
 
@@ -118,8 +122,8 @@ type DecisionDataProvider interface {
 	// GetExecutedActions returns successfully executed actions for a ticket.
 	GetExecutedActions(ticketID uint) ([]ExecutedActionInfo, error)
 
-	// CountActiveServiceActions returns the number of active service actions for a service.
-	CountActiveServiceActions(serviceID uint) (int64, error)
+	// CountActiveServiceActions returns the number of active service actions for a ticket's runtime service version.
+	CountActiveServiceActions(ticketID, serviceID uint) (int64, error)
 
 	// GetCurrentAssignment returns the current assignment for a ticket, or nil if none.
 	GetCurrentAssignment(ticketID uint) (*CurrentAssignmentInfo, error)
@@ -148,11 +152,11 @@ type DecisionDataProvider interface {
 	// GetSLAData returns SLA-related fields for a ticket.
 	GetSLAData(ticketID uint) (*SLATicketData, error)
 
-	// ListActiveServiceActions lists active service actions for a service.
-	ListActiveServiceActions(serviceID uint) ([]ServiceActionRow, error)
+	// ListActiveServiceActions lists active service actions for a ticket's runtime service version.
+	ListActiveServiceActions(ticketID, serviceID uint) ([]ServiceActionRow, error)
 
-	// GetServiceAction returns a specific service action by ID and service ID.
-	GetServiceAction(actionID, serviceID uint) (*ServiceActionRow, error)
+	// GetServiceAction returns a specific service action by ID and service ID for a ticket's runtime version.
+	GetServiceAction(ticketID, actionID, serviceID uint) (*ServiceActionRow, error)
 
 	// ResolveForTool delegates to ParticipantResolver.ResolveForTool, which needs raw DB access.
 	ResolveForTool(resolver *ParticipantResolver, ticketID uint, toolArgs json.RawMessage) ([]uint, error)
@@ -227,7 +231,18 @@ func (s *decisionDataStore) GetExecutedActions(ticketID uint) ([]ExecutedActionI
 	return rows, err
 }
 
-func (s *decisionDataStore) CountActiveServiceActions(serviceID uint) (int64, error) {
+func (s *decisionDataStore) CountActiveServiceActions(ticketID, serviceID uint) (int64, error) {
+	if rows, ok, err := s.loadSnapshotActions(ticketID, serviceID); err != nil {
+		return 0, err
+	} else if ok {
+		var count int64
+		for _, row := range rows {
+			if row.IsActive {
+				count++
+			}
+		}
+		return count, nil
+	}
 	var count int64
 	err := s.db.Table("itsm_service_actions").
 		Where("service_id = ? AND is_active = ? AND deleted_at IS NULL", serviceID, true).
@@ -344,21 +359,42 @@ func (s *decisionDataStore) GetSLAData(ticketID uint) (*SLATicketData, error) {
 	return &row, nil
 }
 
-func (s *decisionDataStore) ListActiveServiceActions(serviceID uint) ([]ServiceActionRow, error) {
+func (s *decisionDataStore) ListActiveServiceActions(ticketID, serviceID uint) ([]ServiceActionRow, error) {
+	if rows, ok, err := s.loadSnapshotActions(ticketID, serviceID); err != nil {
+		return nil, err
+	} else if ok {
+		active := make([]ServiceActionRow, 0, len(rows))
+		for _, row := range rows {
+			if row.IsActive {
+				active = append(active, row)
+			}
+		}
+		return active, nil
+	}
 	var rows []ServiceActionRow
 	err := s.db.Table("itsm_service_actions").
 		Where("service_id = ? AND is_active = ? AND deleted_at IS NULL", serviceID, true).
-		Select("id, code, name, description").
+		Select("id, code, name, description, action_type, config_json, is_active").
 		Order("id ASC").
 		Find(&rows).Error
 	return rows, err
 }
 
-func (s *decisionDataStore) GetServiceAction(actionID, serviceID uint) (*ServiceActionRow, error) {
+func (s *decisionDataStore) GetServiceAction(ticketID, actionID, serviceID uint) (*ServiceActionRow, error) {
+	if rows, ok, err := s.loadSnapshotActions(ticketID, serviceID); err != nil {
+		return nil, err
+	} else if ok {
+		for _, row := range rows {
+			if row.ID == actionID {
+				return &row, nil
+			}
+		}
+		return nil, gorm.ErrRecordNotFound
+	}
 	var row ServiceActionRow
 	err := s.db.Table("itsm_service_actions").
 		Where("id = ? AND service_id = ? AND deleted_at IS NULL", actionID, serviceID).
-		Select("id, name, code, is_active").
+		Select("id, name, code, description, action_type, config_json, is_active").
 		First(&row).Error
 	if err != nil {
 		return nil, err
@@ -368,4 +404,57 @@ func (s *decisionDataStore) GetServiceAction(actionID, serviceID uint) (*Service
 
 func (s *decisionDataStore) ResolveForTool(resolver *ParticipantResolver, ticketID uint, toolArgs json.RawMessage) ([]uint, error) {
 	return resolver.ResolveForTool(s.db, ticketID, toolArgs)
+}
+
+func (s *decisionDataStore) loadSnapshotActions(ticketID, serviceID uint) ([]ServiceActionRow, bool, error) {
+	if !s.db.Migrator().HasColumn(&ticketModel{}, "service_version_id") ||
+		!s.db.Migrator().HasTable("itsm_service_definition_versions") {
+		return nil, false, nil
+	}
+	var row struct {
+		ServiceVersionID *uint
+		ActionsJSON      string
+	}
+	err := s.db.Table("itsm_tickets").
+		Joins("JOIN itsm_service_definition_versions ON itsm_service_definition_versions.id = itsm_tickets.service_version_id").
+		Where("itsm_tickets.id = ? AND itsm_tickets.service_id = ? AND itsm_service_definition_versions.service_id = ?", ticketID, serviceID, serviceID).
+		Select("itsm_tickets.service_version_id, itsm_service_definition_versions.actions_json").
+		First(&row).Error
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, false, nil
+		}
+		return nil, false, err
+	}
+	if row.ServiceVersionID == nil {
+		return nil, false, nil
+	}
+	actions, err := ParseServiceActionSnapshotRows(row.ActionsJSON)
+	if err != nil {
+		return nil, true, err
+	}
+	return actions, true, nil
+}
+
+func ParseServiceActionSnapshotRows(raw string) ([]ServiceActionRow, error) {
+	if raw == "" || raw == "null" {
+		return []ServiceActionRow{}, nil
+	}
+	var actions []domain.ServiceActionResponse
+	if err := json.Unmarshal([]byte(raw), &actions); err != nil {
+		return nil, fmt.Errorf("parse service action snapshot: %w", err)
+	}
+	rows := make([]ServiceActionRow, len(actions))
+	for i, action := range actions {
+		rows[i] = ServiceActionRow{
+			ID:          action.ID,
+			Code:        action.Code,
+			Name:        action.Name,
+			Description: action.Description,
+			ActionType:  action.ActionType,
+			ConfigJSON:  string(action.ConfigJSON),
+			IsActive:    action.IsActive,
+		}
+	}
+	return rows, nil
 }

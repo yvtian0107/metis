@@ -1,15 +1,21 @@
 package ticket
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	. "metis/internal/app/itsm/definition"
 	. "metis/internal/app/itsm/domain"
 	. "metis/internal/app/itsm/sla"
+	"net/http"
+	"net/http/httptest"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	appcore "metis/internal/app"
 	"metis/internal/app/itsm/engine"
 	"metis/internal/app/itsm/testutil"
@@ -97,6 +103,115 @@ func TestAgentDraftSubmission_IdempotentConfirmedDraftStartsSmartProgressTask(t 
 	}
 }
 
+func TestCreateSmartTicket_BindsImmutableServiceRuntimeVersion(t *testing.T) {
+	db := newTestDB(t)
+	ticketSvc := newSubmissionTicketService(t, db)
+	service := testutil.SeedSmartSubmissionService(t, db)
+	action := ServiceAction{
+		Name:       "Original action",
+		Code:       "notify",
+		ActionType: "http",
+		ConfigJSON: JSONField(`{"url":"https://example.com/original","method":"POST","timeout":30,"retries":3}`),
+		ServiceID:  service.ID,
+		IsActive:   true,
+	}
+	if err := db.Create(&action).Error; err != nil {
+		t.Fatalf("create action: %v", err)
+	}
+
+	created, err := ticketSvc.Create(CreateTicketInput{
+		Title:      "VPN 开通申请",
+		ServiceID:  service.ID,
+		PriorityID: 1,
+		FormData:   JSONField(`{"vpn_account":"admin@example.com"}`),
+	}, 7)
+	if err != nil {
+		t.Fatalf("create ticket: %v", err)
+	}
+	if created.ServiceVersionID == nil || *created.ServiceVersionID == 0 {
+		t.Fatalf("expected smart ticket to bind service_version_id, got %+v", created.ServiceVersionID)
+	}
+
+	if err := db.Model(&ServiceDefinition{}).Where("id = ?", service.ID).Updates(map[string]any{
+		"collaboration_spec": "mutated runtime spec",
+		"agent_config":       JSONField(`{"temperature":0.9}`),
+	}).Error; err != nil {
+		t.Fatalf("mutate service: %v", err)
+	}
+	if err := db.Model(&ServiceAction{}).Where("id = ?", action.ID).Updates(map[string]any{
+		"name":        "Mutated action",
+		"config_json": JSONField(`{"url":"https://example.com/mutated","method":"DELETE","timeout":30,"retries":3}`),
+	}).Error; err != nil {
+		t.Fatalf("mutate action: %v", err)
+	}
+
+	var version ServiceDefinitionVersion
+	if err := db.First(&version, *created.ServiceVersionID).Error; err != nil {
+		t.Fatalf("load service version: %v", err)
+	}
+	if version.CollaborationSpec != service.CollaborationSpec {
+		t.Fatalf("expected snapshot collaboration spec %q, got %q", service.CollaborationSpec, version.CollaborationSpec)
+	}
+	if !strings.Contains(string(version.ActionsJSON), "https://example.com/original") {
+		t.Fatalf("expected version actions snapshot to retain original action config, got %s", version.ActionsJSON)
+	}
+	if strings.Contains(string(version.ActionsJSON), "https://example.com/mutated") {
+		t.Fatalf("version actions snapshot drifted after live action mutation: %s", version.ActionsJSON)
+	}
+}
+
+func TestCreateTicketUsesRuntimeVersionSLASnapshotForDeadlines(t *testing.T) {
+	db := newTestDB(t)
+	ticketSvc := newSubmissionTicketService(t, db)
+	service := testutil.SeedSmartSubmissionService(t, db)
+	sla := SLATemplate{Name: "Snapshot SLA", Code: "snapshot-sla", ResponseMinutes: 7, ResolutionMinutes: 70, IsActive: true}
+	if err := db.Create(&sla).Error; err != nil {
+		t.Fatalf("create sla: %v", err)
+	}
+	if err := db.Model(&ServiceDefinition{}).Where("id = ?", service.ID).Update("sla_id", sla.ID).Error; err != nil {
+		t.Fatalf("bind sla: %v", err)
+	}
+	var priority Priority
+	if err := db.Where("code = ?", "P3").First(&priority).Error; err != nil {
+		t.Fatalf("load priority: %v", err)
+	}
+
+	before := time.Now()
+	created, err := ticketSvc.Create(CreateTicketInput{
+		Title:      "VPN 开通申请",
+		ServiceID:  service.ID,
+		PriorityID: priority.ID,
+		FormData:   JSONField(`{"vpn_account":"admin@example.com"}`),
+	}, 7)
+	after := time.Now()
+	if err != nil {
+		t.Fatalf("create ticket: %v", err)
+	}
+	if created.ServiceVersionID == nil || *created.ServiceVersionID == 0 {
+		t.Fatalf("expected service_version_id, got %v", created.ServiceVersionID)
+	}
+	var version ServiceDefinitionVersion
+	if err := db.First(&version, *created.ServiceVersionID).Error; err != nil {
+		t.Fatalf("load service version: %v", err)
+	}
+	if !strings.Contains(string(version.SLATemplateJSON), `"responseMinutes":7`) {
+		t.Fatalf("expected version SLA snapshot to contain responseMinutes=7, got %s", version.SLATemplateJSON)
+	}
+	if created.SLAResponseDeadline == nil || created.SLAResolutionDeadline == nil {
+		t.Fatalf("expected SLA deadlines, got response=%v resolution=%v", created.SLAResponseDeadline, created.SLAResolutionDeadline)
+	}
+	minResponse := before.Add(7 * time.Minute)
+	maxResponse := after.Add(7 * time.Minute)
+	if created.SLAResponseDeadline.Before(minResponse) || created.SLAResponseDeadline.After(maxResponse) {
+		t.Fatalf("response deadline %s not derived from 7 minute snapshot window [%s,%s]", created.SLAResponseDeadline, minResponse, maxResponse)
+	}
+	minResolution := before.Add(70 * time.Minute)
+	maxResolution := after.Add(70 * time.Minute)
+	if created.SLAResolutionDeadline.Before(minResolution) || created.SLAResolutionDeadline.After(maxResolution) {
+		t.Fatalf("resolution deadline %s not derived from 70 minute snapshot window [%s,%s]", created.SLAResolutionDeadline, minResolution, maxResolution)
+	}
+}
+
 func TestAgentDraftSubmission_SingleSQLiteConnectionDoesNotBlock(t *testing.T) {
 	db := newTestDB(t)
 	sqlDB, err := db.DB()
@@ -165,6 +280,92 @@ func TestAgentDraftSubmission_SingleSQLiteConnectionDoesNotBlock(t *testing.T) {
 	}
 	if created.Status != TicketStatusDecisioning {
 		t.Fatalf("expected created smart ticket status %q, got %q", TicketStatusDecisioning, created.Status)
+	}
+}
+
+func TestAgentTicketUsesP3AsDefaultPriority(t *testing.T) {
+	db := newTestDB(t)
+	ticketSvc := newSubmissionTicketService(t, db)
+	service := testutil.SeedSmartSubmissionService(t, db)
+	p0 := Priority{Name: "P0", Code: "P0", Value: 0, Color: "#dc2626", IsActive: true}
+	if err := db.Create(&p0).Error; err != nil {
+		t.Fatalf("create P0 priority: %v", err)
+	}
+
+	result, err := ticketSvc.CreateFromAgent(context.Background(), tools.AgentTicketRequest{
+		UserID:       7,
+		ServiceID:    service.ID,
+		Summary:      "VPN 开通申请",
+		FormData:     map[string]any{"vpn_account": "admin@dev.com", "request_kind": "线上支持"},
+		SessionID:    101,
+		DraftVersion: 1,
+		FieldsHash:   "fields-v1",
+		RequestHash:  "request-v1",
+	})
+	if err != nil {
+		t.Fatalf("create from agent: %v", err)
+	}
+
+	var priority Priority
+	if err := db.Table("itsm_priorities").
+		Joins("JOIN itsm_tickets ON itsm_tickets.priority_id = itsm_priorities.id").
+		Where("itsm_tickets.id = ?", result.TicketID).
+		First(&priority).Error; err != nil {
+		t.Fatalf("load ticket priority: %v", err)
+	}
+	if priority.Code != "P3" {
+		t.Fatalf("expected agent ticket default priority P3, got %s", priority.Code)
+	}
+}
+
+func TestCreateTicketFailsWhenBoundSLAIsMissingOrInactive(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		setupSLA func(t *testing.T, db *gorm.DB) uint
+	}{
+		{
+			name: "missing",
+			setupSLA: func(t *testing.T, db *gorm.DB) uint {
+				return 999
+			},
+		},
+		{
+			name: "inactive",
+			setupSLA: func(t *testing.T, db *gorm.DB) uint {
+				sla := SLATemplate{Name: "停用 SLA", Code: "inactive-sla", ResponseMinutes: 1, ResolutionMinutes: 5, IsActive: false}
+				if err := db.Create(&sla).Error; err != nil {
+					t.Fatalf("create inactive SLA: %v", err)
+				}
+				if err := db.Model(&sla).Update("is_active", false).Error; err != nil {
+					t.Fatalf("deactivate SLA: %v", err)
+				}
+				return sla.ID
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db := newTestDB(t)
+			ticketSvc := newSubmissionTicketService(t, db)
+			service := testutil.SeedSmartSubmissionService(t, db)
+			slaID := tc.setupSLA(t, db)
+			if err := db.Model(&ServiceDefinition{}).Where("id = ?", service.ID).Update("sla_id", slaID).Error; err != nil {
+				t.Fatalf("bind SLA: %v", err)
+			}
+			var priority Priority
+			if err := db.Where("code = ?", "P3").First(&priority).Error; err != nil {
+				t.Fatalf("load P3 priority: %v", err)
+			}
+
+			_, err := ticketSvc.Create(CreateTicketInput{
+				Title:      "VPN 开通申请",
+				ServiceID:  service.ID,
+				PriorityID: priority.ID,
+				FormData:   JSONField(`{}`),
+			}, 7)
+			if err == nil {
+				t.Fatal("expected ticket creation to fail for invalid bound SLA")
+			}
+		})
 	}
 }
 
@@ -271,6 +472,157 @@ func TestTicketProgress_SingleSQLiteConnectionWithOrgScopeDoesNotBlock(t *testin
 				t.Fatalf("unexpected activity state: %+v", updatedActivity)
 			}
 		})
+	}
+}
+
+func TestTicketProgressRejectsOperatorWithoutPendingAssignment(t *testing.T) {
+	db := newTestDB(t)
+	ticketSvc := newSubmissionTicketService(t, db)
+	service := testutil.SeedSmartSubmissionService(t, db)
+	ticket := Ticket{
+		Code:              "TICK-UNAUTHORIZED-PROGRESS",
+		Title:             "VPN 开通申请",
+		ServiceID:         service.ID,
+		EngineType:        "smart",
+		Status:            TicketStatusWaitingHuman,
+		PriorityID:        1,
+		RequesterID:       1,
+		CurrentActivityID: nil,
+	}
+	if err := db.Create(&ticket).Error; err != nil {
+		t.Fatalf("create ticket: %v", err)
+	}
+	activity := TicketActivity{
+		TicketID:     ticket.ID,
+		Name:         "审批",
+		ActivityType: engine.NodeApprove,
+		Status:       engine.ActivityPending,
+		NodeID:       "approve",
+	}
+	if err := db.Create(&activity).Error; err != nil {
+		t.Fatalf("create activity: %v", err)
+	}
+	assigneeID := uint(7)
+	assignment := TicketAssignment{
+		TicketID:   ticket.ID,
+		ActivityID: activity.ID,
+		UserID:     &assigneeID,
+		AssigneeID: &assigneeID,
+		Status:     AssignmentPending,
+		IsCurrent:  true,
+	}
+	if err := db.Create(&assignment).Error; err != nil {
+		t.Fatalf("create assignment: %v", err)
+	}
+
+	_, err := ticketSvc.Progress(ticket.ID, activity.ID, "approved", "越权同意", nil, 8)
+	if !errors.Is(err, ErrNoActiveAssignment) {
+		t.Fatalf("expected ErrNoActiveAssignment, got %v", err)
+	}
+
+	var reloadedActivity TicketActivity
+	if err := db.First(&reloadedActivity, activity.ID).Error; err != nil {
+		t.Fatalf("reload activity: %v", err)
+	}
+	if reloadedActivity.Status != engine.ActivityPending || reloadedActivity.TransitionOutcome != "" {
+		t.Fatalf("unauthorized progress mutated activity: %+v", reloadedActivity)
+	}
+	var reloadedAssignment TicketAssignment
+	if err := db.First(&reloadedAssignment, assignment.ID).Error; err != nil {
+		t.Fatalf("reload assignment: %v", err)
+	}
+	if reloadedAssignment.Status != AssignmentPending || reloadedAssignment.AssigneeID == nil || *reloadedAssignment.AssigneeID != assigneeID {
+		t.Fatalf("unauthorized progress mutated assignment: %+v", reloadedAssignment)
+	}
+	var completedTimelineCount int64
+	if err := db.Model(&TicketTimeline{}).Where("ticket_id = ? AND event_type = ?", ticket.ID, "activity_completed").Count(&completedTimelineCount).Error; err != nil {
+		t.Fatalf("count completion timeline: %v", err)
+	}
+	if completedTimelineCount != 0 {
+		t.Fatalf("expected no completion timeline, got %d", completedTimelineCount)
+	}
+}
+
+func TestTicketHandlerCreateClassicTicketStartsLifecycle(t *testing.T) {
+	db := newTestDB(t)
+	ticketSvc := newSubmissionTicketService(t, db)
+	service, priority := seedClassicSubmissionService(t, db)
+	handler := &TicketHandler{svc: ticketSvc}
+
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		c.Set("userId", uint(7))
+		c.Set("userRole", model.RoleUser)
+		c.Next()
+	})
+	router.POST("/api/v1/itsm/tickets", handler.Create)
+
+	body := bytes.NewBufferString(`{"title":"经典 VPN 申请","description":"需要网络支持","serviceId":` +
+		jsonNumber(service.ID) + `,"priorityId":` + jsonNumber(priority.ID) + `,"formData":{"request_kind":"network_support"}}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/itsm/tickets", body)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	var ticket Ticket
+	if err := db.Where("title = ?", "经典 VPN 申请").First(&ticket).Error; err != nil {
+		t.Fatalf("load created ticket: %v", err)
+	}
+	if ticket.Source != TicketSourceCatalog || ticket.RequesterID != 7 || ticket.EngineType != "classic" || ticket.Status != TicketStatusWaitingHuman {
+		t.Fatalf("unexpected created ticket: %+v", ticket)
+	}
+	var activity TicketActivity
+	if err := db.Where("ticket_id = ? AND activity_type = ?", ticket.ID, engine.NodeApprove).First(&activity).Error; err != nil {
+		t.Fatalf("load first activity: %v", err)
+	}
+	var assignment TicketAssignment
+	if err := db.Where("ticket_id = ? AND activity_id = ?", ticket.ID, activity.ID).First(&assignment).Error; err != nil {
+		t.Fatalf("load assignment: %v", err)
+	}
+	if assignment.AssigneeID == nil || *assignment.AssigneeID != 8 || assignment.Status != AssignmentPending {
+		t.Fatalf("unexpected assignment: %+v", assignment)
+	}
+}
+
+func TestTicketHandlerCreateRejectsSmartService(t *testing.T) {
+	db := newTestDB(t)
+	ticketSvc := newSubmissionTicketService(t, db)
+	service := testutil.SeedSmartSubmissionService(t, db)
+	var priority Priority
+	if err := db.Where("code = ?", "P3").First(&priority).Error; err != nil {
+		t.Fatalf("load priority: %v", err)
+	}
+	handler := &TicketHandler{svc: ticketSvc}
+
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		c.Set("userId", uint(7))
+		c.Set("userRole", model.RoleUser)
+		c.Next()
+	})
+	router.POST("/api/v1/itsm/tickets", handler.Create)
+
+	body := bytes.NewBufferString(`{"title":"智能 VPN 申请","serviceId":` +
+		jsonNumber(service.ID) + `,"priorityId":` + jsonNumber(priority.ID) + `,"formData":{}}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/itsm/tickets", body)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for smart service, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	var ticketCount int64
+	if err := db.Model(&Ticket{}).Where("title = ?", "智能 VPN 申请").Count(&ticketCount).Error; err != nil {
+		t.Fatalf("count tickets: %v", err)
+	}
+	if ticketCount != 0 {
+		t.Fatalf("expected smart service API submission to create no tickets, got %d", ticketCount)
 	}
 }
 
@@ -399,6 +751,59 @@ func TestRecoverHandoffHuman_WritesAuditTimeline(t *testing.T) {
 
 func newSubmissionTicketService(t *testing.T, db *gorm.DB) *TicketService {
 	return newSubmissionTicketServiceWithOrgResolver(t, db, nil)
+}
+
+func seedClassicSubmissionService(t *testing.T, db *gorm.DB) (ServiceDefinition, Priority) {
+	t.Helper()
+	if err := db.Create(&model.User{
+		BaseModel: model.BaseModel{ID: 7},
+		Username:  "classic-requester",
+		IsActive:  true,
+	}).Error; err != nil {
+		t.Fatalf("create requester: %v", err)
+	}
+	if err := db.Create(&model.User{
+		BaseModel: model.BaseModel{ID: 8},
+		Username:  "classic-approver",
+		IsActive:  true,
+	}).Error; err != nil {
+		t.Fatalf("create approver: %v", err)
+	}
+	priority := Priority{Name: "P3", Code: "P3", Value: 3, Color: "#64748b", IsActive: true}
+	if err := db.Create(&priority).Error; err != nil {
+		t.Fatalf("create priority: %v", err)
+	}
+	catalog := ServiceCatalog{Name: "账号与权限", Code: "classic-account", IsActive: true}
+	if err := db.Create(&catalog).Error; err != nil {
+		t.Fatalf("create catalog: %v", err)
+	}
+	workflow := JSONField(`{
+		"nodes": [
+			{"id": "start", "type": "start", "data": {"label": "开始"}},
+			{"id": "approve", "type": "approve", "data": {"label": "审批", "participants": [{"type": "user", "value": "8"}]}},
+			{"id": "end", "type": "end", "data": {"label": "结束"}}
+		],
+		"edges": [
+			{"id": "e1", "source": "start", "target": "approve", "data": {}},
+			{"id": "e2", "source": "approve", "target": "end", "data": {"outcome": "approved"}}
+		]
+	}`)
+	service := ServiceDefinition{
+		Name:         "经典 VPN 开通",
+		Code:         "classic-vpn-access",
+		CatalogID:    catalog.ID,
+		EngineType:   "classic",
+		WorkflowJSON: workflow,
+		IsActive:     true,
+	}
+	if err := db.Create(&service).Error; err != nil {
+		t.Fatalf("create service: %v", err)
+	}
+	return service, priority
+}
+
+func jsonNumber(v uint) string {
+	return strconv.FormatUint(uint64(v), 10)
 }
 
 func newSubmissionTicketServiceWithOrgResolver(t *testing.T, db *gorm.DB, orgResolver appcore.OrgResolver) *TicketService {

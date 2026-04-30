@@ -80,7 +80,7 @@ func completePendingAssignment(tx *gorm.DB, resolver *ParticipantResolver, activ
 		positionIDs, departmentIDs = resolver.userOrgIDs(operatorID)
 	}
 	query := tx.Model(&assignmentModel{}).
-		Where("activity_id = ? AND status = ?", activityID, "pending").
+		Where("activity_id = ? AND status IN ?", activityID, []string{"pending", "claimed"}).
 		Where(assignmentOperatorCondition(tx, "itsm_ticket_assignments", operatorID, positionIDs, departmentIDs))
 
 	status := HumanActivityResultStatus(outcome)
@@ -94,7 +94,14 @@ func completePendingAssignment(tx *gorm.DB, resolver *ParticipantResolver, activ
 		return nil, false, result.Error
 	}
 	if result.RowsAffected == 0 {
-		return nil, false, nil
+		var assignmentCount int64
+		if err := tx.Model(&assignmentModel{}).Where("activity_id = ?", activityID).Count(&assignmentCount).Error; err != nil {
+			return nil, false, err
+		}
+		if assignmentCount == 0 {
+			return nil, false, nil
+		}
+		return nil, false, ErrNoActiveAssignment
 	}
 
 	var completed assignmentModel
@@ -105,4 +112,14 @@ func completePendingAssignment(tx *gorm.DB, resolver *ParticipantResolver, activ
 		return nil, true, nil
 	}
 	return &completed, true, nil
+}
+
+func activityBecameInactive(tx *gorm.DB, activityID uint) bool {
+	var row struct {
+		Status string
+	}
+	if err := tx.Model(&activityModel{}).Select("status").Where("id = ?", activityID).First(&row).Error; err != nil {
+		return false
+	}
+	return row.Status != ActivityPending && row.Status != ActivityInProgress
 }

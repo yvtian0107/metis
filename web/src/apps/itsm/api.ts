@@ -20,6 +20,20 @@ export function fetchCatalogTree() {
   return api.get<CatalogItem[]>("/api/v1/itsm/catalogs/tree").then((r) => r ?? [])
 }
 
+export interface CatalogServiceCounts {
+  total: number
+  byCatalogId: Record<number, number>
+  byRootCatalogId: Record<number, number>
+}
+
+export function fetchCatalogServiceCounts() {
+  return api.get<CatalogServiceCounts>("/api/v1/itsm/catalogs/service-counts").then((r) => r ?? {
+    total: 0,
+    byCatalogId: {},
+    byRootCatalogId: {},
+  })
+}
+
 export function createCatalog(data: {
   name: string
   code: string
@@ -81,6 +95,7 @@ export interface SmartAgentConfig {
 export interface ServiceDefListParams {
   keyword?: string
   catalogId?: number
+  rootCatalogId?: number
   isActive?: boolean
   page?: number
   pageSize?: number
@@ -89,7 +104,8 @@ export interface ServiceDefListParams {
 export function fetchServiceDefs(params: ServiceDefListParams) {
   const p = new URLSearchParams()
   if (params.keyword) p.set("keyword", params.keyword)
-  if (params.catalogId) p.set("catalogId", String(params.catalogId))
+  if (params.catalogId !== undefined) p.set("catalogId", String(params.catalogId))
+  if (params.rootCatalogId !== undefined) p.set("rootCatalogId", String(params.rootCatalogId))
   if (params.isActive !== undefined) p.set("isActive", String(params.isActive))
   p.set("page", String(params.page ?? 1))
   p.set("pageSize", String(params.pageSize ?? 20))
@@ -514,6 +530,8 @@ export interface ServiceDeskState {
   confirmed_service_id?: number
   confirmation_required: boolean
   loaded_service_id?: number
+  service_version_id?: number
+  service_version_hash?: string
   draft_summary?: string
   draft_form_data?: Record<string, unknown>
   request_text?: string
@@ -535,8 +553,9 @@ export interface AgenticUISurface<TPayload = unknown> {
 }
 
 export interface ITSMDraftFormSurfacePayload {
-  status: "loading" | "ready" | "submitted"
+  status: "loading" | "ready" | "submitted" | "error"
   serviceId?: number
+  serviceVersionId?: number
   title?: string
   summary?: string
   schema?: unknown
@@ -565,6 +584,7 @@ export interface SubmitDraftResponse {
   ticketCode?: string
   status?: string
   message?: string
+  nextExpectedAction?: string
   failureReason?: string
   nodeLabel?: string
   guidance?: string

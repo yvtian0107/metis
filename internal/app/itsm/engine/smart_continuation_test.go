@@ -136,6 +136,7 @@ func TestSmartProgressContinuationWaitsForParallelGroupConvergence(t *testing.T)
 	if err := db.Create(&second).Error; err != nil {
 		t.Fatalf("create second activity: %v", err)
 	}
+	assignSmartActivityToOperator(t, db, ticket.ID, second.ID, 1)
 
 	submitter := &txRecordingSubmitter{}
 	eng := NewSmartEngine(availableDecisionExecutor{}, nil, nil, nil, submitter, nil)
@@ -244,6 +245,46 @@ func TestSmartStartInitializesWorkflowWithoutRunningDecision(t *testing.T) {
 	}
 	if activityCount != 0 {
 		t.Fatalf("initial smart start should not run decision synchronously, got %d activities", activityCount)
+	}
+}
+
+func TestSmartStartAllowsServiceWithoutServiceAgent(t *testing.T) {
+	db := newSmartContinuationDB(t)
+
+	service := serviceModel{
+		Name:       "智能 VPN 服务",
+		EngineType: "smart",
+	}
+	if err := db.Create(&service).Error; err != nil {
+		t.Fatalf("create service: %v", err)
+	}
+	ticket := ticketModel{
+		ServiceID:   service.ID,
+		Status:      "pending",
+		EngineType:  "smart",
+		RequesterID: 7,
+	}
+	if err := db.Create(&ticket).Error; err != nil {
+		t.Fatalf("create ticket: %v", err)
+	}
+
+	eng := NewSmartEngine(availableDecisionExecutor{}, nil, nil, nil, nil, nil)
+	err := db.Transaction(func(tx *gorm.DB) error {
+		return eng.Start(context.Background(), tx, StartParams{
+			TicketID:    ticket.ID,
+			RequesterID: ticket.RequesterID,
+		})
+	})
+	if err != nil {
+		t.Fatalf("start smart workflow without service agent: %v", err)
+	}
+
+	var reloaded ticketModel
+	if err := db.First(&reloaded, ticket.ID).Error; err != nil {
+		t.Fatalf("reload ticket: %v", err)
+	}
+	if reloaded.Status != TicketStatusDecisioning {
+		t.Fatalf("expected ticket status %q, got %q", TicketStatusDecisioning, reloaded.Status)
 	}
 }
 
@@ -511,11 +552,30 @@ func createSmartContinuationTicket(t *testing.T, db *gorm.DB, groupID string, ac
 	if err := db.Create(&activity).Error; err != nil {
 		t.Fatalf("create activity: %v", err)
 	}
+	if activityStatus == ActivityPending {
+		assignSmartActivityToOperator(t, db, ticket.ID, activity.ID, 1)
+	}
 	if err := db.Model(&ticketModel{}).Where("id = ?", ticket.ID).Update("current_activity_id", activity.ID).Error; err != nil {
 		t.Fatalf("set current activity: %v", err)
 	}
 	ticket.CurrentActivityID = &activity.ID
 	return ticket, activity
+}
+
+func assignSmartActivityToOperator(t *testing.T, db *gorm.DB, ticketID uint, activityID uint, operatorID uint) {
+	t.Helper()
+	assignment := assignmentModel{
+		TicketID:        ticketID,
+		ActivityID:      activityID,
+		ParticipantType: "user",
+		UserID:          &operatorID,
+		AssigneeID:      &operatorID,
+		Status:          ActivityPending,
+		IsCurrent:       true,
+	}
+	if err := db.Create(&assignment).Error; err != nil {
+		t.Fatalf("create assignment: %v", err)
+	}
 }
 
 type rootDBPositionResolver struct {

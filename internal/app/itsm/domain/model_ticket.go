@@ -64,6 +64,7 @@ type Ticket struct {
 	Title                 string     `json:"title" gorm:"size:256;not null"`
 	Description           string     `json:"description" gorm:"type:text"`
 	ServiceID             uint       `json:"serviceId" gorm:"not null;index"`
+	ServiceVersionID      *uint      `json:"serviceVersionId" gorm:"index"`
 	EngineType            string     `json:"engineType" gorm:"size:16;not null"`
 	Status                string     `json:"status" gorm:"size:32;not null;default:submitted;index"`
 	Outcome               string     `json:"outcome" gorm:"size:32;index"`
@@ -91,6 +92,7 @@ type TicketResponse struct {
 	Title                 string               `json:"title"`
 	Description           string               `json:"description"`
 	ServiceID             uint                 `json:"serviceId"`
+	ServiceVersionID      *uint                `json:"serviceVersionId"`
 	ServiceName           string               `json:"serviceName"`
 	IntakeFormSchema      JSONField            `json:"intakeFormSchema,omitempty"`
 	EngineType            string               `json:"engineType"`
@@ -209,6 +211,7 @@ func (t *Ticket) ToResponse() TicketResponse {
 		Title:                 t.Title,
 		Description:           t.Description,
 		ServiceID:             t.ServiceID,
+		ServiceVersionID:      t.ServiceVersionID,
 		EngineType:            t.EngineType,
 		Status:                t.Status,
 		Outcome:               t.Outcome,

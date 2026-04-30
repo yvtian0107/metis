@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useState, type ReactNode } from "react"
-import { useLocation, useParams, useNavigate } from "react-router"
+import { useParams, useNavigate } from "react-router"
 import { useTranslation } from "react-i18next"
 import { useForm } from "react-hook-form"
 import { z } from "zod"
@@ -56,7 +56,6 @@ import { Textarea } from "@/components/ui/textarea"
 import { Progress } from "@/components/ui/progress"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { usePermission } from "@/hooks/use-permission"
-import { getActiveMenuPermission } from "@/lib/navigation-state"
 import { useAuthStore } from "@/stores/auth"
 import {
   assignTicket,
@@ -80,11 +79,9 @@ import {
   resolveFieldDisplayValue as resolveTicketFieldDisplayValue,
   resolveFieldLabel as resolveTicketFieldLabel,
 } from "./field-display"
-import { TICKET_MENU_PERMISSION } from "../navigation"
+import { buildTicketActionContext } from "./ticket-action-context"
 
-const ACTIVE_STATUSES = new Set(["submitted", "waiting_human", "approved_decisioning", "rejected_decisioning", "decisioning", "executing_action"])
 const TERMINAL_STATUSES = new Set(["completed", "rejected", "withdrawn", "cancelled", "failed"])
-const HUMAN_ACTIVITY_TYPES = new Set(["approve", "form", "process"])
 const DEFAULT_DECISIONING_MESSAGE = "流程决策岗正在生成下一步，页面会自动刷新。"
 type ApprovalOutcome = "approved" | "rejected"
 
@@ -666,7 +663,11 @@ function FlatAside({
   decisioningMessage,
   isDecisioning,
   isActive,
-  activeHumanActivity,
+  displayHumanActivity,
+  selectedActionableActivity,
+  actionableActivities,
+  selectedActionableActivityId,
+  setSelectedActionableActivityId,
   isCurrentUserResponsible,
   progressPending,
   openApprovalSheet,
@@ -683,7 +684,6 @@ function FlatAside({
   canWithdraw,
   withdrawForm,
   setWithdrawOpen,
-  actionableActivity,
 }: {
   ticket: TicketItem
   owner: string
@@ -691,7 +691,11 @@ function FlatAside({
   decisioningMessage: string
   isDecisioning: boolean
   isActive: boolean
-  activeHumanActivity: ActivityItem | undefined
+  displayHumanActivity: ActivityItem | undefined
+  selectedActionableActivity: ActivityItem | undefined
+  actionableActivities: ActivityItem[]
+  selectedActionableActivityId: number | null
+  setSelectedActionableActivityId: (activityId: number) => void
   isCurrentUserResponsible: boolean
   progressPending: boolean
   openApprovalSheet: (activityId: number, outcome: ApprovalOutcome) => void
@@ -708,7 +712,6 @@ function FlatAside({
   canWithdraw: boolean
   withdrawForm: ReturnType<typeof useForm<{ reason: string }>>
   setWithdrawOpen: (open: boolean) => void
-  actionableActivity: ActivityItem | undefined
 }) {
   return (
     <aside className="workspace-surface rounded-[1.2rem] p-4">
@@ -739,17 +742,39 @@ function FlatAside({
           </p>
         )}
 
-        {canProcess && isActive && !isDecisioning && activeHumanActivity && isCurrentUserResponsible && getNodeOutcomes(activeHumanActivity.activityType).map((outcome) => (
+        {canProcess && actionableActivities.length > 1 && (
+          <div className="col-span-2 space-y-1.5">
+            <p className="text-xs font-medium text-muted-foreground">待处理节点</p>
+            <Select
+              value={selectedActionableActivityId ? String(selectedActionableActivityId) : ""}
+              onValueChange={(value) => setSelectedActionableActivityId(Number(value))}
+              disabled={progressPending}
+            >
+              <SelectTrigger className="h-8 text-xs">
+                <SelectValue placeholder="选择处理节点" />
+              </SelectTrigger>
+              <SelectContent>
+                {actionableActivities.map((activity) => (
+                  <SelectItem key={activity.id} value={String(activity.id)}>
+                    {activity.name || activity.activityType || `#${activity.id}`}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
+
+        {canProcess && isActive && !isDecisioning && selectedActionableActivity && isCurrentUserResponsible && getNodeOutcomes(selectedActionableActivity.activityType).map((outcome) => (
           <Button
             data-testid={outcome === "approved" ? "itsm-ticket-approve-button" : "itsm-ticket-reject-button"}
-            key={`${activeHumanActivity.id}-${outcome}`}
+            key={`${selectedActionableActivity.id}-${outcome}`}
             size="sm"
-                    className={outcome === "rejected" ? "w-full text-destructive" : "w-full"}
-                    variant={outcome === "approved" ? "default" : "outline"}
-                    disabled={progressPending}
-                    onClick={() => openApprovalSheet(activeHumanActivity.id, outcome)}
-                  >
-            <DecisionButtonContent icon={outcome === "approved" ? CheckCircle2 : CircleX}>{outcomeLabel(activeHumanActivity, outcome, t)}</DecisionButtonContent>
+            className={outcome === "rejected" ? "w-full text-destructive" : "w-full"}
+            variant={outcome === "approved" ? "default" : "outline"}
+            disabled={progressPending}
+            onClick={() => openApprovalSheet(selectedActionableActivity.id, outcome)}
+          >
+            <DecisionButtonContent icon={outcome === "approved" ? CheckCircle2 : CircleX}>{outcomeLabel(selectedActionableActivity, outcome, t)}</DecisionButtonContent>
           </Button>
         ))}
 
@@ -771,7 +796,7 @@ function FlatAside({
           </Button>
         )}
 
-        {isActive && !isDecisioning && actionableActivity && !isCurrentUserResponsible && (
+        {isActive && !isDecisioning && displayHumanActivity && !isCurrentUserResponsible && (
           <p className="col-span-2 rounded-lg border border-border/50 bg-background/35 p-3 text-sm text-muted-foreground">
             当前步骤正在等待责任人处理，你可以查看依据和审计记录。
           </p>
@@ -811,7 +836,6 @@ function renderFlowTab(
 export function Component() {
   const { t } = useTranslation(["itsm", "common"])
   const { id } = useParams<{ id: string }>()
-  const location = useLocation()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const ticketId = Number(id)
@@ -821,16 +845,11 @@ export function Component() {
   const [approvalOpen, setApprovalOpen] = useState(false)
   const [approvalOutcome, setApprovalOutcome] = useState<ApprovalOutcome>("approved")
   const [approvalActivityId, setApprovalActivityId] = useState<number | null>(null)
+  const [selectedActionableActivityId, setSelectedActionableActivityId] = useState<number | null>(null)
   const [decisioningMessage, setDecisioningMessage] = useState(DEFAULT_DECISIONING_MESSAGE)
 
   const canAssign = usePermission("itsm:ticket:assign")
   const canCancel = usePermission("itsm:ticket:cancel")
-  const activeMenuPermission = getActiveMenuPermission(location.state)
-  const canProcessFromEntry = activeMenuPermission === TICKET_MENU_PERMISSION.approvalPending
-  const canManageFromEntry = activeMenuPermission === TICKET_MENU_PERMISSION.list || activeMenuPermission === "itsm:ticket:monitor"
-  const canWithdrawFromEntry = activeMenuPermission === TICKET_MENU_PERMISSION.mine
-  const canAssignFromEntry = canAssign && canManageFromEntry
-  const canCancelFromEntry = canCancel && canManageFromEntry
   const currentUser = useAuthStore((s) => s.user)
   const currentUserId = currentUser?.id ?? 0
 
@@ -1010,21 +1029,27 @@ export function Component() {
     }
   }, [queryClient, ticket, ticketId, timeline])
 
+  const actionContext = buildTicketActionContext({
+    ticket,
+    activities,
+    currentUserId,
+    canAssignPermission: canAssign,
+    canCancelPermission: canCancel,
+  })
+
   const currentActivity = ticket ? activities.find((a) => a.id === ticket.currentActivityId) : undefined
-  const activeHumanActivity = activities.find(
-    (a) => ["pending", "in_progress"].includes(a.status) && HUMAN_ACTIVITY_TYPES.has(a.activityType),
-  )
+  const activeHumanActivity = actionContext.displayHumanActivity
+  const selectedActionableActivity = selectedActionableActivityId
+    ? actionContext.actionableActivities.find((activity) => activity.id === selectedActionableActivityId)
+    : undefined
+  const actionableActivity = selectedActionableActivity ?? actionContext.selectedActionableActivity
   const explanationActivity = currentActivity ?? [...activities].reverse().find((a) => a.aiDecision || a.aiReasoning)
   const plan = parseDecision(explanationActivity)
   const confidence = confidenceOf(explanationActivity, plan)
   const confidencePct = confidence == null ? null : Math.round(confidence * 100)
-  const isActive = ticket ? ACTIVE_STATUSES.has(ticket.status) : false
-  const isDecisioning = ticket?.engineType === "smart" && ticket.smartState === "ai_reasoning"
-  const canWithdraw = Boolean(canWithdrawFromEntry && ticket && isActive && !isDecisioning && ticket.status === "submitted" && ticket.requesterId === currentUserId)
-  const actionableActivity = activeHumanActivity
-  const isCurrentUserResponsible = Boolean(
-    ticket?.canAct || actionableActivity?.canAct || (ticket?.assigneeId && ticket.assigneeId === currentUserId),
-  )
+  const isActive = actionContext.isActive
+  const isDecisioning = actionContext.isDecisioning
+  const isCurrentUserResponsible = Boolean(actionableActivity?.canAct)
   const nextStep = ticket
     ? (isDecisioning ? t("itsm:tickets.statusDecisioning") : summarizeDecision(
       plan,
@@ -1081,27 +1106,30 @@ export function Component() {
             ticket={ticket}
             owner={owner}
             confidencePct={confidencePct}
-          decisioningMessage={decisioningMessage}
-          isDecisioning={isDecisioning}
-          isActive={isActive}
-          activeHumanActivity={activeHumanActivity}
+            decisioningMessage={decisioningMessage}
+            isDecisioning={isDecisioning}
+            isActive={isActive}
+            displayHumanActivity={activeHumanActivity}
+            selectedActionableActivity={actionableActivity}
+            actionableActivities={actionContext.actionableActivities}
+            selectedActionableActivityId={actionableActivity?.id ?? null}
+            setSelectedActionableActivityId={setSelectedActionableActivityId}
             isCurrentUserResponsible={isCurrentUserResponsible}
             progressPending={progressMut.isPending}
             openApprovalSheet={openApprovalSheet}
             getNodeOutcomes={getNodeOutcomes}
             outcomeLabel={outcomeLabel}
             t={t}
-            canProcess={canProcessFromEntry}
-            canAssign={canAssignFromEntry}
+            canProcess={actionContext.canProcess}
+            canAssign={actionContext.canAssign}
             assignForm={assignForm}
             setAssignOpen={setAssignOpen}
-            canCancel={canCancelFromEntry}
+            canCancel={actionContext.canCancel}
             cancelForm={cancelForm}
             setCancelOpen={setCancelOpen}
-            canWithdraw={canWithdraw}
+            canWithdraw={actionContext.canWithdraw}
             withdrawForm={withdrawForm}
             setWithdrawOpen={setWithdrawOpen}
-            actionableActivity={actionableActivity}
           />
         </div>
       </div>

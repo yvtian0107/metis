@@ -142,6 +142,35 @@ form 节点必须包含 formSchema，描述该节点需要收集的字段：
 
 后续排他网关必须基于 form.access_reason 路由，不要改用 form.reason、form.purpose、form.request_kind、form.access_purpose 或自然语言字段名。
 
+### 生产数据库备份白名单临时放行表单字段
+
+当协作规范描述“生产数据库备份白名单临时放行申请”，并要求收集目标数据库、来源 IP、放行时间窗、申请原因时，申请表单字段 key 必须稳定为：
+- database_name：目标数据库
+- source_ip：来源 IP
+- whitelist_window：白名单放行时间窗
+- access_reason：申请原因
+
+该服务的预检和放行动作由智能引擎运行时执行；但为了让用户在流程图上看懂完整业务链路，参考路径 workflow_json 也必须表达这两个动作节点。
+如果可用动作列表存在 code='db_backup_whitelist_precheck' 和 code='db_backup_whitelist_apply'，必须生成两个 type="action" 节点，并使用对应的数字 action_id：
+- 申请表单 -> 备份白名单预检 action -> 数据库管理员处理 -> 执行备份白名单放行 action -> 结束
+- 数据库管理员处理 rejected 出边直接指向公共结束节点，不经过放行动作节点。
+运行时仍由智能引擎优先通过 decision.execute_action 同步执行预检和放行动作，不要因为 workflow_json 中有 action 节点就改变为异步动作活动。
+
+### 高风险变更协同申请（Boss）表单字段
+
+当协作规范描述“高风险变更协同申请（Boss）”，并要求收集申请主题、申请类别、风险等级、期望完成时间、变更窗口、影响范围、回滚要求、影响模块和变更明细时，申请表单字段 key 必须稳定为：
+- subject：申请主题
+- request_category：申请类别；选项值为 prod_change、access_grant、emergency_support
+- risk_level：风险等级；选项值为 low、medium、high
+- expected_finish_time：期望完成时间
+- change_window：变更窗口
+- impact_scope：影响范围
+- rollback_required：回滚要求；选项值为 required、not_required
+- impact_modules：影响模块；选项值为 gateway、payment、monitoring、order
+- change_items：变更明细表；表格列为 system、resource、permission_level、effective_range、reason，其中 permission_level 选项值为 read、read_write
+
+该服务是两级串行人工处理：先总部处理人，再信息部运维管理员；参考路径应使用两个 process 节点和公共结束节点表达。
+
 ## 排他网关（exclusive）条件格式
 
 排他网关的路由条件配置在**出边的 data.condition** 中（不是节点上）：

@@ -19,6 +19,7 @@ import (
 	"metis/internal/app"
 	"metis/internal/app/itsm/engine"
 	"metis/internal/app/itsm/tools"
+	"metis/internal/model"
 )
 
 var (
@@ -35,13 +36,18 @@ var (
 	ErrNoActiveAssignment        = errors.New("no active pending assignment for this activity")
 	ErrNotRequester              = errors.New("only the ticket requester can withdraw")
 	ErrTicketClaimed             = errors.New("ticket has been claimed and cannot be withdrawn")
+	ErrTicketForbidden           = errors.New("ticket access forbidden")
 	ErrInvalidProgressOutcome    = errors.New("人工节点只能提交 approved 或 rejected")
+	ErrCatalogSubmissionClassic  = errors.New("服务目录提单仅支持经典服务，请通过服务台提交智能服务")
 	ErrInvalidRecoveryAction     = errors.New("invalid recovery action")
 	ErrRecoveryActionTooFrequent = errors.New("recovery action is too frequent")
 	errSubmissionAlreadyExists   = errors.New("service desk submission already exists")
 )
 
-const recoveryDedupWindow = 15 * time.Second
+const (
+	defaultAgentPriorityCode = "P3"
+	recoveryDedupWindow      = 15 * time.Second
+)
 
 type TicketService struct {
 	ticketRepo    *TicketRepo
@@ -74,13 +80,14 @@ func NewTicketService(i do.Injector) (*TicketService, error) {
 }
 
 type CreateTicketInput struct {
-	Title          string    `json:"title"`
-	Description    string    `json:"description"`
-	ServiceID      uint      `json:"serviceId"`
-	PriorityID     uint      `json:"priorityId"`
-	FormData       JSONField `json:"formData"`
-	Source         string    `json:"source"`
-	AgentSessionID *uint     `json:"agentSessionId"`
+	Title            string    `json:"title"`
+	Description      string    `json:"description"`
+	ServiceID        uint      `json:"serviceId"`
+	ServiceVersionID *uint     `json:"serviceVersionId"`
+	PriorityID       uint      `json:"priorityId"`
+	FormData         JSONField `json:"formData"`
+	Source           string    `json:"source"`
+	AgentSessionID   *uint     `json:"agentSessionId"`
 }
 
 func (s *TicketService) Create(input CreateTicketInput, requesterID uint) (*Ticket, error) {
@@ -101,6 +108,21 @@ func (s *TicketService) Create(input CreateTicketInput, requesterID uint) (*Tick
 	return s.ticketRepo.FindByID(ticket.ID)
 }
 
+func (s *TicketService) CreateCatalog(input CreateTicketInput, requesterID uint) (*Ticket, error) {
+	svc, err := s.serviceRepo.FindByID(input.ServiceID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrServiceDefNotFound
+		}
+		return nil, err
+	}
+	if svc.EngineType != "classic" {
+		return nil, ErrCatalogSubmissionClassic
+	}
+	input.Source = TicketSourceCatalog
+	return s.Create(input, requesterID)
+}
+
 func (s *TicketService) prepareTicket(input CreateTicketInput, requesterID uint) (*Ticket, *ServiceDefinition, error) {
 	// Validate service
 	svc, err := s.serviceRepo.FindByID(input.ServiceID)
@@ -113,6 +135,30 @@ func (s *TicketService) prepareTicket(input CreateTicketInput, requesterID uint)
 	if !svc.IsActive {
 		return nil, nil, ErrServiceNotActive
 	}
+	var version *ServiceDefinitionVersion
+	if input.ServiceVersionID != nil && *input.ServiceVersionID > 0 {
+		var snapshot ServiceDefinitionVersion
+		if err := s.ticketRepo.DB().
+			Where("id = ? AND service_id = ?", *input.ServiceVersionID, input.ServiceID).
+			First(&snapshot).Error; err != nil {
+			return nil, nil, err
+		}
+		version = &snapshot
+	} else {
+		version, err = s.serviceRepo.GetOrCreateRuntimeVersion(input.ServiceID)
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+	runtimeSvc := *svc
+	runtimeSvc.EngineType = version.EngineType
+	runtimeSvc.SLAID = version.SLAID
+	runtimeSvc.IntakeFormSchema = version.IntakeFormSchema
+	runtimeSvc.WorkflowJSON = version.WorkflowJSON
+	runtimeSvc.CollaborationSpec = version.CollaborationSpec
+	runtimeSvc.AgentID = version.AgentID
+	runtimeSvc.AgentConfig = version.AgentConfig
+	runtimeSvc.KnowledgeBaseIDs = version.KnowledgeBaseIDs
 
 	// Validate priority
 	if _, err := s.priorityRepo.FindByID(input.PriorityID); err != nil {
@@ -123,11 +169,11 @@ func (s *TicketService) prepareTicket(input CreateTicketInput, requesterID uint)
 	}
 
 	// For classic engine, validate workflow_json before creating ticket
-	if svc.EngineType == "classic" {
-		if len(svc.WorkflowJSON) == 0 {
+	if runtimeSvc.EngineType == "classic" {
+		if len(runtimeSvc.WorkflowJSON) == 0 {
 			return nil, nil, errors.New("服务未配置工作流")
 		}
-		if errs := engine.ValidateWorkflow(json.RawMessage(svc.WorkflowJSON)); len(errs) > 0 {
+		if errs := engine.ValidateWorkflow(json.RawMessage(runtimeSvc.WorkflowJSON)); len(errs) > 0 {
 			return nil, nil, errors.New("工作流校验失败: " + errs[0].Message)
 		}
 	}
@@ -143,37 +189,45 @@ func (s *TicketService) prepareTicket(input CreateTicketInput, requesterID uint)
 	}
 
 	ticket := &Ticket{
-		Code:           code,
-		Title:          input.Title,
-		Description:    input.Description,
-		ServiceID:      input.ServiceID,
-		EngineType:     svc.EngineType,
-		Status:         TicketStatusSubmitted,
-		PriorityID:     input.PriorityID,
-		RequesterID:    requesterID,
-		Source:         source,
-		AgentSessionID: input.AgentSessionID,
-		FormData:       input.FormData,
-		SLAStatus:      SLAStatusOnTrack,
+		Code:             code,
+		Title:            input.Title,
+		Description:      input.Description,
+		ServiceID:        input.ServiceID,
+		ServiceVersionID: &version.ID,
+		EngineType:       runtimeSvc.EngineType,
+		Status:           TicketStatusSubmitted,
+		PriorityID:       input.PriorityID,
+		RequesterID:      requesterID,
+		Source:           source,
+		AgentSessionID:   input.AgentSessionID,
+		FormData:         input.FormData,
+		SLAStatus:        SLAStatusOnTrack,
 	}
 
 	// Snapshot workflow_json for classic engine
-	if svc.EngineType == "classic" {
-		ticket.WorkflowJSON = svc.WorkflowJSON
+	if runtimeSvc.EngineType == "classic" {
+		ticket.WorkflowJSON = runtimeSvc.WorkflowJSON
 	}
 
-	// Calculate SLA deadlines
-	if svc.SLAID != nil {
-		sla, err := s.slaRepo.FindByID(*svc.SLAID)
-		if err == nil {
-			now := time.Now()
-			responseDeadline := now.Add(time.Duration(sla.ResponseMinutes) * time.Minute)
-			resolutionDeadline := now.Add(time.Duration(sla.ResolutionMinutes) * time.Minute)
-			ticket.SLAResponseDeadline = &responseDeadline
-			ticket.SLAResolutionDeadline = &resolutionDeadline
+	// Calculate SLA deadlines from the bound service definition snapshot.
+	if runtimeSvc.SLAID != nil {
+		var sla SLATemplateResponse
+		if len(version.SLATemplateJSON) == 0 {
+			return nil, nil, ErrSLATemplateNotFound
 		}
+		if err := json.Unmarshal(version.SLATemplateJSON, &sla); err != nil {
+			return nil, nil, err
+		}
+		if !sla.IsActive {
+			return nil, nil, ErrSLATemplateNotFound
+		}
+		now := time.Now()
+		responseDeadline := now.Add(time.Duration(sla.ResponseMinutes) * time.Minute)
+		resolutionDeadline := now.Add(time.Duration(sla.ResolutionMinutes) * time.Minute)
+		ticket.SLAResponseDeadline = &responseDeadline
+		ticket.SLAResolutionDeadline = &resolutionDeadline
 	}
-	return ticket, svc, nil
+	return ticket, &runtimeSvc, nil
 }
 
 func (s *TicketService) createTicketLifecycleInTx(ctx context.Context, tx *gorm.DB, ticket *Ticket, svc *ServiceDefinition, requesterID uint) error {
@@ -218,21 +272,21 @@ func (s *TicketService) createTicketLifecycleInTx(ctx context.Context, tx *gorm.
 // (validation, SLA, engine start, timeline). This ensures agent-created tickets are identical to
 // UI-created tickets in terms of lifecycle processing.
 func (s *TicketService) CreateFromAgent(ctx context.Context, req tools.AgentTicketRequest) (*tools.AgentTicketResult, error) {
-	// Resolve default priority (lowest value = highest priority)
-	defaultPriority, err := s.priorityRepo.FindDefaultActive()
+	defaultPriority, err := s.priorityRepo.FindActiveByCode(defaultAgentPriorityCode)
 	if err != nil {
-		return nil, fmt.Errorf("no active priority found: %w", err)
+		return nil, fmt.Errorf("default agent priority %s is not active: %w", defaultAgentPriorityCode, err)
 	}
 
 	formJSON, _ := json.Marshal(req.FormData)
 	input := CreateTicketInput{
-		Title:          req.Summary,
-		Description:    req.Summary,
-		ServiceID:      req.ServiceID,
-		PriorityID:     defaultPriority.ID,
-		FormData:       JSONField(formJSON),
-		Source:         TicketSourceAgent,
-		AgentSessionID: &req.SessionID,
+		Title:            req.Summary,
+		Description:      req.Summary,
+		ServiceID:        req.ServiceID,
+		ServiceVersionID: serviceVersionIDPointer(req.ServiceVersionID),
+		PriorityID:       defaultPriority.ID,
+		FormData:         JSONField(formJSON),
+		Source:           TicketSourceAgent,
+		AgentSessionID:   &req.SessionID,
 	}
 
 	ticket, err := s.createAgentTicket(ctx, input, req)
@@ -349,6 +403,13 @@ func (s *TicketService) createAgentTicket(ctx context.Context, input CreateTicke
 	return s.ticketRepo.FindByID(created.ID)
 }
 
+func serviceVersionIDPointer(id uint) *uint {
+	if id == 0 {
+		return nil
+	}
+	return &id
+}
+
 func (s *TicketService) findSubmittedDraftTicket(sessionID uint, draftVersion int, fieldsHash string) (*Ticket, bool, error) {
 	var submission ServiceDeskSubmission
 	result := s.ticketRepo.DB().
@@ -417,6 +478,9 @@ func (s *TicketService) Progress(ticketID uint, activityID uint, outcome string,
 			OperatorOrgScopeReady: true,
 		})
 	}); err != nil {
+		if errors.Is(err, engine.ErrNoActiveAssignment) {
+			return nil, ErrNoActiveAssignment
+		}
 		return nil, err
 	}
 
@@ -510,6 +574,66 @@ func (s *TicketService) Get(id uint) (*Ticket, error) {
 		return nil, err
 	}
 	return t, nil
+}
+
+func (s *TicketService) GetVisible(id uint, operatorID uint, roleCode string) (*Ticket, error) {
+	if err := s.EnsureCanViewTicket(id, operatorID, roleCode); err != nil {
+		return nil, err
+	}
+	return s.Get(id)
+}
+
+func (s *TicketService) EnsureCanViewTicket(ticketID uint, operatorID uint, roleCode string) error {
+	ticket, err := s.ticketRepo.FindByID(ticketID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return ErrTicketNotFound
+		}
+		return err
+	}
+	if roleCode == model.RoleAdmin {
+		return nil
+	}
+	if operatorID == 0 {
+		return ErrTicketForbidden
+	}
+	if ticket.RequesterID == operatorID {
+		return nil
+	}
+
+	positionIDs, departmentIDs := s.resolveUserOrg(operatorID)
+	ok, err := s.hasActiveAssignmentAccess(ticketID, operatorID, positionIDs, departmentIDs)
+	if err != nil {
+		return err
+	}
+	if ok {
+		return nil
+	}
+	ok, err = s.hasHistoryAssignmentAccess(ticketID, operatorID)
+	if err != nil {
+		return err
+	}
+	if ok {
+		return nil
+	}
+	return ErrTicketForbidden
+}
+
+func (s *TicketService) hasActiveAssignmentAccess(ticketID uint, operatorID uint, positionIDs []uint, departmentIDs []uint) (bool, error) {
+	var count int64
+	err := s.ticketRepo.DB().Model(&TicketAssignment{}).
+		Where("ticket_id = ? AND status IN ?", ticketID, []string{AssignmentPending, AssignmentInProgress}).
+		Where(s.ticketRepo.assignmentOperatorCondition("itsm_ticket_assignments", operatorID, positionIDs, departmentIDs)).
+		Count(&count).Error
+	return count > 0, err
+}
+
+func (s *TicketService) hasHistoryAssignmentAccess(ticketID uint, operatorID uint) (bool, error) {
+	var count int64
+	err := s.ticketRepo.DB().Model(&TicketAssignment{}).
+		Where("ticket_id = ? AND assignee_id = ? AND status IN ?", ticketID, operatorID, []string{AssignmentApproved, AssignmentRejected}).
+		Count(&count).Error
+	return count > 0, err
 }
 
 // BuildResponse returns a UI-ready ticket DTO with display names and smart-state
@@ -982,12 +1106,16 @@ const (
 )
 
 func (s *TicketService) Monitor(params TicketMonitorParams, operatorID uint) (*TicketMonitorResponse, error) {
+	if params.OperatorID == 0 {
+		params.OperatorID = operatorID
+	}
 	tickets, err := s.ticketRepo.ListMonitorBase(params)
 	if err != nil {
 		return nil, err
 	}
 
-	base, err := s.BuildResponses(tickets, operatorID)
+	now := time.Now()
+	completedToday, err := s.ticketRepo.CountMonitorCompletedToday(params, now)
 	if err != nil {
 		return nil, err
 	}
@@ -997,18 +1125,18 @@ func (s *TicketService) Monitor(params TicketMonitorParams, operatorID uint) (*T
 		return nil, err
 	}
 
-	now := time.Now()
-	items := make([]TicketMonitorItem, 0, len(base))
+	items := make([]TicketMonitorItem, 0, len(tickets))
 	summary := TicketMonitorSummary{}
-	for i := range base {
+	for i := range tickets {
 		ticket := &tickets[i]
-		item := TicketMonitorItem{TicketResponse: base[i], RiskLevel: "normal"}
+		item := TicketMonitorItem{TicketResponse: ticket.ToResponse(), RiskLevel: "normal"}
 		s.populateMonitorItem(&item, ticket, facts[ticket.ID], now)
 		s.accumulateMonitorSummary(&summary, ticket, &item, now)
 		if monitorRiskMatches(params.RiskLevel, item.RiskLevel) && monitorMetricMatches(params.MetricCode, ticket, &item, now) {
 			items = append(items, item)
 		}
 	}
+	summary.CompletedTodayTotal = int(completedToday)
 
 	sort.SliceStable(items, func(i, j int) bool {
 		ri, rj := monitorRiskRank(items[i].RiskLevel), monitorRiskRank(items[j].RiskLevel)
@@ -1032,6 +1160,29 @@ func (s *TicketService) Monitor(params TicketMonitorParams, operatorID uint) (*T
 			end = len(items)
 		}
 		items = items[start:end]
+	}
+	if len(items) > 0 {
+		ticketByID := make(map[uint]Ticket, len(tickets))
+		for _, ticket := range tickets {
+			ticketByID[ticket.ID] = ticket
+		}
+		pageTickets := make([]Ticket, 0, len(items))
+		itemByID := make(map[uint]*TicketMonitorItem, len(items))
+		for i := range items {
+			pageTickets = append(pageTickets, ticketByID[items[i].ID])
+			itemByID[items[i].ID] = &items[i]
+		}
+		responses, err := s.BuildResponses(pageTickets, operatorID)
+		if err != nil {
+			return nil, err
+		}
+		for _, response := range responses {
+			if item := itemByID[response.ID]; item != nil {
+				ticket := ticketByID[response.ID]
+				item.TicketResponse = response
+				s.populateMonitorItem(item, &ticket, facts[response.ID], now)
+			}
+		}
 	}
 
 	return &TicketMonitorResponse{Summary: summary, Items: items, Total: total}, nil
@@ -1902,41 +2053,48 @@ func (s *TicketService) Transfer(ticketID, activityID, targetUserID, operatorID 
 
 	db := s.ticketRepo.DB()
 
-	// Find the operator's pending assignment for this activity
-	var original TicketAssignment
-	if err := db.Where("activity_id = ? AND (user_id = ? OR assignee_id = ?) AND status = ?",
-		activityID, operatorID, operatorID, AssignmentPending).First(&original).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, ErrNoActiveAssignment
+	if err := db.Transaction(func(tx *gorm.DB) error {
+		// Find the operator's pending assignment for this ticket activity.
+		var original TicketAssignment
+		if err := tx.Where("ticket_id = ? AND activity_id = ? AND (user_id = ? OR assignee_id = ?) AND status = ?",
+			ticketID, activityID, operatorID, operatorID, AssignmentPending).First(&original).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return ErrNoActiveAssignment
+			}
+			return err
 		}
+
+		if err := tx.Model(&original).Update("status", AssignmentTransferred).Error; err != nil {
+			return err
+		}
+
+		if err := tx.Create(&TicketAssignment{
+			TicketID:        ticketID,
+			ActivityID:      activityID,
+			ParticipantType: "user",
+			UserID:          &targetUserID,
+			AssigneeID:      &targetUserID,
+			Status:          AssignmentPending,
+			IsCurrent:       original.IsCurrent,
+			TransferFrom:    &original.ID,
+		}).Error; err != nil {
+			return err
+		}
+
+		if err := tx.Model(&Ticket{}).Where("id = ?", ticketID).Update("assignee_id", targetUserID).Error; err != nil {
+			return err
+		}
+
+		return tx.Create(&TicketTimeline{
+			TicketID:   ticketID,
+			ActivityID: &activityID,
+			OperatorID: operatorID,
+			EventType:  "transfer",
+			Message:    fmt.Sprintf("工单已转办给用户 %d", targetUserID),
+		}).Error
+	}); err != nil {
 		return nil, err
 	}
-
-	// Mark original as transferred
-	db.Model(&original).Update("status", AssignmentTransferred)
-
-	// Create new assignment for target user
-	db.Create(&TicketAssignment{
-		TicketID:        ticketID,
-		ActivityID:      activityID,
-		ParticipantType: "user",
-		UserID:          &targetUserID,
-		AssigneeID:      &targetUserID,
-		Status:          AssignmentPending,
-		IsCurrent:       original.IsCurrent,
-		TransferFrom:    &original.ID,
-	})
-
-	// Update ticket assignee
-	db.Model(&Ticket{}).Where("id = ?", ticketID).Update("assignee_id", targetUserID)
-
-	s.timelineRepo.Create(&TicketTimeline{
-		TicketID:   ticketID,
-		ActivityID: &activityID,
-		OperatorID: operatorID,
-		EventType:  "transfer",
-		Message:    fmt.Sprintf("工单已转办给用户 %d", targetUserID),
-	})
 
 	return s.ticketRepo.FindByID(ticketID)
 }
@@ -1957,38 +2115,44 @@ func (s *TicketService) Delegate(ticketID, activityID, targetUserID, operatorID 
 
 	db := s.ticketRepo.DB()
 
-	// Find the operator's pending assignment for this activity
-	var original TicketAssignment
-	if err := db.Where("activity_id = ? AND (user_id = ? OR assignee_id = ?) AND status = ?",
-		activityID, operatorID, operatorID, AssignmentPending).First(&original).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, ErrNoActiveAssignment
+	if err := db.Transaction(func(tx *gorm.DB) error {
+		// Find the operator's pending assignment for this ticket activity.
+		var original TicketAssignment
+		if err := tx.Where("ticket_id = ? AND activity_id = ? AND (user_id = ? OR assignee_id = ?) AND status = ?",
+			ticketID, activityID, operatorID, operatorID, AssignmentPending).First(&original).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return ErrNoActiveAssignment
+			}
+			return err
 		}
+
+		if err := tx.Model(&original).Update("status", AssignmentDelegated).Error; err != nil {
+			return err
+		}
+
+		if err := tx.Create(&TicketAssignment{
+			TicketID:        ticketID,
+			ActivityID:      activityID,
+			ParticipantType: "user",
+			UserID:          &targetUserID,
+			AssigneeID:      &targetUserID,
+			Status:          AssignmentPending,
+			IsCurrent:       true,
+			DelegatedFrom:   &original.ID,
+		}).Error; err != nil {
+			return err
+		}
+
+		return tx.Create(&TicketTimeline{
+			TicketID:   ticketID,
+			ActivityID: &activityID,
+			OperatorID: operatorID,
+			EventType:  "delegate",
+			Message:    fmt.Sprintf("工单已委派给用户 %d", targetUserID),
+		}).Error
+	}); err != nil {
 		return nil, err
 	}
-
-	// Mark original as delegated (not completed — it will be restored after delegate finishes)
-	db.Model(&original).Update("status", AssignmentDelegated)
-
-	// Create delegated assignment
-	db.Create(&TicketAssignment{
-		TicketID:        ticketID,
-		ActivityID:      activityID,
-		ParticipantType: "user",
-		UserID:          &targetUserID,
-		AssigneeID:      &targetUserID,
-		Status:          AssignmentPending,
-		IsCurrent:       true,
-		DelegatedFrom:   &original.ID,
-	})
-
-	s.timelineRepo.Create(&TicketTimeline{
-		TicketID:   ticketID,
-		ActivityID: &activityID,
-		OperatorID: operatorID,
-		EventType:  "delegate",
-		Message:    fmt.Sprintf("工单已委派给用户 %d", targetUserID),
-	})
 
 	return s.ticketRepo.FindByID(ticketID)
 }
@@ -2009,45 +2173,52 @@ func (s *TicketService) Claim(ticketID, activityID, operatorID uint) (*Ticket, e
 
 	db := s.ticketRepo.DB()
 
-	// Find the operator's pending assignment for this activity
-	var assignment TicketAssignment
-	posIDs, deptIDs := s.resolveUserOrg(operatorID)
-	if err := db.Where("activity_id = ? AND status = ?", activityID, AssignmentPending).
-		Where(s.ticketRepo.assignmentOperatorCondition("itsm_ticket_assignments", operatorID, posIDs, deptIDs)).
-		First(&assignment).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, ErrNoActiveAssignment
+	if err := db.Transaction(func(tx *gorm.DB) error {
+		// Find the operator's pending assignment for this ticket activity.
+		var assignment TicketAssignment
+		posIDs, deptIDs := s.resolveUserOrg(operatorID)
+		if err := tx.Where("ticket_id = ? AND activity_id = ? AND status = ?", ticketID, activityID, AssignmentPending).
+			Where(s.ticketRepo.assignmentOperatorCondition("itsm_ticket_assignments", operatorID, posIDs, deptIDs)).
+			First(&assignment).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return ErrNoActiveAssignment
+			}
+			return err
 		}
+
+		now := time.Now()
+
+		if err := tx.Model(&assignment).Updates(map[string]any{
+			"assignee_id": operatorID,
+			"status":      AssignmentInProgress,
+			"claimed_at":  now,
+		}).Error; err != nil {
+			return err
+		}
+
+		if err := tx.Model(&TicketAssignment{}).
+			Where("ticket_id = ? AND activity_id = ? AND status = ? AND id != ?", ticketID, activityID, AssignmentPending, assignment.ID).
+			Update("status", AssignmentClaimedByOther).Error; err != nil {
+			return err
+		}
+
+		if err := tx.Model(&Ticket{}).Where("id = ?", ticketID).Updates(map[string]any{
+			"assignee_id": operatorID,
+			"status":      TicketStatusWaitingHuman,
+		}).Error; err != nil {
+			return err
+		}
+
+		return tx.Create(&TicketTimeline{
+			TicketID:   ticketID,
+			ActivityID: &activityID,
+			OperatorID: operatorID,
+			EventType:  "claim",
+			Message:    "用户已抢单",
+		}).Error
+	}); err != nil {
 		return nil, err
 	}
-
-	now := time.Now()
-
-	// Mark the claimer's assignment as claimed
-	db.Model(&assignment).Updates(map[string]any{
-		"assignee_id": operatorID,
-		"status":      AssignmentInProgress,
-		"claimed_at":  now,
-	})
-
-	// Mark other pending assignments for the same activity as claimed_by_other
-	db.Model(&TicketAssignment{}).
-		Where("activity_id = ? AND status = ? AND id != ?", activityID, AssignmentPending, assignment.ID).
-		Update("status", AssignmentClaimedByOther)
-
-	// Update ticket assignee
-	db.Model(&Ticket{}).Where("id = ?", ticketID).Updates(map[string]any{
-		"assignee_id": operatorID,
-		"status":      TicketStatusWaitingHuman,
-	})
-
-	s.timelineRepo.Create(&TicketTimeline{
-		TicketID:   ticketID,
-		ActivityID: &activityID,
-		OperatorID: operatorID,
-		EventType:  "claim",
-		Message:    "用户已抢单",
-	})
 
 	return s.ticketRepo.FindByID(ticketID)
 }

@@ -248,6 +248,101 @@ func TestEngineConfigServiceRejectsInvalidFallbackAssignee(t *testing.T) {
 	}
 }
 
+func TestEngineConfigServiceSmartStaffingUpdateRollsBackOnWriteFailure(t *testing.T) {
+	svc, db := newEngineConfigTestService(t)
+
+	var intakeAgent aiapp.Agent
+	if err := db.Where("code = ?", "itsm.servicedesk").First(&intakeAgent).Error; err != nil {
+		t.Fatalf("load intake agent: %v", err)
+	}
+	var decisionAgent aiapp.Agent
+	if err := db.Where("code = ?", "itsm.decision").First(&decisionAgent).Error; err != nil {
+		t.Fatalf("load decision agent: %v", err)
+	}
+
+	if err := db.Exec(`CREATE TRIGGER reject_decision_agent_config_update
+BEFORE UPDATE ON system_configs
+WHEN NEW.key = '` + SmartTicketDecisionAgentKey + `'
+BEGIN
+	SELECT RAISE(FAIL, 'reject decision agent config');
+END;`).Error; err != nil {
+		t.Fatalf("create trigger: %v", err)
+	}
+
+	var req UpdateSmartStaffingRequest
+	req.Posts.Intake.AgentID = intakeAgent.ID
+	req.Posts.Decision.AgentID = decisionAgent.ID
+	req.Posts.Decision.Mode = "direct_first"
+
+	err := svc.UpdateSmartStaffingConfig(&req)
+	if err == nil {
+		t.Fatalf("expected write failure")
+	}
+	if got := svc.IntakeAgentID(); got != 0 {
+		t.Fatalf("expected intake agent rollback to 0, got %d", got)
+	}
+}
+
+func TestEngineConfigServiceEngineSettingsUpdateRollsBackOnWriteFailure(t *testing.T) {
+	svc, db := newEngineConfigTestService(t)
+
+	provider := aiapp.Provider{
+		Name:     "OpenAI",
+		Type:     aiapp.ProviderTypeOpenAI,
+		Protocol: "openai",
+		BaseURL:  "https://example.test",
+		Status:   aiapp.ProviderStatusActive,
+	}
+	if err := db.Create(&provider).Error; err != nil {
+		t.Fatalf("create provider: %v", err)
+	}
+	model := aiapp.AIModel{
+		ProviderID:  provider.ID,
+		ModelID:     "gpt-test",
+		DisplayName: "GPT Test",
+		Type:        aiapp.ModelTypeLLM,
+		Status:      aiapp.ModelStatusActive,
+	}
+	if err := db.Create(&model).Error; err != nil {
+		t.Fatalf("create model: %v", err)
+	}
+
+	if err := db.Exec(`CREATE TRIGGER reject_path_temperature_config_update
+BEFORE UPDATE ON system_configs
+WHEN NEW.key = '` + SmartTicketPathTemperatureKey + `'
+BEGIN
+	SELECT RAISE(FAIL, 'reject path temperature config');
+END;`).Error; err != nil {
+		t.Fatalf("create trigger: %v", err)
+	}
+
+	var req UpdateEngineSettingsRequest
+	req.Runtime.PathBuilder.ModelID = model.ID
+	req.Runtime.PathBuilder.Temperature = 0.25
+	req.Runtime.PathBuilder.MaxRetries = 4
+	req.Runtime.PathBuilder.TimeoutSeconds = 90
+	req.Runtime.PathBuilder.SystemPrompt = "path prompt"
+	req.Runtime.TitleBuilder.ModelID = model.ID
+	req.Runtime.TitleBuilder.Temperature = 0.15
+	req.Runtime.TitleBuilder.MaxRetries = 2
+	req.Runtime.TitleBuilder.TimeoutSeconds = 45
+	req.Runtime.TitleBuilder.SystemPrompt = "title prompt"
+	req.Runtime.HealthChecker.ModelID = model.ID
+	req.Runtime.HealthChecker.Temperature = 0.2
+	req.Runtime.HealthChecker.MaxRetries = 1
+	req.Runtime.HealthChecker.TimeoutSeconds = 55
+	req.Runtime.HealthChecker.SystemPrompt = "health prompt"
+	req.Runtime.Guard.AuditLevel = "summary"
+
+	err := svc.UpdateEngineSettingsConfig(&req)
+	if err == nil {
+		t.Fatalf("expected write failure")
+	}
+	if got := svc.readPathConfig().ModelID; got != 0 {
+		t.Fatalf("expected path model rollback to 0, got %d", got)
+	}
+}
+
 func TestEngineConfigServiceRuntimeConfigRequiresDBPrompt(t *testing.T) {
 	svc, db := newEngineConfigTestService(t)
 

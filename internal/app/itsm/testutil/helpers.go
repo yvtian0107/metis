@@ -26,6 +26,7 @@ func NewTestDB(t *testing.T) *gorm.DB {
 	if err := gdb.AutoMigrate(
 		&ServiceCatalog{},
 		&ServiceDefinition{},
+		&ServiceDefinitionVersion{},
 		&ServiceAction{},
 		&ServiceKnowledgeDocument{},
 		&Priority{},
@@ -36,6 +37,7 @@ func NewTestDB(t *testing.T) *gorm.DB {
 		&TicketAssignment{},
 		&TicketTimeline{},
 		&TicketActionExecution{},
+		&ExecutionToken{},
 		&ServiceDeskSubmission{},
 		&ai.Agent{},
 		&ai.AgentSession{},

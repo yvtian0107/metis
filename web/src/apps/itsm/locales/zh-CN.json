@@ -168,7 +168,8 @@
     "addService": "添加服务",
     "guideCardHint": "添加服务",
     "emptyInCatalog": "该分类下暂无服务",
-    "emptyInCatalogHint": "点击「添加服务」创建第一个服务"
+    "emptyInCatalogHint": "点击「添加服务」创建第一个服务",
+    "listCount": "{{count}} 个服务"
   },
   "intakeForm": {
     "title": "进件表单",
@@ -244,6 +245,10 @@
     "searchEmpty": "没有匹配的 SLA 模板",
     "listCount": "{{count}} 个 SLA 模板",
     "sheetDesc": "设置模板身份和基础时效，升级规则可在列表中展开维护。",
+    "ruleOverview": "规则链概览",
+    "ruleOverviewDesc": "按 SLA 模板汇总超时升级规则，提前暴露停用、冲突和目标不可用风险。",
+    "ruleOverviewCount": "{{count}} 条规则",
+    "ruleOverviewEmpty": "暂无升级规则",
     "formIdentity": "身份信息",
     "formCommitment": "时间承诺",
     "formDescription": "描述",
@@ -289,6 +294,17 @@
       "deleteTitle": "删除规则",
       "deleteDesc": "确定要删除此升级规则吗？",
       "confirmDelete": "确定删除"
+    },
+    "risk": {
+      "title": "风险",
+      "ok": "可执行",
+      "inactive": "已停用",
+      "duplicate_level": "级别冲突",
+      "notify_missing_recipients": "缺少接收人",
+      "notify_missing_channel": "通道不可用",
+      "reassign_missing_candidates": "缺少改派候选人",
+      "priority_missing": "目标优先级缺失",
+      "priority_inactive": "目标优先级停用"
     }
   },
   "tickets": {
@@ -412,6 +428,9 @@
   "validation": {
     "nameRequired": "名称不能为空",
     "codeRequired": "编码不能为空",
+    "valueRequired": "排序值必须为大于 0 的整数",
+    "colorRequired": "颜色不能为空",
+    "colorInvalid": "颜色必须是 #RRGGBB 格式",
     "titleRequired": "标题不能为空",
     "serviceRequired": "请选择服务",
     "priorityRequired": "请选择优先级",
@@ -667,6 +686,7 @@
     "pageDesc": "配置服务受理、流程决策和 SLA 保障三个岗位，让合适的智能体上岗处理智能工单。",
     "engineSettingsTitle": "引擎设置",
     "engineSettingsDesc": "配置 ITSM 领域内的生成与兜底能力。",
+    "configLoadErrorTitle": "配置读取失败",
     "modelCapabilityGroupTitle": "模型直连能力",
     "modelCapabilityGroupDesc": "这些能力由 ITSM 后端直接调用模型完成，统一配置模型、提示词、重试与超时。",
     "runtimeGuardGroupTitle": "运行保障",
@@ -813,7 +833,22 @@
     "recentTimeline": "最近轨迹",
     "openDetail": "查看详情",
     "noTimeline": "暂无时间线记录",
-    "qualityTrendHint": "基于流程活动结果与时间线事件聚合，仅用于趋势观察"
+    "metricCode": "指标",
+    "ruleCode": "规则",
+    "evidence": "证据",
+    "qualityTitle": "决策质量（30 天）",
+    "qualityVersion": "口径版本",
+    "qualityTrendHint": "基于流程活动结果与时间线事件聚合，仅用于趋势观察",
+    "qualityByService": "按服务",
+    "qualityByDepartment": "按部门",
+    "qualityDimension": "维度",
+    "qualityApprovalRate": "通过率",
+    "qualityRejectionRate": "驳回率",
+    "qualityRetryRate": "重试率",
+    "qualityLatency": "平均决策时延",
+    "qualityRecoveryRate": "恢复成功率",
+    "qualityDecisionCount": "决策量",
+    "qualityEmpty": "暂无决策质量数据"
   },
   "variables": {
     "title": "流程变量",

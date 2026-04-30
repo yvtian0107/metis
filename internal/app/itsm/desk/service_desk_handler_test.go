@@ -329,9 +329,12 @@ func TestITSMRuntimeContextUsesConfiguredIntakeAgentSession(t *testing.T) {
 	}
 	store := tools.NewSessionStateStore(db)
 	if err := store.SaveState(intakeSession.ID, &tools.ServiceDeskState{
-		Stage:           "service_loaded",
-		LoadedServiceID: 42,
-		RequestText:     "我要提交 VPN 申请",
+		Stage:            "service_loaded",
+		LoadedServiceID:  42,
+		RequestText:      "我要提交 VPN 申请",
+		MissingFields:    []string{"vpn_account"},
+		AskedFields:      []string{"vpn_account"},
+		MinDecisionReady: false,
 	}); err != nil {
 		t.Fatalf("save intake state: %v", err)
 	}
@@ -348,6 +351,9 @@ func TestITSMRuntimeContextUsesConfiguredIntakeAgentSession(t *testing.T) {
 	}
 	if !strings.Contains(block, "ITSM Service Desk Runtime Context") || !strings.Contains(block, `"loaded_service_id": 42`) {
 		t.Fatalf("expected runtime context for configured intake session, got %q", block)
+	}
+	if !strings.Contains(block, `"missing_fields": [`) || !strings.Contains(block, `"asked_fields": [`) || !strings.Contains(block, `"min_decision_ready": false`) {
+		t.Fatalf("expected runtime context to include conversation progress fields, got %q", block)
 	}
 
 	block, err = buildAgentRuntimeContextForTest(context.Background(), db, newEngineConfigServiceOnly(t, db), store, otherSession.ID, userID)
@@ -393,6 +399,9 @@ func buildAgentRuntimeContextForTest(ctx context.Context, db *gorm.DB, configPro
 		"draft_form_data":         state.DraftFormData,
 		"draft_version":           state.DraftVersion,
 		"confirmed_draft_version": state.ConfirmedDraftVersion,
+		"missing_fields":          state.MissingFields,
+		"asked_fields":            state.AskedFields,
+		"min_decision_ready":      state.MinDecisionReady,
 		"next_expected_action":    tools.NextExpectedAction(state),
 	}
 	b, err := json.MarshalIndent(payload, "", "  ")

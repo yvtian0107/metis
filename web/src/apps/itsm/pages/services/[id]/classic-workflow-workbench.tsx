@@ -30,6 +30,7 @@ import {
   type ServiceDefItem,
   type SLATemplateItem,
 } from "../../../api"
+import { itsmQueryKeys } from "../../../query-keys"
 
 interface ClassicWorkflowWorkbenchProps {
   service: ServiceDefItem
@@ -95,8 +96,9 @@ export function ClassicWorkflowWorkbench({ service, catalogs, slaTemplates }: Cl
       workflowJson: workflow,
     } as Partial<ServiceDefItem>),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["itsm-service", service.id] })
-      queryClient.invalidateQueries({ queryKey: ["itsm-services"] })
+      queryClient.invalidateQueries({ queryKey: itsmQueryKeys.services.detail(service.id) })
+      queryClient.invalidateQueries({ queryKey: itsmQueryKeys.services.lists() })
+      queryClient.invalidateQueries({ queryKey: itsmQueryKeys.catalogs.serviceCounts() })
       toast.success(t("itsm:workflow.saveSuccess"))
     },
     onError: (err) => toast.error(err.message),

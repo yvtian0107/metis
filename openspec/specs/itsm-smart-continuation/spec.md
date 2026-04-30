@@ -5,29 +5,20 @@
 ITSM SmartEngine continuation dispatcher -- 统一所有活动状态变更后的续推进口，避免重复触发、漏触发和熔断后继续推进。
 ## Requirements
 ### Requirement: 统一 continuation dispatcher
-SmartEngine SHALL 提供统一 continuation dispatcher，作为所有智能流程推进的唯一入口。该入口 SHALL 按以下顺序执行检查：
-1. 检查工单是否已终态（completed/rejected/withdrawn/cancelled/failed） -> 是则直接返回
-2. 检查熔断状态（`ai_failure_count >= MaxAIFailureCount`） -> 是则记录日志并返回
-3. 如果 completedActivityID 属于并签组，执行收敛检查 -> 未全部完成则返回
-4. 将工单状态更新为对应决策中状态（approved_decisioning、rejected_decisioning 或 decisioning）
-5. 在当前事务提交成功后，通过 direct decision dispatcher 启动 SmartEngine 决策 goroutine
+SmartEngine SHALL 将 `ensureContinuation(tx *gorm.DB, ticket *Ticket, completedActivityID uint)` 作为统一推进入口，并在满足推进条件时直接触发事件驱动决策调度（direct decision dispatch），而非提交 `itsm-smart-progress` 轮询任务。该入口 MUST 执行终态检查、熔断检查、并签收敛检查与幂等防重。
 
-#### Scenario: 正常推进
-- **WHEN** activity 完成后调用 continuation dispatcher 且工单非终态、未熔断、非并签（或并签已全部收敛）
-- **THEN** SHALL 注册事务后 direct decision dispatch
-- **AND** SHALL NOT 依赖 `itsm-smart-progress` scheduler worker 轮询作为主路径
+#### Scenario: 正常推进走直接调度
+- **WHEN** activity 完成后调用 ensureContinuation 且工单非终态、未熔断、并签已收敛
+- **THEN** 系统 SHALL 触发 direct decision dispatch
+- **AND** 不提交 itsm-smart-progress 任务作为主路径
 
-#### Scenario: 工单已终态
-- **WHEN** 调用 continuation dispatcher 且工单 status 为 completed
-- **THEN** SHALL 直接返回，不启动决策 goroutine
+#### Scenario: 终态与熔断阻断推进
+- **WHEN** 工单已终态或 ai_failure_count 达到熔断阈值
+- **THEN** ensureContinuation SHALL 返回且不触发新调度
 
-#### Scenario: 熔断状态
-- **WHEN** 调用 continuation dispatcher 且工单 `ai_failure_count >= 3`
-- **THEN** SHALL 记录 warning 日志并返回，不启动决策 goroutine
-
-#### Scenario: 并签未全部完成
-- **WHEN** 调用 continuation dispatcher 且 completedActivityID 属于一个 2 人并签组，组内仅 1 个已完成
-- **THEN** SHALL 返回，不启动决策 goroutine
+#### Scenario: 并签未收敛不推进
+- **WHEN** completedActivityID 属于并签组且尚未全部完成
+- **THEN** ensureContinuation SHALL 返回且不触发新调度
 
 ### Requirement: 所有状态变更路径调用 ensureContinuation
 以下操作在完成 activity 状态变更后 SHALL 调用统一 continuation dispatcher：

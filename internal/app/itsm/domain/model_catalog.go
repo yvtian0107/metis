@@ -133,6 +133,21 @@ type ServiceDefinitionResponse struct {
 	UpdatedAt          time.Time           `json:"updatedAt"`
 }
 
+type ServiceDefinitionListItemResponse struct {
+	ID                 uint                `json:"id"`
+	Name               string              `json:"name"`
+	Code               string              `json:"code"`
+	Description        string              `json:"description"`
+	CatalogID          uint                `json:"catalogId"`
+	EngineType         string              `json:"engineType"`
+	SLAID              *uint               `json:"slaId"`
+	PublishHealthCheck *ServiceHealthCheck `json:"publishHealthCheck"`
+	IsActive           bool                `json:"isActive"`
+	SortOrder          int                 `json:"sortOrder"`
+	CreatedAt          time.Time           `json:"createdAt"`
+	UpdatedAt          time.Time           `json:"updatedAt"`
+}
+
 type ServiceHealthItem struct {
 	Key            string                `json:"key"`
 	Label          string                `json:"label"`
@@ -157,6 +172,47 @@ type ServiceHealthCheck struct {
 }
 
 func (s *ServiceDefinition) ToResponse() ServiceDefinitionResponse {
+	publishHealthCheck := s.toPublishHealthCheck()
+	return ServiceDefinitionResponse{
+		ID:                 s.ID,
+		Name:               s.Name,
+		Code:               s.Code,
+		Description:        s.Description,
+		CatalogID:          s.CatalogID,
+		EngineType:         s.EngineType,
+		SLAID:              s.SLAID,
+		IntakeFormSchema:   s.IntakeFormSchema,
+		WorkflowJSON:       s.WorkflowJSON,
+		CollaborationSpec:  s.CollaborationSpec,
+		AgentID:            s.AgentID,
+		AgentConfig:        s.AgentConfig,
+		KnowledgeBaseIDs:   s.KnowledgeBaseIDs,
+		PublishHealthCheck: publishHealthCheck,
+		IsActive:           s.IsActive,
+		SortOrder:          s.SortOrder,
+		CreatedAt:          s.CreatedAt,
+		UpdatedAt:          s.UpdatedAt,
+	}
+}
+
+func (s *ServiceDefinition) ToListItemResponse() ServiceDefinitionListItemResponse {
+	return ServiceDefinitionListItemResponse{
+		ID:                 s.ID,
+		Name:               s.Name,
+		Code:               s.Code,
+		Description:        s.Description,
+		CatalogID:          s.CatalogID,
+		EngineType:         s.EngineType,
+		SLAID:              s.SLAID,
+		PublishHealthCheck: s.toPublishHealthCheck(),
+		IsActive:           s.IsActive,
+		SortOrder:          s.SortOrder,
+		CreatedAt:          s.CreatedAt,
+		UpdatedAt:          s.UpdatedAt,
+	}
+}
+
+func (s *ServiceDefinition) toPublishHealthCheck() *ServiceHealthCheck {
 	var publishHealthCheck *ServiceHealthCheck
 	if s.PublishHealthCheckedAt != nil {
 		var items []ServiceHealthItem
@@ -180,27 +236,7 @@ func (s *ServiceDefinition) ToResponse() ServiceDefinitionResponse {
 			CheckedAt: s.PublishHealthCheckedAt,
 		}
 	}
-
-	return ServiceDefinitionResponse{
-		ID:                 s.ID,
-		Name:               s.Name,
-		Code:               s.Code,
-		Description:        s.Description,
-		CatalogID:          s.CatalogID,
-		EngineType:         s.EngineType,
-		SLAID:              s.SLAID,
-		IntakeFormSchema:   s.IntakeFormSchema,
-		WorkflowJSON:       s.WorkflowJSON,
-		CollaborationSpec:  s.CollaborationSpec,
-		AgentID:            s.AgentID,
-		AgentConfig:        s.AgentConfig,
-		KnowledgeBaseIDs:   s.KnowledgeBaseIDs,
-		PublishHealthCheck: publishHealthCheck,
-		IsActive:           s.IsActive,
-		SortOrder:          s.SortOrder,
-		CreatedAt:          s.CreatedAt,
-		UpdatedAt:          s.UpdatedAt,
-	}
+	return publishHealthCheck
 }
 
 // ServiceAction 服务动作（HTTP webhook 等）

@@ -153,6 +153,12 @@ func (s *WorkflowGenerateService) Generate(ctx context.Context, req *GenerateReq
 		if err != nil {
 			slog.Warn("workflow generate: LLM call failed",
 				"attempt", attempt+1, "error", err)
+			lastErrors = []engine.ValidationError{
+				{Message: fmt.Sprintf("参考路径生成引擎调用失败: %v", err)},
+			}
+			if attempt < maxRetries {
+				continue
+			}
 			return nil, fmt.Errorf("%w: 参考路径生成引擎调用超时或不可用，请检查 AI 供应商上游、模型、密钥或额度配置: %v", ErrPathEngineUpstream, err)
 		}
 
@@ -544,7 +550,44 @@ func (s *WorkflowGenerateService) buildFormContractContext(raw JSONField) string
 				}
 			}
 		}
+		if field.Type == form.FieldTable {
+			sb.WriteString(formatWorkflowTableColumns(field))
+		}
 		sb.WriteString("\n")
+	}
+	return sb.String()
+}
+
+func formatWorkflowTableColumns(field form.FormField) string {
+	columns, err := form.TableColumns(field)
+	if err != nil || len(columns) == 0 {
+		return ""
+	}
+
+	var sb strings.Builder
+	sb.WriteString(", columns=")
+	for i, column := range columns {
+		if i > 0 {
+			sb.WriteString(", ")
+		}
+		label := strings.TrimSpace(column.Label)
+		if label == "" {
+			label = column.Key
+		}
+		sb.WriteString(fmt.Sprintf("`%s`（%s/%s", column.Key, label, column.Type))
+		if len(column.Options) > 0 {
+			sb.WriteString(", options=")
+			for j, option := range column.Options {
+				if j > 0 {
+					sb.WriteString(", ")
+				}
+				sb.WriteString(fmt.Sprintf("`%v`", option.Value))
+				if option.Label != "" {
+					sb.WriteString(fmt.Sprintf("（%s）", option.Label))
+				}
+			}
+		}
+		sb.WriteString("）")
 	}
 	return sb.String()
 }
@@ -857,6 +900,15 @@ func (s *WorkflowGenerateService) buildUserMessage(spec string, promptCtx workfl
 		sb.WriteString(promptCtx.OrgContext)
 	}
 
+	if looksLikeDBBackupWhitelistPromptSpec(spec) {
+		sb.WriteString("\n\n## 数据库备份白名单运行时动作约束\n")
+		sb.WriteString("该服务的预检和放行动作由智能引擎运行时执行；但为了让用户在流程图上看懂完整业务链路，参考路径 workflow_json 也必须表达这两个动作节点。\n")
+		sb.WriteString("如果可用动作列表存在 code=`db_backup_whitelist_precheck` 和 code=`db_backup_whitelist_apply`，必须生成两个 type=\"action\" 节点，并使用对应的数字 action_id：申请表单 -> 备份白名单预检 action -> 数据库管理员处理 -> 执行备份白名单放行 action -> 结束。\n")
+		sb.WriteString("数据库管理员处理 rejected 出边直接指向公共结束节点，不经过放行动作节点。\n")
+		sb.WriteString("运行时仍由智能引擎优先通过 decision.execute_action 同步执行预检和放行动作，不要因为 workflow_json 中有 action 节点就改变为异步动作活动。\n")
+		sb.WriteString("数据库管理员处理节点应使用按需组织上下文中的 position_department 参与人配置。\n")
+	}
+
 	if promptCtx.ActionsContext != "" {
 		sb.WriteString(promptCtx.ActionsContext)
 	}
@@ -887,7 +939,8 @@ func (s *WorkflowGenerateService) buildUserMessage(spec string, promptCtx workfl
 		if validationErrorsRequireActionRepair(prevErrors) {
 			sb.WriteString("\n## 动作节点修正要求\n\n")
 			sb.WriteString("- 只有协作规范明确要求在参考路径 workflow_json 里编排系统动作，且“可用动作列表”给出了动作 id 时，才允许生成 type=\"action\" 节点。\n")
-			sb.WriteString("- 如果没有可用动作 id，或动作应由智能体运行时通过工具调用完成，不要生成 action 节点；请改用 process/notify/end 表达参考路径。\n")
+			sb.WriteString("- 如果没有可用动作 id，或动作应由智能体运行时通过工具调用完成且没有可视化要求，不要生成 action 节点；请改用 process/notify/end 表达参考路径。\n")
+			sb.WriteString("- 例外：生产数据库备份白名单临时放行需要在流程图上可视化预检和放行动作；如果可用动作列表提供了对应动作 id，应保留两个 action 节点并修正 action_id。\n")
 			sb.WriteString("- 保留人工处理语义：人工处理、并行处理、部门岗位处理必须使用 type=\"process\"，不能写成 action。\n")
 		}
 		if validationErrorsRequireRejectedEdgeRepair(prevErrors) {
@@ -908,6 +961,12 @@ func (s *WorkflowGenerateService) buildUserMessage(spec string, promptCtx workfl
 
 	sb.WriteString("\n\n请仅输出合法的 JSON，不要包含任何额外文字或 markdown 代码块标记。")
 	return sb.String()
+}
+
+func looksLikeDBBackupWhitelistPromptSpec(spec string) bool {
+	return strings.Contains(spec, "数据库备份") &&
+		strings.Contains(spec, "白名单") &&
+		(strings.Contains(spec, "放行") || strings.Contains(spec, "临时"))
 }
 
 func (s *WorkflowGenerateService) BuildUserMessage(spec string, actionsCtx string, prevErrors []engine.ValidationError) string {

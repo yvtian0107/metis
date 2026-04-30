@@ -9,6 +9,7 @@ import { WorkflowNodeIconGlyph } from "./visual"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
 import { fetchServiceActions } from "../../api"
+import { itsmQueryKeys } from "../../query-keys"
 import type { FormField, FormSchema } from "../form-engine"
 
 interface NodePaletteProps {
@@ -29,7 +30,7 @@ function fieldVariables(schema: unknown, prefix: string): Array<FormField & { va
 export function NodePalette({ serviceId, nodes = [], intakeFormSchema }: NodePaletteProps) {
   const { t } = useTranslation("itsm")
   const { data: actions = [] } = useQuery({
-    queryKey: ["itsm-service-actions", serviceId],
+    queryKey: serviceId ? itsmQueryKeys.services.actions(serviceId) : itsmQueryKeys.services.actions(0),
     queryFn: () => fetchServiceActions(serviceId ?? 0),
     enabled: !!serviceId,
   })

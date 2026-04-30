@@ -9,34 +9,53 @@ import (
 )
 
 type ticketMonitorFact struct {
+	ActivityFacts         []ticketMonitorActivityFact
 	Activity              *TicketActivity
 	AssignmentCount       int
 	ResolvableAssignments int
+	ResolvableUserCount   int
+	OwnerName             string
+	ActionFailed          bool
+}
+
+type ticketMonitorActivityFact struct {
+	Activity              TicketActivity
+	AssignmentCount       int
+	ResolvableAssignments int
+	ResolvableUserCount   int
 	OwnerName             string
 	ActionFailed          bool
 }
 
 func (s *TicketService) loadMonitorFacts(tickets []Ticket) (map[uint]ticketMonitorFact, error) {
 	facts := make(map[uint]ticketMonitorFact, len(tickets))
-	activityIDs := map[uint]struct{}{}
+	ticketIDs := map[uint]struct{}{}
+	currentActivityIDs := map[uint]uint{}
 	for i := range tickets {
 		t := &tickets[i]
 		facts[t.ID] = ticketMonitorFact{}
+		ticketIDs[t.ID] = struct{}{}
 		if t.CurrentActivityID != nil {
-			activityIDs[*t.CurrentActivityID] = struct{}{}
+			currentActivityIDs[t.ID] = *t.CurrentActivityID
 		}
 	}
-	if len(activityIDs) == 0 {
+	if len(ticketIDs) == 0 {
 		return facts, nil
 	}
 
 	var activities []TicketActivity
-	if err := s.ticketRepo.DB().Where("id IN ?", keysOf(activityIDs)).Find(&activities).Error; err != nil {
+	if err := s.ticketRepo.DB().
+		Where("ticket_id IN ? AND status IN ?", keysOf(ticketIDs), []string{engine.ActivityPending, engine.ActivityInProgress}).
+		Order("ticket_id ASC, id ASC").
+		Find(&activities).Error; err != nil {
 		return nil, err
 	}
-	activityByID := map[uint]*TicketActivity{}
+	activityIDs := map[uint]struct{}{}
 	for i := range activities {
-		activityByID[activities[i].ID] = &activities[i]
+		activityIDs[activities[i].ID] = struct{}{}
+	}
+	if len(activityIDs) == 0 {
+		return facts, nil
 	}
 
 	assignments, err := s.loadAssignmentDisplays(activityIDs, 0)
@@ -65,30 +84,100 @@ func (s *TicketService) loadMonitorFacts(tickets []Ticket) (map[uint]ticketMonit
 	}
 	assignmentCount := map[uint]int{}
 	resolvableCount := map[uint]int{}
+	resolvableUserCount := map[uint]int{}
+	resolvableUsers, err := s.countResolvableAssignmentUsers(assignmentRows)
+	if err != nil {
+		return nil, err
+	}
 	for _, a := range assignmentRows {
 		assignmentCount[a.ActivityID]++
-		if a.AssigneeID != nil || a.UserID != nil || a.PositionID != nil || a.DepartmentID != nil {
+		if resolvableUsers[a.ID] > 0 {
 			resolvableCount[a.ActivityID]++
+			resolvableUserCount[a.ActivityID] += resolvableUsers[a.ID]
 		}
 	}
 
-	for i := range tickets {
-		t := &tickets[i]
-		fact := facts[t.ID]
-		if t.CurrentActivityID != nil {
-			if activity := activityByID[*t.CurrentActivityID]; activity != nil {
-				fact.Activity = activity
-				fact.ActionFailed = failedByActivity[activity.ID]
-				fact.AssignmentCount = assignmentCount[activity.ID]
-				fact.ResolvableAssignments = resolvableCount[activity.ID]
-				if assignment, ok := assignments[activity.ID]; ok {
-					fact.OwnerName = assignment.OwnerName
-				}
-			}
+	for i := range activities {
+		activity := activities[i]
+		activityFact := ticketMonitorActivityFact{
+			Activity:              activity,
+			ActionFailed:          failedByActivity[activity.ID],
+			AssignmentCount:       assignmentCount[activity.ID],
+			ResolvableAssignments: resolvableCount[activity.ID],
+			ResolvableUserCount:   resolvableUserCount[activity.ID],
 		}
-		facts[t.ID] = fact
+		if assignment, ok := assignments[activity.ID]; ok {
+			activityFact.OwnerName = assignment.OwnerName
+		}
+		fact := facts[activity.TicketID]
+		fact.ActivityFacts = append(fact.ActivityFacts, activityFact)
+		if fact.Activity == nil || currentActivityIDs[activity.TicketID] == activity.ID {
+			fact.Activity = &activity
+			fact.ActionFailed = activityFact.ActionFailed
+			fact.AssignmentCount = activityFact.AssignmentCount
+			fact.ResolvableAssignments = activityFact.ResolvableAssignments
+			fact.ResolvableUserCount = activityFact.ResolvableUserCount
+			fact.OwnerName = activityFact.OwnerName
+		}
+		facts[activity.TicketID] = fact
 	}
 	return facts, nil
+}
+
+func (s *TicketService) countResolvableAssignmentUsers(assignments []TicketAssignment) (map[uint]int, error) {
+	result := make(map[uint]int, len(assignments))
+	if len(assignments) == 0 {
+		return result, nil
+	}
+	for _, assignment := range assignments {
+		userIDs := map[uint]struct{}{}
+		if assignment.AssigneeID != nil {
+			userIDs[*assignment.AssigneeID] = struct{}{}
+		}
+		if assignment.UserID != nil {
+			userIDs[*assignment.UserID] = struct{}{}
+		}
+		if ids := keysOf(userIDs); len(ids) > 0 {
+			var count int64
+			if err := s.ticketRepo.DB().Table("users").
+				Where("id IN ? AND is_active = ? AND deleted_at IS NULL", ids, true).
+				Count(&count).Error; err != nil {
+				return nil, err
+			}
+			result[assignment.ID] += int(count)
+		}
+		orgCount, err := s.countResolvableOrgAssignmentUsers(assignment)
+		if err != nil {
+			return nil, err
+		}
+		result[assignment.ID] += orgCount
+	}
+	return result, nil
+}
+
+func (s *TicketService) countResolvableOrgAssignmentUsers(assignment TicketAssignment) (int, error) {
+	db := s.ticketRepo.DB()
+	if !db.Migrator().HasTable("user_positions") {
+		return 0, nil
+	}
+	query := db.Table("user_positions").
+		Joins("JOIN users ON users.id = user_positions.user_id").
+		Where("user_positions.deleted_at IS NULL AND users.deleted_at IS NULL AND users.is_active = ?", true)
+	switch {
+	case assignment.PositionID != nil && assignment.DepartmentID != nil:
+		query = query.Where("user_positions.position_id = ? AND user_positions.department_id = ?", *assignment.PositionID, *assignment.DepartmentID)
+	case assignment.PositionID != nil:
+		query = query.Where("user_positions.position_id = ?", *assignment.PositionID)
+	case assignment.DepartmentID != nil:
+		query = query.Where("user_positions.department_id = ?", *assignment.DepartmentID)
+	default:
+		return 0, nil
+	}
+	var count int64
+	if err := query.Distinct("user_positions.user_id").Count(&count).Error; err != nil {
+		return 0, err
+	}
+	return int(count), nil
 }
 
 func (s *TicketService) populateMonitorItem(item *TicketMonitorItem, ticket *Ticket, fact ticketMonitorFact, now time.Time) {
@@ -199,7 +288,18 @@ func EvaluateTicketMonitorRules(ticket *Ticket, fact ticketMonitorFact, now time
 			"current_activity_id": monitorOptionalUint(ticket.CurrentActivityID),
 		})
 	}
-	if ticket.CurrentActivityID == nil && now.Sub(ticket.UpdatedAt) >= monitorNoActivityBlockAfter {
+	activityFacts := fact.ActivityFacts
+	if len(activityFacts) == 0 && fact.Activity != nil {
+		activityFacts = []ticketMonitorActivityFact{{
+			Activity:              *fact.Activity,
+			AssignmentCount:       fact.AssignmentCount,
+			ResolvableAssignments: fact.ResolvableAssignments,
+			ResolvableUserCount:   fact.ResolvableUserCount,
+			OwnerName:             fact.OwnerName,
+			ActionFailed:          fact.ActionFailed,
+		}}
+	}
+	if len(activityFacts) == 0 && ticket.CurrentActivityID == nil && now.Sub(ticket.UpdatedAt) >= monitorNoActivityBlockAfter {
 		addReason("blocked_total", "no_current_activity", "blocked", "活跃工单超过 5 分钟没有当前活动", map[string]any{
 			"current_activity_id": "nil",
 			"ticket_updated_at":   ticket.UpdatedAt.Format(time.RFC3339),
@@ -207,45 +307,51 @@ func EvaluateTicketMonitorRules(ticket *Ticket, fact ticketMonitorFact, now time
 			"threshold_minutes":   float64(monitorNoActivityBlockAfter / time.Minute),
 		})
 	}
-	if fact.Activity != nil && isActiveActivity(fact.Activity.Status) {
-		startedAt := activityStartedAt(fact.Activity)
-		if engine.IsHumanNode(fact.Activity.ActivityType) {
+	for _, activityFact := range activityFacts {
+		activity := activityFact.Activity
+		if !isActiveActivity(activity.Status) {
+			continue
+		}
+		startedAt := activityStartedAt(&activity)
+		if engine.IsHumanNode(activity.ActivityType) {
 			switch {
-			case fact.AssignmentCount == 0:
+			case activityFact.AssignmentCount == 0:
 				addReason("blocked_total", "human_assignment_missing", "blocked", "当前人工节点没有处理人", map[string]any{
-					"activity_id":                 float64(fact.Activity.ID),
-					"activity_type":               fact.Activity.ActivityType,
-					"assignment_count":            float64(fact.AssignmentCount),
-					"resolvable_assignment_count": float64(fact.ResolvableAssignments),
+					"activity_id":                 float64(activity.ID),
+					"activity_type":               activity.ActivityType,
+					"assignment_count":            float64(activityFact.AssignmentCount),
+					"resolvable_assignment_count": float64(activityFact.ResolvableAssignments),
+					"resolvable_user_count":       float64(activityFact.ResolvableUserCount),
 				})
-			case fact.ResolvableAssignments == 0:
+			case activityFact.ResolvableAssignments == 0:
 				addReason("blocked_total", "human_assignment_unresolvable", "blocked", "当前人工节点没有可解析处理人", map[string]any{
-					"activity_id":                 float64(fact.Activity.ID),
-					"activity_type":               fact.Activity.ActivityType,
-					"assignment_count":            float64(fact.AssignmentCount),
-					"resolvable_assignment_count": float64(fact.ResolvableAssignments),
+					"activity_id":                 float64(activity.ID),
+					"activity_type":               activity.ActivityType,
+					"assignment_count":            float64(activityFact.AssignmentCount),
+					"resolvable_assignment_count": float64(activityFact.ResolvableAssignments),
+					"resolvable_user_count":       float64(activityFact.ResolvableUserCount),
 				})
 			case now.Sub(startedAt) >= monitorHumanWaitRiskAfter:
 				addReason("risk_total", "human_waiting_too_long", "risk", "人工节点等待超过 60 分钟", map[string]any{
-					"activity_id":         float64(fact.Activity.ID),
-					"activity_type":       fact.Activity.ActivityType,
+					"activity_id":         float64(activity.ID),
+					"activity_type":       activity.ActivityType,
 					"activity_started_at": startedAt.Format(time.RFC3339),
 					"waiting_minutes":     float64(elapsedMinutes(now, startedAt)),
 					"threshold_minutes":   float64(monitorHumanWaitRiskAfter / time.Minute),
 				})
 			}
 		}
-		if fact.Activity.ActivityType == engine.NodeAction {
-			if fact.ActionFailed {
+		if activity.ActivityType == engine.NodeAction {
+			if activityFact.ActionFailed {
 				addReason("blocked_total", "action_execution_failed", "blocked", "自动化动作执行失败", map[string]any{
-					"activity_id":   float64(fact.Activity.ID),
-					"activity_type": fact.Activity.ActivityType,
+					"activity_id":   float64(activity.ID),
+					"activity_type": activity.ActivityType,
 					"action_failed": true,
 				})
 			} else if now.Sub(startedAt) >= monitorActionRiskAfter {
 				addReason("risk_total", "action_running_too_long", "risk", "自动化动作运行超过 15 分钟", map[string]any{
-					"activity_id":         float64(fact.Activity.ID),
-					"activity_type":       fact.Activity.ActivityType,
+					"activity_id":         float64(activity.ID),
+					"activity_type":       activity.ActivityType,
 					"activity_started_at": startedAt.Format(time.RFC3339),
 					"waiting_minutes":     float64(elapsedMinutes(now, startedAt)),
 					"threshold_minutes":   float64(monitorActionRiskAfter / time.Minute),
@@ -419,8 +525,8 @@ func normalizePage(page int, pageSize int) (int, int) {
 	if pageSize < 1 {
 		pageSize = 20
 	}
-	if pageSize > 200 {
-		pageSize = 200
+	if pageSize > 100 {
+		pageSize = 100
 	}
 	return page, pageSize
 }

@@ -2,7 +2,8 @@ import { useEffect, useMemo, useCallback } from "react"
 import { useForm, Controller, useWatch } from "react-hook-form"
 import { cn } from "@/lib/utils"
 import { renderField } from "./field-renderers"
-import { buildZodSchema, defaultValueForField } from "./build-zod-schema"
+import { defaultValueForField } from "./build-zod-schema"
+import { validateVisibleFormData } from "./form-submit"
 import { useFieldVisibility } from "./use-visibility"
 import type { FormRendererProps, FormField } from "./types"
 
@@ -18,6 +19,7 @@ export function FormRenderer({
   onSubmit,
   onChange,
   disabled = false,
+  footer,
 }: FormRendererProps) {
   // Build default values from schema
   const defaultValues = useMemo(() => {
@@ -41,12 +43,6 @@ export function FormRenderer({
 
   // Compute field visibility
   const visibleFields = useFieldVisibility(schema, watchValues)
-
-  // Build Zod schema dynamically (memoized on schema + visibility)
-  const zodSchema = useMemo(
-    () => buildZodSchema(schema, visibleFields),
-    [schema, visibleFields],
-  )
 
   // Reset form when data changes
   useEffect(() => {
@@ -77,26 +73,16 @@ export function FormRenderer({
   // Submit handler with manual Zod validation
   const handleSubmit = useCallback(async () => {
     const values = form.getValues()
-    const result = zodSchema.safeParse(values)
+    form.clearErrors()
+    const result = validateVisibleFormData(schema, visibleFields, values)
     if (!result.success) {
-      // Set errors manually
-      for (const issue of result.error.issues) {
-        const path = issue.path[0]
-        if (path) {
-          form.setError(String(path), { message: issue.message })
-        }
+      for (const error of result.errors) {
+        form.setError(error.field, { message: error.message })
       }
       return
     }
-    // Filter out hidden fields
-    const filtered: Record<string, unknown> = {}
-    for (const key of Object.keys(result.data as Record<string, unknown>)) {
-      if (visibleFields.has(key)) {
-        filtered[key] = (result.data as Record<string, unknown>)[key]
-      }
-    }
-    onSubmit?.(filtered)
-  }, [form, zodSchema, visibleFields, onSubmit])
+    onSubmit?.(result.data)
+  }, [form, schema, visibleFields, onSubmit])
 
   // Determine field permission for current node
   const getFieldState = (field: FormField) => {
@@ -204,6 +190,7 @@ export function FormRenderer({
       className="space-y-4"
     >
       {content}
+      {footer}
     </form>
   )
 }

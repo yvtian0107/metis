@@ -19,6 +19,7 @@ func registerDbBackupSteps(sc *godog.ScenarioContext, bc *bddContext) {
 	sc.Given(`^放行接收端临时失败$`, bc.givenApplyReceiverTemporarilyFails)
 	sc.Given(`^"([^"]*)" 已创建数据库备份白名单放行工单，场景为 "([^"]*)"$`, bc.givenDbBackupTicketCreated)
 	sc.Given(`^"([^"]*)" 已创建数据库备份白名单放行工单 "([^"]*)"，场景为 "([^"]*)"$`, bc.givenDbBackupTicketCreatedWithAlias)
+	sc.Given(`^数据库备份白名单流程图包含预检和放行动作节点$`, bc.thenDbBackupWorkflowContainsActionNodes)
 
 	sc.Then(`^预检动作已为当前工单触发$`, bc.thenPrecheckActionTriggered)
 	sc.Then(`^预检动作未为当前工单触发$`, bc.thenPrecheckActionNotTriggered)
@@ -34,6 +35,7 @@ func registerDbBackupSteps(sc *godog.ScenarioContext, bc *bddContext) {
 	sc.Then(`^工单 "([^"]*)" 的动作记录与工单 "([^"]*)" 完全隔离$`, bc.thenActionRecordsIsolated)
 	sc.Then(`^记录当前工单活动数与动作请求数$`, bc.thenMarkCurrentActivityAndActionRequestCounts)
 	sc.Then(`^当前工单活动数与动作请求数保持不变$`, bc.thenCurrentActivityAndActionRequestCountsUnchanged)
+	sc.Then(`^数据库备份白名单流程图包含预检和放行动作节点$`, bc.thenDbBackupWorkflowContainsActionNodes)
 
 	sc.When(`^放行接收端恢复成功$`, bc.whenApplyReceiverRecovers)
 }
@@ -220,6 +222,72 @@ func (bc *bddContext) whenApplyReceiverRecovers() error {
 	bc.actionReceiver.SetResponder("/apply", func(ActionRecord) (int, string) {
 		return 200, `{"status":"ok"}`
 	})
+	return nil
+}
+
+func (bc *bddContext) thenDbBackupWorkflowContainsActionNodes() error {
+	if bc.service == nil {
+		return fmt.Errorf("service not initialized")
+	}
+	precheckAction, ok := bc.serviceActions["db_backup_whitelist_precheck"]
+	if !ok {
+		return fmt.Errorf("precheck service action not found in context")
+	}
+	applyAction, ok := bc.serviceActions["db_backup_whitelist_apply"]
+	if !ok {
+		return fmt.Errorf("apply service action not found in context")
+	}
+
+	var wf struct {
+		Nodes []struct {
+			ID   string `json:"id"`
+			Type string `json:"type"`
+			Data struct {
+				Label    string `json:"label"`
+				ActionID uint   `json:"action_id"`
+			} `json:"data"`
+		} `json:"nodes"`
+		Edges []struct {
+			Source string `json:"source"`
+			Target string `json:"target"`
+			Data   struct {
+				Outcome string `json:"outcome"`
+			} `json:"data"`
+		} `json:"edges"`
+	}
+	if err := json.Unmarshal([]byte(bc.service.WorkflowJSON), &wf); err != nil {
+		return fmt.Errorf("parse workflow json: %w", err)
+	}
+
+	var precheckNodeID, applyNodeID string
+	for _, node := range wf.Nodes {
+		if node.Type != "action" {
+			continue
+		}
+		switch node.Data.ActionID {
+		case precheckAction.ID:
+			if !strings.Contains(node.Data.Label, "预检") {
+				return fmt.Errorf("precheck action node label %q does not describe precheck", node.Data.Label)
+			}
+			precheckNodeID = node.ID
+		case applyAction.ID:
+			if !strings.Contains(node.Data.Label, "放行") {
+				return fmt.Errorf("apply action node label %q does not describe release", node.Data.Label)
+			}
+			applyNodeID = node.ID
+		}
+	}
+	if precheckNodeID == "" {
+		return fmt.Errorf("workflow does not contain precheck action node bound to action_id %d", precheckAction.ID)
+	}
+	if applyNodeID == "" {
+		return fmt.Errorf("workflow does not contain apply action node bound to action_id %d", applyAction.ID)
+	}
+	for _, edge := range wf.Edges {
+		if edge.Source == "db_process" && edge.Data.Outcome == "rejected" && edge.Target == applyNodeID {
+			return fmt.Errorf("workflow rejected edge must not enter apply action node %q", applyNodeID)
+		}
+	}
 	return nil
 }
 

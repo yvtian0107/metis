@@ -12,6 +12,7 @@ Feature: 数据库备份白名单临时放行 — 智能引擎 Action 元调用
       | 运维管理员处理人     | ops-operator        | it   | ops_admin  |
     And 已定义数据库备份白名单临时放行协作规范
     And 已基于协作规范发布数据库备份白名单放行服务（智能引擎）
+    And 数据库备份白名单流程图包含预检和放行动作节点
 
   Scenario: 完整流程——Agent 元调用预检、DBA处理、元调用放行、完成
     Given "db-requester-1" 已创建数据库备份白名单放行工单，场景为 "requester-1"

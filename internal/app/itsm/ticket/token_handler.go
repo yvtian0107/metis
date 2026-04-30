@@ -32,9 +32,8 @@ func (h *TokenHandler) List(c *gin.Context) {
 		return
 	}
 
-	// Check ticket exists
-	if _, err := h.ticketSvc.Get(uint(ticketID)); err != nil {
-		handler.Fail(c, http.StatusNotFound, "ticket not found")
+	if err := h.ticketSvc.EnsureCanViewTicket(uint(ticketID), currentUserID(c), currentUserRole(c)); err != nil {
+		respondTicketAccessError(c, err)
 		return
 	}
 

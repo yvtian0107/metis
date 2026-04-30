@@ -30,6 +30,7 @@ import {
   fetchUsers,
   updateEngineSettingsConfig,
 } from "../../api"
+import { validateEngineSettingsRuntime } from "./engine-settings-validation"
 
 type SectionStatus = "pass" | "warn" | "fail"
 
@@ -104,6 +105,21 @@ function EngineSettingRow({
   )
 }
 
+function ConfigErrorState({ message, onRetry }: { message: string; onRetry: () => void }) {
+  const { t } = useTranslation(["itsm", "common"])
+  return (
+    <div className="flex items-center justify-center py-12">
+      <div className="workspace-surface w-full max-w-xl rounded-lg p-6 text-center">
+        <p className="text-sm font-medium text-foreground">{t("itsm:engineConfig.configLoadErrorTitle")}</p>
+        <p className="mt-2 text-sm text-muted-foreground">{message}</p>
+        <Button type="button" variant="outline" className="mt-4" onClick={onRetry}>
+          {t("common:refresh")}
+        </Button>
+      </div>
+    </div>
+  )
+}
+
 function PathBuilderFields({
   providerId,
   modelId,
@@ -111,6 +127,7 @@ function PathBuilderFields({
   maxRetries,
   timeoutSeconds,
   systemPrompt,
+  modelError,
   promptDrawerTitle,
   promptDrawerDescription,
   onProviderChange,
@@ -126,6 +143,7 @@ function PathBuilderFields({
   maxRetries: number
   timeoutSeconds: number
   systemPrompt: string
+  modelError?: string
   promptDrawerTitle: string
   promptDrawerDescription: string
   onProviderChange: (id: number) => void
@@ -198,7 +216,7 @@ function PathBuilderFields({
       <div className="space-y-1.5">
         <Label>{t("engineConfig.model")}</Label>
         <Select value={modelId ? String(modelId) : ""} onValueChange={(v) => onModelChange(Number(v))} disabled={!providerId}>
-          <SelectTrigger className="w-full">
+          <SelectTrigger className="w-full" aria-invalid={Boolean(modelError)}>
             <SelectValue placeholder={t("engineConfig.modelPlaceholder")} />
           </SelectTrigger>
           <SelectContent>
@@ -209,6 +227,7 @@ function PathBuilderFields({
             ))}
           </SelectContent>
         </Select>
+        {modelError ? <p className="text-xs text-destructive">{modelError}</p> : null}
       </div>
       <div className="space-y-2">
         <div className="flex items-center justify-between gap-3">
@@ -368,6 +387,12 @@ function EngineSettingsForm({ config }: { config: EngineSettingsConfig }) {
   }, [config.health.items])
 
   const fallbackUserKnown = fallbackAssignee === 0 || fallbackUsers.some((u) => u.id === fallbackAssignee)
+  const runtimeValidation = useMemo(() => validateEngineSettingsRuntime({
+    pathBuilder: { modelId: pathModelId },
+    titleBuilder: { modelId: titleModelId },
+    healthChecker: { modelId: healthModelId },
+  }), [healthModelId, pathModelId, titleModelId])
+  const validationMessage = Object.values(runtimeValidation.errors)[0] ?? "引擎设置未完成"
 
   const saveMut = useMutation({
     mutationFn: (data: EngineSettingsConfigUpdate) => updateEngineSettingsConfig(data),
@@ -408,10 +433,18 @@ function EngineSettingsForm({ config }: { config: EngineSettingsConfig }) {
   }
 
   function handleSave() {
+    if (!runtimeValidation.valid) {
+      toast.error(validationMessage)
+      return
+    }
     saveMut.mutate(buildRuntimePayload(pathSystemPrompt, titleSystemPrompt, healthSystemPrompt))
   }
 
   async function applyPathPrompt(nextPrompt: string) {
+    if (!runtimeValidation.valid) {
+      toast.error(validationMessage)
+      return false
+    }
     try {
       await saveMut.mutateAsync(buildRuntimePayload(nextPrompt, titleSystemPrompt, healthSystemPrompt))
       setPathSystemPrompt(nextPrompt)
@@ -422,6 +455,10 @@ function EngineSettingsForm({ config }: { config: EngineSettingsConfig }) {
   }
 
   async function applyTitlePrompt(nextPrompt: string) {
+    if (!runtimeValidation.valid) {
+      toast.error(validationMessage)
+      return false
+    }
     try {
       await saveMut.mutateAsync(buildRuntimePayload(pathSystemPrompt, nextPrompt, healthSystemPrompt))
       setTitleSystemPrompt(nextPrompt)
@@ -432,6 +469,10 @@ function EngineSettingsForm({ config }: { config: EngineSettingsConfig }) {
   }
 
   async function applyHealthPrompt(nextPrompt: string) {
+    if (!runtimeValidation.valid) {
+      toast.error(validationMessage)
+      return false
+    }
     try {
       await saveMut.mutateAsync(buildRuntimePayload(pathSystemPrompt, titleSystemPrompt, nextPrompt))
       setHealthSystemPrompt(nextPrompt)
@@ -448,13 +489,18 @@ function EngineSettingsForm({ config }: { config: EngineSettingsConfig }) {
           <h2 className="workspace-page-title">{t("itsm:engineConfig.engineSettingsTitle")}</h2>
           <p className="workspace-page-description">{t("itsm:engineConfig.engineSettingsDesc")}</p>
         </div>
-        <Button className="shrink-0" onClick={handleSave} disabled={saveMut.isPending}>
+        <Button className="shrink-0" onClick={handleSave} disabled={saveMut.isPending || !runtimeValidation.valid}>
           <Save className="mr-1.5 h-4 w-4" />
           {saveMut.isPending ? t("common:saving") : t("common:save")}
         </Button>
       </div>
 
       <div className="space-y-5">
+        {!runtimeValidation.valid && validationMessage ? (
+          <Alert>
+            <AlertDescription>{validationMessage}</AlertDescription>
+          </Alert>
+        ) : null}
         <EngineSettingGroup
           title={t("itsm:engineConfig.modelCapabilityGroupTitle")}
           description={t("itsm:engineConfig.modelCapabilityGroupDesc")}
@@ -472,6 +518,7 @@ function EngineSettingsForm({ config }: { config: EngineSettingsConfig }) {
               maxRetries={pathMaxRetries}
               timeoutSeconds={pathTimeoutSeconds}
               systemPrompt={pathSystemPrompt}
+              modelError={runtimeValidation.errors.pathBuilder}
               promptDrawerTitle={t("engineConfig.pathPromptEditorTitle")}
               promptDrawerDescription={t("engineConfig.pathPromptEditorDesc")}
               onProviderChange={setPathProviderId}
@@ -496,6 +543,7 @@ function EngineSettingsForm({ config }: { config: EngineSettingsConfig }) {
               maxRetries={titleMaxRetries}
               timeoutSeconds={titleTimeoutSeconds}
               systemPrompt={titleSystemPrompt}
+              modelError={runtimeValidation.errors.titleBuilder}
               promptDrawerTitle={t("engineConfig.titlePromptEditorTitle")}
               promptDrawerDescription={t("engineConfig.titlePromptEditorDesc")}
               onProviderChange={setTitleProviderId}
@@ -520,6 +568,7 @@ function EngineSettingsForm({ config }: { config: EngineSettingsConfig }) {
               maxRetries={healthMaxRetries}
               timeoutSeconds={healthTimeoutSeconds}
               systemPrompt={healthSystemPrompt}
+              modelError={runtimeValidation.errors.healthChecker}
               promptDrawerTitle={t("engineConfig.healthPromptEditorTitle")}
               promptDrawerDescription={t("engineConfig.healthPromptEditorDesc")}
               onProviderChange={setHealthProviderId}
@@ -588,10 +637,14 @@ function EngineSettingsForm({ config }: { config: EngineSettingsConfig }) {
 export function Component() {
   const { t } = useTranslation("common")
 
-  const { data: config, isLoading } = useQuery({
+  const { data: config, error, isError, isLoading, refetch } = useQuery({
     queryKey: ["itsm-engine-settings-config"],
     queryFn: fetchEngineSettingsConfig,
   })
+
+  if (isError) {
+    return <ConfigErrorState message={error.message} onRetry={() => { void refetch() }} />
+  }
 
   if (isLoading || !config) {
     return (

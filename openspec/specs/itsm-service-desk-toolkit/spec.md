@@ -347,9 +347,9 @@ The `Operator.CreateTicket` method SHALL delegate to a `TicketCreator` interface
 - **THEN** 系统 SHALL 返回错误 `{"ok": false, "error": "仅工单提交人可撤回"}`
 
 ### Requirement: 服务台会话状态管理
-AgentSession 模型 SHALL 包含 `State` 字段（JSON text），用于存储服务台工具链的多轮对话状态。
+AgentSession 状态模型 SHALL 扩展为对话式提单状态机，支持 `missing_fields`、`asked_fields`、`min_decision_ready` 等字段，以驱动增量追问与最小可决策提交。系统 MUST 在每轮工具调用后更新并持久化状态，且不得重复追问已确认字段。
 
-**状态结构**:
+**状态结构扩展**:
 ```json
 {
   "stage": "idle|candidates_ready|service_selected|service_loaded|awaiting_confirmation|confirmed",
@@ -362,9 +362,24 @@ AgentSession 模型 SHALL 包含 `State` 字段（JSON text），用于存储服
   "draft_form_data": {},
   "draft_version": 0,
   "confirmed_draft_version": 0,
-  "fields_hash": ""
+  "fields_hash": "",
+  "missing_fields": [],
+  "asked_fields": [],
+  "min_decision_ready": false
 }
 ```
+
+#### Scenario: 追问缺失字段并推进状态
+- **WHEN** 用户输入请求后存在关键字段缺失
+- **THEN** 系统 SHALL 在会话状态记录 missing_fields 并发起下一轮追问
+
+#### Scenario: 达到最小可决策条件
+- **WHEN** 会话状态满足 min_decision_ready=true
+- **THEN** 工具链 SHALL 允许进入 draft_confirm 与 ticket_create
+
+#### Scenario: 已确认字段不重复追问
+- **WHEN** 字段已存在于 asked_fields 且已确认
+- **THEN** 后续工具调用 SHALL 跳过该字段追问
 
 #### Scenario: 状态随工具调用自动推进
 - **WHEN** 工具按顺序调用 service_match -> service_confirm -> service_load -> draft_prepare -> draft_confirm -> ticket_create

@@ -251,7 +251,7 @@ func TestProgress_ConcurrentGoroutines(t *testing.T) {
 			switch {
 			case err == nil:
 				successes++
-			case errors.Is(err, ErrActivityNotActive):
+			case errors.Is(err, ErrActivityNotActive), errors.Is(err, ErrNoActiveAssignment):
 				notActive++
 			case errors.Is(err, ErrTokenNotActive):
 				tokenDone++

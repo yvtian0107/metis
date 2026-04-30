@@ -168,7 +168,8 @@
     "addService": "Add Service",
     "guideCardHint": "Add Service",
     "emptyInCatalog": "No services in this category",
-    "emptyInCatalogHint": "Click \"Add Service\" to create one"
+    "emptyInCatalogHint": "Click \"Add Service\" to create one",
+    "listCount": "{{count}} services"
   },
   "intakeForm": {
     "title": "Intake Form",
@@ -244,6 +245,10 @@
     "searchEmpty": "No matching SLA templates",
     "listCount": "{{count}} SLA templates",
     "sheetDesc": "Set the template identity and base timing. Escalation rules are managed from the expanded row.",
+    "ruleOverview": "Rule Chain Overview",
+    "ruleOverviewDesc": "Summarize timeout escalation rules by SLA template and expose inactive, conflicting, or unavailable targets early.",
+    "ruleOverviewCount": "{{count}} rules",
+    "ruleOverviewEmpty": "No escalation rules",
     "formIdentity": "Identity",
     "formCommitment": "Timing",
     "formDescription": "Description",
@@ -289,6 +294,17 @@
       "deleteTitle": "Delete Rule",
       "deleteDesc": "Are you sure you want to delete this rule?",
       "confirmDelete": "Confirm Delete"
+    },
+    "risk": {
+      "title": "Risk",
+      "ok": "Executable",
+      "inactive": "Inactive",
+      "duplicate_level": "Level conflict",
+      "notify_missing_recipients": "Missing recipients",
+      "notify_missing_channel": "Channel unavailable",
+      "reassign_missing_candidates": "Missing reassignment candidates",
+      "priority_missing": "Target priority missing",
+      "priority_inactive": "Target priority inactive"
     }
   },
   "tickets": {
@@ -412,6 +428,9 @@
   "validation": {
     "nameRequired": "Name is required",
     "codeRequired": "Code is required",
+    "valueRequired": "Sort value must be an integer greater than 0",
+    "colorRequired": "Color is required",
+    "colorInvalid": "Color must use #RRGGBB format",
     "titleRequired": "Title is required",
     "serviceRequired": "Service is required",
     "priorityRequired": "Priority is required",
@@ -667,6 +686,7 @@
     "pageDesc": "Assign agents to service intake, workflow decision, and SLA assurance posts for smart ticket operations.",
     "engineSettingsTitle": "Engine Settings",
     "engineSettingsDesc": "Configure ITSM-owned generation and fallback capabilities.",
+    "configLoadErrorTitle": "Failed to load configuration",
     "modelCapabilityGroupTitle": "Direct Model Capabilities",
     "modelCapabilityGroupDesc": "These ITSM-owned capabilities call models directly. Configure model, prompt, retries, and timeout in one group.",
     "runtimeGuardGroupTitle": "Runtime Guardrails",
@@ -813,7 +833,22 @@
     "recentTimeline": "Recent Timeline",
     "openDetail": "Open Detail",
     "noTimeline": "No timeline records",
-    "qualityTrendHint": "Aggregated from workflow activity results and timeline events, for trend observation only"
+    "metricCode": "Metric",
+    "ruleCode": "Rule",
+    "evidence": "Evidence",
+    "qualityTitle": "Decision Quality (30 days)",
+    "qualityVersion": "Version",
+    "qualityTrendHint": "Aggregated from workflow activity results and timeline events, for trend observation only",
+    "qualityByService": "By Service",
+    "qualityByDepartment": "By Department",
+    "qualityDimension": "Dimension",
+    "qualityApprovalRate": "Approval Rate",
+    "qualityRejectionRate": "Rejection Rate",
+    "qualityRetryRate": "Retry Rate",
+    "qualityLatency": "Avg. Decision Latency",
+    "qualityRecoveryRate": "Recovery Success Rate",
+    "qualityDecisionCount": "Decision Count",
+    "qualityEmpty": "No decision quality data"
   },
   "variables": {
     "title": "Process Variables",

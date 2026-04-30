@@ -3,7 +3,9 @@ package ticket
 import (
 	"encoding/json"
 	"errors"
+	itsmdef "metis/internal/app/itsm/definition"
 	. "metis/internal/app/itsm/domain"
+	itsmsla "metis/internal/app/itsm/sla"
 	"net/http"
 	"strconv"
 	"time"
@@ -35,6 +37,23 @@ func currentUserID(c *gin.Context) uint {
 	return uid
 }
 
+func currentUserRole(c *gin.Context) string {
+	role, _ := c.Get("userRole")
+	roleCode, _ := role.(string)
+	return roleCode
+}
+
+func respondTicketAccessError(c *gin.Context, err error) {
+	switch {
+	case errors.Is(err, ErrTicketNotFound):
+		handler.Fail(c, http.StatusNotFound, err.Error())
+	case errors.Is(err, ErrTicketForbidden):
+		handler.Fail(c, http.StatusForbidden, err.Error())
+	default:
+		handler.Fail(c, http.StatusInternalServerError, err.Error())
+	}
+}
+
 func (h *TicketHandler) respondTicket(c *gin.Context, ticket *Ticket) {
 	resp, err := h.svc.BuildResponse(ticket, currentUserID(c))
 	if err != nil {
@@ -51,6 +70,54 @@ func (h *TicketHandler) respondTicketList(c *gin.Context, items []Ticket, total 
 		return
 	}
 	handler.OK(c, gin.H{"items": result, "total": total})
+}
+
+type CreateTicketRequest struct {
+	Title       string          `json:"title" binding:"required"`
+	Description string          `json:"description"`
+	ServiceID   uint            `json:"serviceId" binding:"required"`
+	PriorityID  uint            `json:"priorityId" binding:"required"`
+	FormData    json.RawMessage `json:"formData"`
+}
+
+func (h *TicketHandler) Create(c *gin.Context) {
+	var req CreateTicketRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		handler.Fail(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	if len(req.FormData) == 0 {
+		req.FormData = json.RawMessage(`{}`)
+	}
+
+	operatorID := currentUserID(c)
+	c.Set("audit_action", "itsm.ticket.create")
+	c.Set("audit_resource", "ticket")
+
+	ticket, err := h.svc.CreateCatalog(CreateTicketInput{
+		Title:       req.Title,
+		Description: req.Description,
+		ServiceID:   req.ServiceID,
+		PriorityID:  req.PriorityID,
+		FormData:    JSONField(req.FormData),
+		Source:      TicketSourceCatalog,
+	}, operatorID)
+	if err != nil {
+		switch {
+		case errors.Is(err, itsmdef.ErrServiceDefNotFound):
+			handler.Fail(c, http.StatusNotFound, err.Error())
+		case errors.Is(err, ErrCatalogSubmissionClassic), errors.Is(err, ErrServiceNotActive),
+			errors.Is(err, itsmsla.ErrPriorityNotFound), errors.Is(err, itsmsla.ErrSLATemplateNotFound):
+			handler.Fail(c, http.StatusBadRequest, err.Error())
+		default:
+			handler.Fail(c, http.StatusInternalServerError, err.Error())
+		}
+		return
+	}
+
+	c.Set("audit_resource_id", strconv.FormatUint(uint64(ticket.ID), 10))
+	c.Set("audit_summary", "created ticket: "+ticket.Code)
+	h.respondTicket(c, ticket)
 }
 
 func (h *TicketHandler) buildTimelineResponses(items []TicketTimeline) ([]TicketTimelineResponse, error) {
@@ -146,6 +213,12 @@ func (h *TicketHandler) Monitor(c *gin.Context) {
 		MetricCode: c.Query("metricCode"),
 		Page:       page,
 		PageSize:   pageSize,
+		OperatorID: currentUserID(c),
+	}
+	if scope, ok := c.Get("deptScope"); ok {
+		if deptScope, ok := scope.(*[]uint); ok {
+			params.DeptScope = deptScope
+		}
 	}
 
 	if v := c.Query("priorityId"); v != "" {
@@ -207,13 +280,9 @@ func (h *TicketHandler) Get(c *gin.Context) {
 		return
 	}
 
-	ticket, err := h.svc.Get(id)
+	ticket, err := h.svc.GetVisible(id, currentUserID(c), currentUserRole(c))
 	if err != nil {
-		if errors.Is(err, ErrTicketNotFound) {
-			handler.Fail(c, http.StatusNotFound, err.Error())
-			return
-		}
-		handler.Fail(c, http.StatusInternalServerError, err.Error())
+		respondTicketAccessError(c, err)
 		return
 	}
 	h.respondTicket(c, ticket)
@@ -408,6 +477,11 @@ func (h *TicketHandler) Timeline(c *gin.Context) {
 		return
 	}
 
+	if err := h.svc.EnsureCanViewTicket(id, currentUserID(c), currentUserRole(c)); err != nil {
+		respondTicketAccessError(c, err)
+		return
+	}
+
 	items, err := h.timelineSvc.ListByTicket(id)
 	if err != nil {
 		handler.Fail(c, http.StatusInternalServerError, err.Error())
@@ -457,6 +531,8 @@ func (h *TicketHandler) Progress(c *gin.Context) {
 			handler.Fail(c, http.StatusBadRequest, err.Error())
 		case errors.Is(err, ErrInvalidProgressOutcome):
 			handler.Fail(c, http.StatusBadRequest, err.Error())
+		case errors.Is(err, ErrNoActiveAssignment):
+			handler.Fail(c, http.StatusForbidden, err.Error())
 		case errors.Is(err, engine.ErrActivityNotFound), errors.Is(err, engine.ErrActivityNotActive):
 			handler.Fail(c, http.StatusBadRequest, err.Error())
 		default:
@@ -522,6 +598,11 @@ func (h *TicketHandler) Activities(c *gin.Context) {
 	}
 	userID, _ := c.Get("userId")
 	operatorID := userID.(uint)
+
+	if err := h.svc.EnsureCanViewTicket(id, operatorID, currentUserRole(c)); err != nil {
+		respondTicketAccessError(c, err)
+		return
+	}
 
 	activities, err := h.svc.GetActivities(id, operatorID)
 	if err != nil {

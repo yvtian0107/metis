@@ -33,9 +33,11 @@ import {
   Form, FormControl, FormField, FormItem, FormLabel, FormMessage,
 } from "@/components/ui/form"
 import {
-  type CatalogItem, type ServiceDefItem,
+  type CatalogItem, type CatalogServiceCounts,
   createCatalog, updateCatalog, deleteCatalog,
 } from "../api"
+import { itsmQueryKeys } from "../query-keys"
+import { getDisplayedCatalogCount } from "../pages/services/service-catalog-state"
 
 // ─── Icon mapping ──────────────────────────────────────
 
@@ -48,6 +50,17 @@ const iconMap: Record<string, LucideIcon> = {
 function CatalogIcon({ name, className }: { name?: string; className?: string }) {
   const Icon = (name && iconMap[name]) || FolderTree
   return <Icon className={className} />
+}
+
+function CatalogCount({ value, className }: { value: number; className?: string }) {
+  return (
+    <span className={cn(
+      "ml-2 min-w-7 shrink-0 text-right font-mono text-[11px] leading-none tabular-nums text-muted-foreground/65",
+      className,
+    )}>
+      {value}
+    </span>
+  )
 }
 
 // ─── Schema ────────────────────────────────────────────
@@ -70,7 +83,7 @@ type FormValues = z.infer<ReturnType<typeof useCatalogSchema>>
 
 interface CatalogNavPanelProps {
   catalogs: CatalogItem[]
-  services: ServiceDefItem[]
+  serviceCounts?: CatalogServiceCounts
   selectedCatalogId: number | null // null = "全部"
   onSelect: (catalogId: number | null) => void
   canCreate: boolean
@@ -81,7 +94,7 @@ interface CatalogNavPanelProps {
 // ─── Component ─────────────────────────────────────────
 
 export function CatalogNavPanel({
-  catalogs, services, selectedCatalogId,
+  catalogs, serviceCounts, selectedCatalogId,
   onSelect, canCreate, canUpdate, canDelete,
 }: CatalogNavPanelProps) {
   const { t } = useTranslation(["itsm", "common"])
@@ -94,16 +107,7 @@ export function CatalogNavPanel({
 
   const roots = useMemo(() => catalogs.filter((n) => !n.parentId), [catalogs])
 
-  // Count services per child catalog
-  const serviceCounts = useMemo(() => {
-    const counts = new Map<number, number>()
-    for (const svc of services) {
-      counts.set(svc.catalogId, (counts.get(svc.catalogId) ?? 0) + 1)
-    }
-    return counts
-  }, [services])
-
-  const totalServices = services.length
+  const totalServices = getDisplayedCatalogCount(serviceCounts, null)
 
   const form = useForm<FormValues>({
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -132,7 +136,7 @@ export function CatalogNavPanel({
     mutationFn: (v: FormValues) => createCatalog({
       name: v.name, code: v.code, parentId: v.parentId, description: v.description, icon: v.icon, sortOrder: v.sortOrder,
     }),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["itsm-catalogs"] }); setFormOpen(false); toast.success(t("itsm:catalogs.createSuccess")) },
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: itsmQueryKeys.catalogs.tree() }); setFormOpen(false); toast.success(t("itsm:catalogs.createSuccess")) },
     onError: (err) => toast.error(err.message),
   })
 
@@ -140,13 +144,17 @@ export function CatalogNavPanel({
     mutationFn: (v: FormValues) => updateCatalog(editing!.id, {
       name: v.name, code: v.code, parentId: v.parentId, description: v.description, icon: v.icon, sortOrder: v.sortOrder,
     }),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["itsm-catalogs"] }); setFormOpen(false); toast.success(t("itsm:catalogs.updateSuccess")) },
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: itsmQueryKeys.catalogs.tree() }); setFormOpen(false); toast.success(t("itsm:catalogs.updateSuccess")) },
     onError: (err) => toast.error(err.message),
   })
 
   const deleteMut = useMutation({
     mutationFn: (id: number) => deleteCatalog(id),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["itsm-catalogs"] }); toast.success(t("itsm:catalogs.deleteSuccess")) },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: itsmQueryKeys.catalogs.tree() })
+      queryClient.invalidateQueries({ queryKey: itsmQueryKeys.catalogs.serviceCounts() })
+      toast.success(t("itsm:catalogs.deleteSuccess"))
+    },
     onError: (err) => toast.error(err.message),
   })
 
@@ -159,7 +167,7 @@ export function CatalogNavPanel({
 
   return (
     <>
-      <div className="workspace-surface flex w-56 shrink-0 flex-col overflow-hidden rounded-[1.15rem]">
+      <div className="workspace-surface flex w-60 shrink-0 flex-col overflow-hidden rounded-[1.15rem]">
         <div className="flex-1 overflow-y-auto p-1.5">
           {/* "全部" */}
           <button
@@ -172,23 +180,39 @@ export function CatalogNavPanel({
             )}
           >
             <FolderTree className="h-4 w-4 shrink-0 text-muted-foreground" />
-            <span className="flex-1">{t("itsm:services.allNav")}</span>
-            <span className="ml-auto w-6 text-right text-xs tabular-nums text-muted-foreground">
-              {totalServices}
-            </span>
+            <span className="min-w-0 flex-1 truncate">{t("itsm:services.allNav")}</span>
+            <CatalogCount value={totalServices} />
           </button>
 
           {/* Group sections */}
           {roots.map((root) => (
             <div key={root.id} className="mt-3">
               {/* Section header */}
-              <div className="group/header flex items-center gap-1 px-2.5 py-1.5">
-                <CatalogIcon name={root.icon} className="h-3.5 w-3.5 shrink-0 text-muted-foreground/60" />
-                <span className="workspace-nav-section-title flex-1 truncate">
-                  {root.name}
-                </span>
+              <div className={cn(
+                "group/header relative rounded-lg transition-colors",
+                selectedCatalogId === root.id && "bg-background/70",
+              )}>
+                <button
+                  type="button"
+                  onClick={() => onSelect(root.id)}
+                  className="flex min-w-0 w-full items-center gap-1.5 px-2.5 py-1.5 text-left"
+                >
+                  <CatalogIcon name={root.icon} className="h-3.5 w-3.5 shrink-0 text-muted-foreground/60" />
+                  <span className={cn(
+                    "workspace-nav-section-title min-w-0 flex-1 truncate",
+                    selectedCatalogId === root.id && "text-foreground",
+                  )}>
+                    {root.name}
+                  </span>
+                  <CatalogCount
+                    value={getDisplayedCatalogCount(serviceCounts, root.id, "root")}
+                    className={cn(
+                      (canUpdate || canDelete || canCreate) && "transition-opacity group-hover/header:opacity-0",
+                    )}
+                  />
+                </button>
                 {(canUpdate || canDelete || canCreate) && (
-                  <div className="opacity-0 transition-opacity group-hover/header:opacity-100">
+                  <div className="absolute right-2 top-1/2 -translate-y-1/2 opacity-0 transition-opacity group-hover/header:opacity-100" onClick={(event) => event.stopPropagation()}>
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
                         <button type="button" className="inline-flex h-5 w-5 items-center justify-center rounded text-muted-foreground/50 hover:bg-background/60 hover:text-foreground">
@@ -233,10 +257,8 @@ export function CatalogNavPanel({
                       selectedCatalogId === child.id && "bg-background/70 font-medium text-foreground",
                     )}
                   >
-                    <span className="flex-1 truncate">{child.name}</span>
-                    <span className="w-5 text-right text-xs tabular-nums text-muted-foreground/75">
-                      {serviceCounts.get(child.id) ?? 0}
-                    </span>
+                    <span className="min-w-0 flex-1 truncate">{child.name}</span>
+                    <CatalogCount value={getDisplayedCatalogCount(serviceCounts, child.id, "child")} />
                   </button>
                 ))}
                 {(!root.children || root.children.length === 0) && (
