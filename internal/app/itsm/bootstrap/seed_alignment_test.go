@@ -317,6 +317,52 @@ func TestBuiltInSmartSeedsAlignParticipantsAndInstallAdminIdentity(t *testing.T)
 	})
 }
 
+func TestSeedITSMGrantsUserServiceDeskSessionPolicies(t *testing.T) {
+	db := newSeedAlignmentDB(t)
+	enforcer := newTestEnforcer(t)
+
+	if err := SeedITSM(db, enforcer); err != nil {
+		t.Fatalf("seed itsm: %v", err)
+	}
+
+	required := [][]string{
+		{coremodel.RoleUser, "/api/v1/itsm/smart-staffing/config", "GET"},
+		{coremodel.RoleUser, "/api/v1/ai/sessions", "GET"},
+		{coremodel.RoleUser, "/api/v1/ai/sessions", "POST"},
+		{coremodel.RoleUser, "/api/v1/ai/sessions/:sid", "GET"},
+		{coremodel.RoleUser, "/api/v1/ai/sessions/:sid", "DELETE"},
+		{coremodel.RoleUser, "/api/v1/ai/sessions/:sid/chat", "POST"},
+		{coremodel.RoleUser, "/api/v1/ai/sessions/:sid/stream", "GET"},
+		{coremodel.RoleUser, "/api/v1/ai/sessions/:sid/cancel", "POST"},
+		{coremodel.RoleUser, "/api/v1/ai/sessions/:sid/images", "POST"},
+	}
+	for _, policy := range required {
+		ok, err := enforcer.HasPolicy(policy)
+		if err != nil {
+			t.Fatalf("check policy %v: %v", policy, err)
+		}
+		if !ok {
+			t.Fatalf("expected user service desk policy %v", policy)
+		}
+	}
+
+	forbidden := [][]string{
+		{coremodel.RoleUser, "/api/v1/itsm/smart-staffing/config", "PUT"},
+		{coremodel.RoleUser, "/api/v1/ai/agents", "GET"},
+		{coremodel.RoleUser, "/api/v1/ai/sessions/:sid/messages/:mid", "PUT"},
+		{coremodel.RoleUser, "/api/v1/ai/sessions/:sid/continue", "POST"},
+	}
+	for _, policy := range forbidden {
+		ok, err := enforcer.HasPolicy(policy)
+		if err != nil {
+			t.Fatalf("check forbidden policy %v: %v", policy, err)
+		}
+		if ok {
+			t.Fatalf("user should not receive privileged policy %v", policy)
+		}
+	}
+}
+
 func TestMigratePriorityCommitmentColumnsDropsLegacyColumns(t *testing.T) {
 	db := newSeedAlignmentDB(t)
 

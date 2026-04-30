@@ -460,11 +460,6 @@ func TestServiceDefServiceRefreshPublishHealthCheck_CoreFailures(t *testing.T) {
 		{name: "empty collaboration spec", setup: func(t *testing.T, db *gorm.DB, service *ServiceDefinition, serviceAgent *ai.Agent, decisionAgent *ai.Agent) {
 			service.CollaborationSpec = ""
 		}, wantKey: "collaboration_spec", wantStatus: "fail"},
-		{name: "inactive service agent", setup: func(t *testing.T, db *gorm.DB, service *ServiceDefinition, serviceAgent *ai.Agent, decisionAgent *ai.Agent) {
-			if err := db.Model(serviceAgent).Update("is_active", false).Error; err != nil {
-				t.Fatalf("deactivate service agent: %v", err)
-			}
-		}, wantKey: "service_agent", wantStatus: "fail"},
 		{name: "inactive decision agent", setup: func(t *testing.T, db *gorm.DB, service *ServiceDefinition, serviceAgent *ai.Agent, decisionAgent *ai.Agent) {
 			if err := db.Model(decisionAgent).Update("is_active", false).Error; err != nil {
 				t.Fatalf("deactivate decision agent: %v", err)
@@ -508,6 +503,41 @@ func TestServiceDefServiceRefreshPublishHealthCheck_CoreFailures(t *testing.T) {
 				t.Fatalf("expected %s item with status %s, got %+v", tt.wantKey, tt.wantStatus, check.Items)
 			}
 		})
+	}
+}
+
+func TestServiceDefServiceRefreshPublishHealthCheck_DoesNotRequireServiceAgent(t *testing.T) {
+	db := newTestDB(t)
+	svc := newServiceDefServiceForTest(t, db)
+	svc.engineConfigSvc = fakePublishHealthConfigProvider{cfg: testPublishHealthRuntimeConfig()}
+	catSvc := newCatalogServiceForTest(t, db)
+	root, _ := catSvc.Create("Root", "root", "", "", nil, 10)
+	user := createServiceHealthUser(t, db, "operator", true)
+	decisionAgent := createServiceHealthAgent(t, db, "decision-agent", true)
+	setServiceHealthDecisionAgent(t, db, decisionAgent.ID)
+	seedServiceHealthPathEngine(t, db)
+	service, err := svc.Create(&ServiceDefinition{
+		Name:             "Smart",
+		Code:             "smart-no-service-agent",
+		CatalogID:        root.ID,
+		EngineType:       "smart",
+		IntakeFormSchema: serviceHealthIntakeFormSchema(),
+		CollaborationSpec: "route the request to the handler",
+		WorkflowJSON:     JSONField(validServiceHealthWorkflow(user.ID)),
+	})
+	if err != nil {
+		t.Fatalf("create service: %v", err)
+	}
+
+	check, err := svc.RefreshPublishHealthCheck(service.ID)
+	if err != nil {
+		t.Fatalf("refresh health check: %v", err)
+	}
+	if serviceHealthHasItem(check, "service_agent", "fail") {
+		t.Fatalf("service agent should not be required, got %+v", check.Items)
+	}
+	if serviceHealthHasItem(check, "decision_agent", "fail") {
+		t.Fatalf("decision agent should remain healthy, got %+v", check.Items)
 	}
 }
 

@@ -134,6 +134,8 @@ type TicketMonitorParams struct {
 	ServiceID  *uint
 	Page       int
 	PageSize   int
+	DeptScope  *[]uint
+	OperatorID uint
 }
 
 type TicketApprovalListParams struct {
@@ -191,7 +193,29 @@ func (r *TicketRepo) List(params TicketListParams) ([]Ticket, int64, error) {
 
 func (r *TicketRepo) ListMonitorBase(params TicketMonitorParams) ([]Ticket, error) {
 	query := r.db.Model(&Ticket{})
+	query = r.applyMonitorBaseFilters(query, params)
 
+	var items []Ticket
+	if err := query.Order("updated_at DESC, id DESC").Find(&items).Error; err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+func (r *TicketRepo) CountMonitorCompletedToday(params TicketMonitorParams, now time.Time) (int64, error) {
+	start := time.Date(now.Local().Year(), now.Local().Month(), now.Local().Day(), 0, 0, 0, 0, now.Local().Location())
+	end := start.Add(24 * time.Hour)
+	query := r.db.Model(&Ticket{})
+	query = r.applyMonitorBaseFilters(query, params).
+		Where("status = ? AND finished_at >= ? AND finished_at < ?", TicketStatusCompleted, start, end)
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		return 0, err
+	}
+	return total, nil
+}
+
+func (r *TicketRepo) applyMonitorBaseFilters(query *gorm.DB, params TicketMonitorParams) *gorm.DB {
 	if params.Keyword != "" {
 		like := "%" + params.Keyword + "%"
 		query = query.Where("code LIKE ? OR title LIKE ? OR description LIKE ?", like, like, like)
@@ -208,12 +232,47 @@ func (r *TicketRepo) ListMonitorBase(params TicketMonitorParams) ([]Ticket, erro
 	if params.ServiceID != nil {
 		query = query.Where("service_id = ?", *params.ServiceID)
 	}
-
-	var items []Ticket
-	if err := query.Order("updated_at DESC, id DESC").Find(&items).Error; err != nil {
-		return nil, err
+	if params.Status == "" {
+		now := time.Now()
+		start := time.Date(now.Local().Year(), now.Local().Month(), now.Local().Day(), 0, 0, 0, 0, now.Local().Location())
+		end := start.Add(24 * time.Hour)
+		query = query.Where(
+			"status NOT IN ? OR (status = ? AND finished_at >= ? AND finished_at < ?)",
+			TerminalTicketStatuses(), TicketStatusCompleted, start, end,
+		)
 	}
-	return items, nil
+	query = r.applyMonitorDataScope(query, params)
+	return query
+}
+
+func (r *TicketRepo) applyMonitorDataScope(query *gorm.DB, params TicketMonitorParams) *gorm.DB {
+	if params.DeptScope == nil {
+		return query
+	}
+	if len(*params.DeptScope) == 0 {
+		if params.OperatorID == 0 {
+			return query.Where("1 = 0")
+		}
+		return query.Where(
+			"requester_id = ? OR assignee_id = ? OR EXISTS ("+
+				"SELECT 1 FROM itsm_ticket_assignments a "+
+				"WHERE a.ticket_id = itsm_tickets.id AND a.deleted_at IS NULL "+
+				"AND (a.user_id = ? OR a.assignee_id = ?))",
+			params.OperatorID, params.OperatorID, params.OperatorID, params.OperatorID,
+		)
+	}
+	deptIDs := *params.DeptScope
+	return query.Where(
+		"requester_id IN (SELECT user_id FROM user_positions WHERE department_id IN ? AND deleted_at IS NULL) "+
+			"OR assignee_id IN (SELECT user_id FROM user_positions WHERE department_id IN ? AND deleted_at IS NULL) "+
+			"OR EXISTS ("+
+			"SELECT 1 FROM itsm_ticket_assignments a "+
+			"WHERE a.ticket_id = itsm_tickets.id AND a.deleted_at IS NULL AND ("+
+			"a.department_id IN ? "+
+			"OR a.user_id IN (SELECT user_id FROM user_positions WHERE department_id IN ? AND deleted_at IS NULL) "+
+			"OR a.assignee_id IN (SELECT user_id FROM user_positions WHERE department_id IN ? AND deleted_at IS NULL)))",
+		deptIDs, deptIDs, deptIDs, deptIDs, deptIDs,
+	)
 }
 
 func applyTicketStatusFilter(query *gorm.DB, status string) *gorm.DB {

@@ -39,6 +39,8 @@ import { useServiceDeskChat } from "./use-service-desk-chat"
 import {
   createServiceDeskWorkspaceActions,
   recoverInitialPromptDraft,
+  resolveServiceDeskStaffingState,
+  type ServiceDeskStaffingState,
 } from "./service-desk-behavior"
 
 const SUGGESTED_PROMPTS = [
@@ -139,8 +141,24 @@ function WelcomeStage({
   )
 }
 
-function NotOnDutyState({ loading }: { loading: boolean }) {
+function NotOnDutyState({ state, onRetry }: { state: ServiceDeskStaffingState; onRetry: () => void }) {
   const navigate = useNavigate()
+  const loading = state.reason === "loading"
+  const configError = state.reason === "config_error"
+  const unhealthy = state.reason === "unhealthy"
+  const title = configError
+    ? "服务台配置读取失败"
+    : unhealthy
+      ? "服务台智能体未就绪"
+      : loading
+        ? "正在检查服务台智能体"
+        : "服务台智能体未配置"
+  const message = configError
+    ? state.message
+    : unhealthy
+      ? state.message
+      : "需要在智能岗位中为服务受理岗安排智能体。"
+
   return (
     <div className="flex flex-1 items-center justify-center p-8">
       <div className="w-full max-w-xl rounded-lg border border-dashed border-border bg-background p-8 text-center">
@@ -149,13 +167,19 @@ function NotOnDutyState({ loading }: { loading: boolean }) {
         ) : (
           <AlertTriangle className="mx-auto size-7 text-amber-600" />
         )}
-        <h2 className="mt-4 text-lg font-semibold">服务台智能体未配置</h2>
+        <h2 className="mt-4 text-lg font-semibold">{title}</h2>
         <p className="mt-2 text-sm text-muted-foreground">
-          需要在智能岗位中为服务受理岗安排智能体。
+          {message}
         </p>
-        <Button className="mt-5" onClick={() => navigate("/itsm/smart-staffing")}>
-          前往智能岗位
-        </Button>
+        {loading ? null : configError ? (
+          <Button className="mt-5" variant="outline" onClick={onRetry}>
+            重新读取
+          </Button>
+        ) : (
+          <Button className="mt-5" onClick={() => navigate("/itsm/smart-staffing")}>
+            前往智能岗位
+          </Button>
+        )}
       </div>
     </div>
   )
@@ -581,19 +605,24 @@ export function Component() {
   const [landingImages, setLandingImages] = useState<ChatComposerImage[]>([])
   const [pendingInitialPrompt, setPendingInitialPrompt] = useState<{ sessionId: number; text: string; images: ChatComposerImage[] } | null>(null)
 
-  const { data: config, isLoading: configLoading } = useQuery({
+  const { data: config, error: configError, isLoading: configLoading, isError: configIsError, refetch: refetchConfig } = useQuery({
     queryKey: ["itsm-smart-staffing-config"],
     queryFn: fetchSmartStaffingConfig,
   })
 
-  const serviceDeskAgentId = config?.posts?.intake?.agentId ?? 0
-  const serviceDeskAgentName = config?.posts?.intake?.agentName || "IT 服务台"
+  const staffingState = resolveServiceDeskStaffingState(config, {
+    loading: configLoading,
+    error: configIsError ? configError : undefined,
+  })
+  const serviceDeskReady = staffingState.ready
+  const serviceDeskAgentId = staffingState.agentId
+  const serviceDeskAgentName = staffingState.agentName
 
   const sessionsQuery = useInfiniteQuery({
     queryKey: ["ai-sessions", serviceDeskAgentId],
     initialPageParam: 1,
     queryFn: ({ pageParam }) => sessionApi.list({ agentId: serviceDeskAgentId, page: pageParam, pageSize: 30 }),
-    enabled: serviceDeskAgentId > 0,
+    enabled: serviceDeskReady,
     getNextPageParam: (lastPage, allPages) => {
       const loaded = allPages.reduce((sum, page) => sum + page.items.length, 0)
       return loaded < lastPage.total ? allPages.length + 1 : undefined
@@ -645,9 +674,9 @@ export function Component() {
 
   const handleLandingSend = useCallback(() => {
     const text = landingInput.trim()
-    if ((!text && landingImages.length === 0) || serviceDeskAgentId <= 0 || createSessionMutation.isPending) return
+    if ((!text && landingImages.length === 0) || !serviceDeskReady || createSessionMutation.isPending) return
     createSessionMutation.mutate({ text, images: landingImages })
-  }, [createSessionMutation, landingImages, landingInput, serviceDeskAgentId])
+  }, [createSessionMutation, landingImages, landingInput, serviceDeskReady])
 
   const addLandingImages = useCallback((files: File[]) => {
     addImagePreviews(files, (image) => setLandingImages((prev) => [...prev, image]))
@@ -710,9 +739,9 @@ export function Component() {
         loadingMore={sessionsQuery.isFetchingNextPage}
         onLoadMore={handleLoadMoreSessions}
       />
-      {serviceDeskAgentId <= 0 || configLoading ? (
+      {!serviceDeskReady ? (
         <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-          <NotOnDutyState loading={configLoading} />
+          <NotOnDutyState state={staffingState} onRetry={() => { void refetchConfig() }} />
         </main>
       ) : activeSession ? (
         <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">

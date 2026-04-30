@@ -638,23 +638,27 @@ func TestBuildActionsContext(t *testing.T) {
 	}
 }
 
-func TestGenerate_FailsFastOnLLMUpstreamError(t *testing.T) {
+func TestGenerate_RetriesLLMUpstreamError(t *testing.T) {
 	client := &fakeWorkflowLLMClient{
-		errs: []error{context.DeadlineExceeded},
+		errs:      []error{context.DeadlineExceeded, nil},
+		responses: []llm.ChatResponse{{}, {Content: validWorkflowJSONForGenerateTest()}},
 	}
 	svc := newWorkflowGenerateServiceForRetryTest(client, 3)
 
-	_, err := svc.Generate(context.Background(), &GenerateRequest{
+	resp, err := svc.Generate(context.Background(), &GenerateRequest{
 		CollaborationSpec: "用户提交 VPN 申请后经理审批",
 	})
-	if !errors.Is(err, ErrPathEngineUpstream) {
-		t.Fatalf("expected ErrPathEngineUpstream, got %v", err)
+	if err != nil {
+		t.Fatalf("generate workflow after retry: %v", err)
 	}
-	if client.calls != 1 {
-		t.Fatalf("expected LLM to be called once for upstream errors, got %d", client.calls)
+	if client.calls != 2 {
+		t.Fatalf("expected LLM upstream error to retry once, got %d calls", client.calls)
 	}
 	if got := client.requests[0].ResponseFormat; got == nil || got.Type != "json_object" {
 		t.Fatalf("expected json_object response format, got %+v", got)
+	}
+	if resp.Retries != 1 {
+		t.Fatalf("expected retries=1, got %d", resp.Retries)
 	}
 }
 

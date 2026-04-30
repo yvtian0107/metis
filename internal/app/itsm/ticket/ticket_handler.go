@@ -163,6 +163,12 @@ func (h *TicketHandler) Monitor(c *gin.Context) {
 		MetricCode: c.Query("metricCode"),
 		Page:       page,
 		PageSize:   pageSize,
+		OperatorID: currentUserID(c),
+	}
+	if scope, ok := c.Get("deptScope"); ok {
+		if deptScope, ok := scope.(*[]uint); ok {
+			params.DeptScope = deptScope
+		}
 	}
 
 	if v := c.Query("priorityId"); v != "" {

@@ -247,6 +247,46 @@ func TestSmartStartInitializesWorkflowWithoutRunningDecision(t *testing.T) {
 	}
 }
 
+func TestSmartStartAllowsServiceWithoutServiceAgent(t *testing.T) {
+	db := newSmartContinuationDB(t)
+
+	service := serviceModel{
+		Name:       "智能 VPN 服务",
+		EngineType: "smart",
+	}
+	if err := db.Create(&service).Error; err != nil {
+		t.Fatalf("create service: %v", err)
+	}
+	ticket := ticketModel{
+		ServiceID:   service.ID,
+		Status:      "pending",
+		EngineType:  "smart",
+		RequesterID: 7,
+	}
+	if err := db.Create(&ticket).Error; err != nil {
+		t.Fatalf("create ticket: %v", err)
+	}
+
+	eng := NewSmartEngine(availableDecisionExecutor{}, nil, nil, nil, nil, nil)
+	err := db.Transaction(func(tx *gorm.DB) error {
+		return eng.Start(context.Background(), tx, StartParams{
+			TicketID:    ticket.ID,
+			RequesterID: ticket.RequesterID,
+		})
+	})
+	if err != nil {
+		t.Fatalf("start smart workflow without service agent: %v", err)
+	}
+
+	var reloaded ticketModel
+	if err := db.First(&reloaded, ticket.ID).Error; err != nil {
+		t.Fatalf("reload ticket: %v", err)
+	}
+	if reloaded.Status != TicketStatusDecisioning {
+		t.Fatalf("expected ticket status %q, got %q", TicketStatusDecisioning, reloaded.Status)
+	}
+}
+
 func TestSmartDecisionPositionAssignmentSingleSQLiteConnectionDoesNotBlock(t *testing.T) {
 	db := newSmartContinuationDB(t)
 	sqlDB, err := db.DB()

@@ -99,6 +99,23 @@ describe("buildTicketActionContext", () => {
     expect(ctx.canProcess).toBe(true)
   })
 
+  test("keeps the current human activity for display while submitting the actionable activity", () => {
+    const currentBlocked = activity({ id: 11, name: "当前卡住节点", canAct: false })
+    const actionable = activity({ id: 12, name: "可处理节点", canAct: true })
+
+    const ctx = buildTicketActionContext({
+      ticket: ticket({ currentActivityId: 11 }),
+      activities: [currentBlocked, actionable],
+      currentUserId: 42,
+      canAssignPermission: true,
+      canCancelPermission: true,
+    })
+
+    expect(ctx.displayHumanActivity?.id).toBe(11)
+    expect(ctx.selectedActionableActivity?.id).toBe(12)
+    expect(ctx.canProcess).toBe(true)
+  })
+
   test("returns all actionable activities for the UI to disambiguate", () => {
     const ctx = buildTicketActionContext({
       ticket: ticket(),
