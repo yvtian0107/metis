@@ -6,7 +6,7 @@ services:
       - clickhouse:/var/lib/clickhouse
     ports:
       - "8123:8123"   # HTTP interface
-      - "9000:9000"   # Native protocol
+      - "19000:9000"  # Native protocol
     environment:
       CLICKHOUSE_DB: otel
       CLICKHOUSE_USER: default
@@ -74,3 +74,7 @@ volumes:
   clickhouse:
   postgres:
   falkordb:
+
+networks:
+  default:
+    name: metis
