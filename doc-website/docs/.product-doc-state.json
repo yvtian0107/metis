@@ -1,0 +1,183 @@
+{
+  "lastRunAt": "2026-05-06T18:00:00+08:00",
+  "scope": "system-management",
+  "discovered": {
+    "businessDomains": [
+      {
+        "name": "系统管理",
+        "modules": [
+          {
+            "name": "用户管理",
+            "route": "/users",
+            "permission": "system:user:list"
+          },
+          {
+            "name": "角色管理",
+            "route": "/roles",
+            "permission": "system:role:list"
+          },
+          {
+            "name": "菜单管理",
+            "route": "/menus",
+            "permission": "system:menu:list"
+          },
+          {
+            "name": "会话管理",
+            "route": "/sessions",
+            "permission": "system:session:list"
+          },
+          {
+            "name": "系统设置",
+            "route": "/settings",
+            "permission": "system:settings:list"
+          },
+          {
+            "name": "任务管理",
+            "route": "/tasks",
+            "permission": "system:task:list"
+          },
+          {
+            "name": "公告管理",
+            "route": "/announcements",
+            "permission": "system:announcement:list"
+          },
+          {
+            "name": "通知渠道",
+            "route": "/channels",
+            "permission": "system:channel:list"
+          },
+          {
+            "name": "认证源",
+            "route": "/auth-providers",
+            "permission": "system:auth-provider:list"
+          },
+          {
+            "name": "审计日志",
+            "route": "/audit-logs",
+            "permission": "system:audit-log:list"
+          },
+          {
+            "name": "身份源",
+            "route": "/identity-sources",
+            "permission": "system:identity-source:list"
+          }
+        ]
+      }
+    ]
+  },
+  "generatedDocs": [
+    {
+      "domain": "系统管理",
+      "module": "用户管理",
+      "path": "docs/system-management/user-management.md",
+      "status": "existing",
+      "reason": "既有文档，保留。"
+    },
+    {
+      "domain": "系统管理",
+      "module": "角色管理",
+      "path": "docs/system-management/role-management.md",
+      "status": "existing",
+      "reason": "既有文档，保留。"
+    },
+    {
+      "domain": "系统管理",
+      "module": "菜单管理",
+      "path": "docs/system-management/menu-management.md",
+      "status": "created",
+      "reason": "索引与代码功能块不匹配时，按优先级补齐缺口；菜单管理影响导航入口与权限可见范围。"
+    },
+    {
+      "domain": "系统管理",
+      "module": "会话管理",
+      "path": "docs/system-management/session-management.md",
+      "status": "existing",
+      "reason": "既有文档，保留。"
+    },
+    {
+      "domain": "系统管理",
+      "module": "系统设置",
+      "path": "docs/system-management/system-settings.md",
+      "status": "created",
+      "reason": "索引与代码功能块不匹配时，按优先级补齐缺口；系统设置为当前最高优先级未覆盖模块。"
+    },
+    {
+      "domain": "系统管理",
+      "module": "任务管理",
+      "path": "docs/system-management/task-management.md",
+      "status": "created",
+      "reason": "索引与代码功能块不匹配时，按优先级补齐缺口；任务管理影响定时任务运行、手动触发与失败排障效率。"
+    },
+    {
+      "domain": "系统管理",
+      "module": "认证源",
+      "path": "docs/system-management/auth-provider-management.md",
+      "status": "created",
+      "reason": "索引与代码功能块不匹配时，按优先级补齐缺口；认证源为当前最高优先级未覆盖模块。"
+    },
+    {
+      "domain": "系统管理",
+      "module": "身份源",
+      "path": "docs/system-management/identity-source-management.md",
+      "status": "created",
+      "reason": "索引与代码功能块不匹配时，按优先级补齐缺口；身份源影响登录来源、域名分流与组织接入策略。"
+    },
+    {
+      "domain": "系统管理",
+      "module": "审计日志",
+      "path": "docs/system-management/audit-log-management.md",
+      "status": "created",
+      "reason": "索引与代码功能块不匹配时，按优先级补齐缺口；审计日志为高频且高影响模块。"
+    },
+    {
+      "domain": "系统管理",
+      "module": "通知渠道",
+      "path": "docs/system-management/channel-management.md",
+      "status": "created",
+      "reason": "索引与代码功能块不匹配时，按优先级补齐缺口；通知渠道影响系统消息触达、测试验证与发送稳定性。"
+    }
+  ],
+  "todoDocs": [
+    {
+      "domain": "系统管理",
+      "module": "公告管理",
+      "priority": "low",
+      "reason": "操作面相对简单，可后续补齐。"
+    }
+  ],
+  "evidence": {
+    "sources": [
+      "web/src/App.tsx",
+      "web/src/i18n/locales/zh-CN/layout.json",
+      "web/src/pages/settings/index.tsx",
+      "web/src/pages/settings/site-name-card.tsx",
+      "web/src/pages/settings/logo-card.tsx",
+      "web/src/pages/settings/security-card.tsx",
+      "web/src/pages/settings/scheduler-card.tsx",
+      "web/src/pages/settings/connections-card.tsx",
+      "web/src/i18n/locales/zh-CN/settings.json",
+      "web/src/pages/auth-providers/index.tsx",
+      "web/src/pages/auth-providers/provider-sheet.tsx",
+      "web/src/i18n/locales/zh-CN/authProviders.json",
+      "web/src/pages/audit-logs/index.tsx",
+      "web/src/pages/audit-logs/auth-tab.tsx",
+      "web/src/pages/audit-logs/operation-tab.tsx",
+      "web/src/i18n/locales/zh-CN/audit.json",
+      "internal/seed/menus.go",
+      "web/src/pages/menus/index.tsx",
+      "web/src/pages/menus/menu-sheet.tsx",
+      "web/src/i18n/locales/zh-CN/menus.json",
+      "web/src/pages/identity-sources/index.tsx",
+      "web/src/pages/identity-sources/identity-source-sheet.tsx",
+      "web/src/i18n/locales/zh-CN/identitySources.json",
+      "web/src/pages/channels/index.tsx",
+      "web/src/pages/channels/channel-sheet.tsx",
+      "web/src/pages/channels/send-test-dialog.tsx",
+      "web/src/pages/channels/channel-types.ts",
+      "web/src/i18n/locales/zh-CN/channels.json",
+      "web/src/pages/tasks/index.tsx",
+      "web/src/pages/tasks/detail.tsx",
+      "web/src/i18n/locales/zh-CN/tasks.json"
+    ]
+  }
+}

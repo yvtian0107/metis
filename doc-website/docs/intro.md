@@ -1,3 +1,8 @@
-# Introduction
+---
+title: 文档首页
+sidebar_label: 文档首页
+---
 
-Welcome to the Metis documentation.
+# Metis 产品文档
+
+欢迎使用 Metis 文档中心。你可以从左侧按业务域浏览产品能力，并通过任务导向文档快速完成配置与日常操作。
