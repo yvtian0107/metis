@@ -19,6 +19,7 @@ const sidebars: SidebarsConfig = {
         'system-management/session-management',
         'system-management/system-settings',
         'system-management/task-management',
+        'system-management/announcement-management',
         'system-management/channel-management',
         'system-management/auth-provider-management',
         'system-management/identity-source-management',

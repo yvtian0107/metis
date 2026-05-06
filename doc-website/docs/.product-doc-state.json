@@ -1,6 +1,13 @@
 {
-  "lastRunAt": "2026-05-06T18:00:00+08:00",
+  "lastRunAt": "2026-05-06T18:40:00+08:00",
   "scope": "system-management",
+  "roundResult": {
+    "type": "review",
+    "module": "系统设置",
+    "docPath": "docs/system-management/system-settings.md",
+    "changed": false,
+    "reason": "文档与路由、页面结构、中文文案一致，执行最小改动策略。"
+  },
   "discovered": {
     "businessDomains": [
       {
@@ -135,49 +142,52 @@
       "path": "docs/system-management/channel-management.md",
       "status": "created",
       "reason": "索引与代码功能块不匹配时，按优先级补齐缺口；通知渠道影响系统消息触达、测试验证与发送稳定性。"
-    }
-  ],
-  "todoDocs": [
+    },
     {
       "domain": "系统管理",
       "module": "公告管理",
-      "priority": "low",
-      "reason": "操作面相对简单，可后续补齐。"
+      "path": "docs/system-management/announcement-management.md",
+      "status": "created",
+      "reason": "索引与代码功能块不匹配时，按优先级补齐缺口；公告管理是系统管理域最后一个未覆盖模块，并且删除操作不可撤销。"
     }
   ],
+  "todoDocs": [],
   "evidence": {
     "sources": [
+      "internal/seed/menus.go",
       "web/src/App.tsx",
+      "web/src/i18n/locales/zh-CN/announcements.json",
+      "web/src/i18n/locales/zh-CN/audit.json",
+      "web/src/i18n/locales/zh-CN/authProviders.json",
+      "web/src/i18n/locales/zh-CN/channels.json",
+      "web/src/i18n/locales/zh-CN/identitySources.json",
       "web/src/i18n/locales/zh-CN/layout.json",
-      "web/src/pages/settings/index.tsx",
-      "web/src/pages/settings/site-name-card.tsx",
-      "web/src/pages/settings/logo-card.tsx",
-      "web/src/pages/settings/security-card.tsx",
-      "web/src/pages/settings/scheduler-card.tsx",
-      "web/src/pages/settings/connections-card.tsx",
+      "web/src/i18n/locales/zh-CN/menus.json",
       "web/src/i18n/locales/zh-CN/settings.json",
+      "web/src/i18n/locales/zh-CN/tasks.json",
+      "web/src/pages/announcements/announcement-sheet.tsx",
+      "web/src/pages/announcements/index.tsx",
+      "web/src/pages/audit-logs/auth-tab.tsx",
+      "web/src/pages/audit-logs/index.tsx",
+      "web/src/pages/audit-logs/operation-tab.tsx",
       "web/src/pages/auth-providers/index.tsx",
       "web/src/pages/auth-providers/provider-sheet.tsx",
-      "web/src/i18n/locales/zh-CN/authProviders.json",
-      "web/src/pages/audit-logs/index.tsx",
-      "web/src/pages/audit-logs/auth-tab.tsx",
-      "web/src/pages/audit-logs/operation-tab.tsx",
-      "web/src/i18n/locales/zh-CN/audit.json",
-      "internal/seed/menus.go",
+      "web/src/pages/channels/channel-sheet.tsx",
+      "web/src/pages/channels/channel-types.ts",
+      "web/src/pages/channels/index.tsx",
+      "web/src/pages/channels/send-test-dialog.tsx",
+      "web/src/pages/identity-sources/identity-source-sheet.tsx",
+      "web/src/pages/identity-sources/index.tsx",
       "web/src/pages/menus/index.tsx",
       "web/src/pages/menus/menu-sheet.tsx",
-      "web/src/i18n/locales/zh-CN/menus.json",
-      "web/src/pages/identity-sources/index.tsx",
-      "web/src/pages/identity-sources/identity-source-sheet.tsx",
-      "web/src/i18n/locales/zh-CN/identitySources.json",
-      "web/src/pages/channels/index.tsx",
-      "web/src/pages/channels/channel-sheet.tsx",
-      "web/src/pages/channels/send-test-dialog.tsx",
-      "web/src/pages/channels/channel-types.ts",
-      "web/src/i18n/locales/zh-CN/channels.json",
-      "web/src/pages/tasks/index.tsx",
+      "web/src/pages/settings/connections-card.tsx",
+      "web/src/pages/settings/index.tsx",
+      "web/src/pages/settings/logo-card.tsx",
+      "web/src/pages/settings/scheduler-card.tsx",
+      "web/src/pages/settings/security-card.tsx",
+      "web/src/pages/settings/site-name-card.tsx",
       "web/src/pages/tasks/detail.tsx",
-      "web/src/i18n/locales/zh-CN/tasks.json"
+      "web/src/pages/tasks/index.tsx"
     ]
   }
 }

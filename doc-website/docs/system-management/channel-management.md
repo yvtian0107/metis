@@ -176,5 +176,6 @@ sidebar_label: 通知渠道
 ## 相关模块
 
 - [系统设置](./system-settings.md)：系统级通知策略调整后，常需联动核对渠道可用性
+- [公告管理](./announcement-management.md)：发布系统公告后，可联动核对是否需要站外通知补充触达
 - [审计日志](./audit-log-management.md)：追踪渠道配置变更与测试操作记录
 - [用户管理](./user-management.md)：排查“用户未收到通知”时可联动核对账号状态与邮箱信息
