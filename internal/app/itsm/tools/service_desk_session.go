@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"metis/internal/app/itsm/contract"
 	"strings"
 )
 
@@ -675,7 +676,7 @@ func ensureLoadedSnapshotMatches(state *ServiceDeskState, detail *ServiceDetail)
 func buildReadyDraftSurface(detail *ServiceDetail, state *ServiceDeskState, summary string, values map[string]any) map[string]any {
 	return map[string]any{
 		"surfaceId":   fmt.Sprintf("itsm-draft-form-%d-%d", detail.ServiceID, state.DraftVersion),
-		"surfaceType": "itsm.draft_form",
+		"surfaceType": string(contract.SurfaceTypeITSMDraftForm),
 		"payload": map[string]any{
 			"status":           "ready",
 			"serviceId":        detail.ServiceID,
@@ -693,7 +694,7 @@ func buildReadyDraftSurface(detail *ServiceDetail, state *ServiceDeskState, summ
 func buildSubmittedDraftSurface(detail *ServiceDetail, ticket *TicketResult, summary string, values map[string]any) map[string]any {
 	return map[string]any{
 		"surfaceId":   fmt.Sprintf("itsm-draft-form-submitted-%d", ticket.TicketID),
-		"surfaceType": "itsm.draft_form",
+		"surfaceType": string(contract.SurfaceTypeITSMDraftForm),
 		"payload": map[string]any{
 			"status":           "submitted",
 			"serviceId":        detail.ServiceID,

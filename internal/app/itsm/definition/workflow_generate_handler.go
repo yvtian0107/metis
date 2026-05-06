@@ -7,6 +7,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/samber/do/v2"
 
+	"metis/internal/app/itsm/engine"
 	"metis/internal/handler"
 )
 
@@ -44,4 +45,8 @@ func (h *WorkflowGenerateHandler) Generate(c *gin.Context) {
 	c.Set("audit_summary", "Generated workflow from collaboration spec")
 
 	handler.OK(c, resp)
+}
+
+func (h *WorkflowGenerateHandler) Capabilities(c *gin.Context) {
+	handler.OK(c, engine.WorkflowCapabilities())
 }

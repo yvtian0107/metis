@@ -1,8 +1,12 @@
+import { type EditorNodeType } from "../../contract"
+import type { FormSchema } from "../form-engine"
+import type { Edge, Node } from "@xyflow/react"
+
 // Shared types for workflow editor and viewer
 export const NODE_TYPES = [
   "start", "end", "form", "process", "action", "exclusive", "notify", "wait",
   "timer", "signal", "parallel", "inclusive", "subprocess", "script",
-] as const
+] as const satisfies readonly EditorNodeType[]
 
 export type NodeType = (typeof NODE_TYPES)[number]
 
@@ -50,7 +54,7 @@ export interface WFNodeData {
   _workflowState?: "active" | "completed" | "failed" | "cancelled" | "idle"
   // form / process
   participants?: Participant[]
-  formSchema?: unknown
+  formSchema?: FormSchema
   // process
   executionMode?: "single" | "parallel" | "sequential"
   // parallel / inclusive gateway
@@ -71,8 +75,27 @@ export interface WFNodeData {
   // script
   assignments?: ScriptAssignment[]
   // subprocess
-  subprocess_def?: unknown
+  subprocess_def?: WorkflowData
   subprocessExpanded?: boolean
+}
+
+export interface WorkflowNode {
+  id: string
+  type?: NodeType
+  position?: { x: number; y: number }
+  data?: WFNodeData
+}
+
+export interface WorkflowEdge {
+  id: string
+  source: string
+  target: string
+  data?: WFEdgeData
+}
+
+export interface WorkflowData {
+  nodes: Node[]
+  edges: Edge[]
 }
 
 export interface WFEdgeData {

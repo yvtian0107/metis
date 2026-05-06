@@ -16,64 +16,6 @@ import (
 // ToolHandler handles execution of a single tool call.
 type ToolHandler func(ctx context.Context, userID uint, args json.RawMessage) (json.RawMessage, error)
 
-// ---------------------------------------------------------------------------
-// Session state
-// ---------------------------------------------------------------------------
-
-// ServiceDeskState represents the multi-turn conversation state for the service desk flow.
-type ServiceDeskState struct {
-	Stage                 string         `json:"stage"` // idle|candidates_ready|service_selected|service_loaded|awaiting_confirmation|confirmed|submitted
-	CandidateServiceIDs   []uint         `json:"candidate_service_ids,omitempty"`
-	TopMatchServiceID     uint           `json:"top_match_service_id,omitempty"`
-	ConfirmedServiceID    uint           `json:"confirmed_service_id,omitempty"`
-	ConfirmationRequired  bool           `json:"confirmation_required"`
-	LoadedServiceID       uint           `json:"loaded_service_id,omitempty"`
-	ServiceVersionID      uint           `json:"service_version_id,omitempty"`
-	ServiceVersionHash    string         `json:"service_version_hash,omitempty"`
-	DraftSummary          string         `json:"draft_summary,omitempty"`
-	DraftFormData         map[string]any `json:"draft_form_data,omitempty"`
-	RequestText           string         `json:"request_text,omitempty"`
-	PrefillFormData       map[string]any `json:"prefill_form_data,omitempty"`
-	DraftVersion          int            `json:"draft_version"`
-	ConfirmedDraftVersion int            `json:"confirmed_draft_version"`
-	FieldsHash            string         `json:"fields_hash,omitempty"`
-	MissingFields         []string       `json:"missing_fields,omitempty"`
-	AskedFields           []string       `json:"asked_fields,omitempty"`
-	MinDecisionReady      bool           `json:"min_decision_ready"`
-}
-
-// validTransitions defines the allowed stage transitions.
-// "idle" is always a valid target (reset via itsm.new_request).
-var validTransitions = map[string][]string{
-	"idle":                  {"candidates_ready"},
-	"candidates_ready":      {"candidates_ready", "service_selected", "service_loaded"},
-	"service_selected":      {"candidates_ready", "service_loaded"},
-	"service_loaded":        {"candidates_ready", "awaiting_confirmation"},
-	"awaiting_confirmation": {"candidates_ready", "confirmed", "submitted", "awaiting_confirmation"},
-	"confirmed":             {"candidates_ready", "submitted"},
-	"submitted":             {"candidates_ready"},
-}
-
-// TransitionTo validates and performs a stage transition.
-// Transition to "idle" is always allowed (reset).
-func (s *ServiceDeskState) TransitionTo(next string) error {
-	if next == "idle" {
-		s.Stage = "idle"
-		return nil
-	}
-	allowed, ok := validTransitions[s.Stage]
-	if !ok {
-		return fmt.Errorf("invalid transition from %q to %q: current stage unknown", s.Stage, next)
-	}
-	for _, a := range allowed {
-		if a == next {
-			s.Stage = next
-			return nil
-		}
-	}
-	return fmt.Errorf("invalid transition from %q to %q", s.Stage, next)
-}
-
 // StateStore reads/writes session state for a given session.
 type StateStore interface {
 	GetState(sessionID uint) (*ServiceDeskState, error)
@@ -378,10 +320,6 @@ func sessionID(ctx context.Context) uint {
 func mustMarshal(v any) json.RawMessage {
 	b, _ := json.Marshal(v)
 	return b
-}
-
-func defaultState() *ServiceDeskState {
-	return &ServiceDeskState{Stage: "idle"}
 }
 
 func syncConversationProgress(state *ServiceDeskState, missingRequired []FieldCollectionItem) {

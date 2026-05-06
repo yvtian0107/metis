@@ -101,6 +101,21 @@ func TestAgentDraftSubmission_IdempotentConfirmedDraftStartsSmartProgressTask(t 
 	if created.Status != TicketStatusDecisioning {
 		t.Fatalf("expected created smart ticket status %q, got %q", TicketStatusDecisioning, created.Status)
 	}
+
+	var tasks []model.TaskExecution
+	if err := db.Where("task_name = ?", "itsm-smart-progress").Find(&tasks).Error; err != nil {
+		t.Fatalf("load smart progress tasks: %v", err)
+	}
+	if len(tasks) != 1 {
+		t.Fatalf("expected one smart-progress task for idempotent submission, got %d", len(tasks))
+	}
+	var payload engine.SmartProgressPayload
+	if err := json.Unmarshal([]byte(tasks[0].Payload), &payload); err != nil {
+		t.Fatalf("decode smart progress payload: %v", err)
+	}
+	if payload.TicketID != first.TicketID || payload.CompletedActivityID != nil || payload.TriggerReason != engine.TriggerReasonTicketCreated {
+		t.Fatalf("unexpected smart progress payload: %+v", payload)
+	}
 }
 
 func TestCreateSmartTicket_BindsImmutableServiceRuntimeVersion(t *testing.T) {
@@ -689,6 +704,21 @@ func TestRetryAI_SingleSQLiteConnectionSubmitsSmartProgressInTransaction(t *test
 
 	if reloaded.Status != TicketStatusDecisioning {
 		t.Fatalf("expected retry to put ticket into %q, got %q", TicketStatusDecisioning, reloaded.Status)
+	}
+
+	var tasks []model.TaskExecution
+	if err := db.Where("task_name = ?", "itsm-smart-progress").Find(&tasks).Error; err != nil {
+		t.Fatalf("load smart progress tasks: %v", err)
+	}
+	if len(tasks) != 1 {
+		t.Fatalf("expected retry to submit one smart-progress task, got %d", len(tasks))
+	}
+	var payload engine.SmartProgressPayload
+	if err := json.Unmarshal([]byte(tasks[0].Payload), &payload); err != nil {
+		t.Fatalf("decode smart progress payload: %v", err)
+	}
+	if payload.TicketID != ticket.ID || payload.TriggerReason != engine.TriggerReasonManualRetry {
+		t.Fatalf("unexpected retry payload: %+v", payload)
 	}
 }
 

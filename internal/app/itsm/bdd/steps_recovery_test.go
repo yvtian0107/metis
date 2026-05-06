@@ -19,12 +19,14 @@ import (
 // trackingSubmitter records submitted task payloads for assertions.
 type trackingSubmitter struct {
 	mu       sync.Mutex
+	names    []string
 	payloads []json.RawMessage
 }
 
-func (ts *trackingSubmitter) SubmitTask(_ string, payload json.RawMessage) error {
+func (ts *trackingSubmitter) SubmitTask(name string, payload json.RawMessage) error {
 	ts.mu.Lock()
 	defer ts.mu.Unlock()
+	ts.names = append(ts.names, name)
 	ts.payloads = append(ts.payloads, payload)
 	return nil
 }
@@ -33,6 +35,15 @@ func (ts *trackingSubmitter) Count() int {
 	ts.mu.Lock()
 	defer ts.mu.Unlock()
 	return len(ts.payloads)
+}
+
+func (ts *trackingSubmitter) LastName() string {
+	ts.mu.Lock()
+	defer ts.mu.Unlock()
+	if len(ts.names) == 0 {
+		return ""
+	}
+	return ts.names[len(ts.names)-1]
 }
 
 // Compile-time check.
@@ -146,10 +157,10 @@ func registerRecoverySteps(sc *godog.ScenarioContext, bc *bddContext) {
 		if submitter == nil {
 			return fmt.Errorf("submitter not initialized")
 		}
-		if submitter.Count() != 0 {
-			return fmt.Errorf("expected recovery to avoid scheduler submitter, got %d calls", submitter.Count())
+		if submitter.Count() != 1 || submitter.LastName() != "itsm-smart-progress" {
+			return fmt.Errorf("expected recovery to enqueue one smart-progress task, got count=%d last=%q", submitter.Count(), submitter.LastName())
 		}
-		return bc.waitForTimelineEvent("workflow_completed", 2*time.Second)
+		return nil
 	})
 
 	sc.Then(`^恢复分发未触发智能决策$`, func() error {

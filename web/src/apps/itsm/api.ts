@@ -1,4 +1,21 @@
 import { api } from "@/lib/api"
+import type {
+  ActivityStatus,
+  DecisionQualityDimension,
+  EngineType,
+  MonitorSeverity,
+  RecoveryActionCode,
+  RiskLevel,
+  ServiceDeskStage,
+  SmartState,
+  StatusTone,
+  SurfaceType,
+  TicketOutcome,
+  TicketStatus,
+  WorkflowCapability,
+} from "./contract"
+import type { FormSchema } from "./components/form-engine"
+import type { WorkflowData } from "./components/workflow/types"
 
 // ─── Catalog ────────────────────────────────────────────
 
@@ -72,10 +89,10 @@ export interface ServiceDefItem {
   code: string
   description: string
   catalogId: number
-  engineType: string
+  engineType: EngineType
   slaId: number | null
-  intakeFormSchema: unknown
-  workflowJson: unknown
+  intakeFormSchema: FormSchema | null
+  workflowJson: WorkflowData | null
   collaborationSpec: string
   agentId: number | null
   agentConfig: SmartAgentConfig | null
@@ -122,10 +139,10 @@ export function createServiceDef(data: {
   name: string
   code: string
   catalogId: number
-  engineType?: string
+  engineType?: EngineType
   description?: string
   slaId?: number | null
-  intakeFormSchema?: unknown
+  intakeFormSchema?: FormSchema | null
   sortOrder?: number
 }) {
   return api.post<ServiceDefItem>("/api/v1/itsm/services", data)
@@ -326,12 +343,12 @@ export interface TicketItem {
   description: string
   serviceId: number
   serviceName: string
-  intakeFormSchema?: unknown
-  engineType: string
-  status: string
-  outcome: string
+  intakeFormSchema?: FormSchema | null
+  engineType: EngineType
+  status: TicketStatus
+  outcome: TicketOutcome
   statusLabel: string
-  statusTone: "success" | "destructive" | "secondary" | "progress" | "warning" | string
+  statusTone: StatusTone
   lastHumanOutcome: string
   decisioningReason: string
   priorityId: number
@@ -345,13 +362,13 @@ export interface TicketItem {
   source: string
   agentSessionId: number | null
   aiFailureCount: number
-  formData: unknown
-  workflowJson: unknown
+  formData: Record<string, unknown>
+  workflowJson: WorkflowData | null
   slaStatus: string
   slaResponseDeadline: string | null
   slaResolutionDeadline: string | null
   finishedAt: string | null
-  smartState?: "terminal" | "ai_disabled" | "waiting_ai_confirmation" | "action_running" | "waiting_human" | "ai_reasoning" | "ai_decided" | string
+  smartState?: SmartState
   currentOwnerType?: string
   currentOwnerName?: string
   nextStepSummary?: string
@@ -366,7 +383,7 @@ export interface TicketItem {
     humanOverride: string
   }
   recoveryActions?: Array<{
-    code: "retry" | "handoff_human" | "withdraw" | string
+    code: RecoveryActionCode
     label: string
   }>
   createdAt: string
@@ -387,13 +404,13 @@ export interface TicketMonitorSummary {
 export interface TicketMonitorReason {
   metricCode: string
   ruleCode: string
-  severity: "blocked" | "risk" | "info" | string
+  severity: MonitorSeverity
   message: string
   evidence: Record<string, unknown>
 }
 
 export interface TicketMonitorItem extends TicketItem {
-  riskLevel: "blocked" | "risk" | "normal" | string
+  riskLevel: RiskLevel
   stuck: boolean
   stuckReasons: string[]
   monitorReasons: TicketMonitorReason[]
@@ -404,8 +421,8 @@ export interface TicketMonitorItem extends TicketItem {
 }
 
 export interface TicketMonitorParams extends TicketListParams {
-  engineType?: string
-  riskLevel?: string
+  engineType?: EngineType
+  riskLevel?: RiskLevel
   metricCode?: string
 }
 
@@ -416,7 +433,7 @@ export interface TicketMonitorResponse {
 }
 
 export interface DecisionQualityItem {
-  dimensionType: "service" | "department" | string
+  dimensionType: DecisionQualityDimension
   dimensionId: number
   dimensionName: string
   approvalRate: number
@@ -436,7 +453,7 @@ export interface DecisionQualityResponse {
 
 export interface TicketListParams {
   keyword?: string
-  status?: string
+  status?: TicketStatus
   priorityId?: number
   serviceId?: number
   assigneeId?: number
@@ -474,7 +491,7 @@ export function fetchTicketMonitor(params: TicketMonitorParams) {
   return api.get<TicketMonitorResponse>(`/api/v1/itsm/tickets/monitor?${p}`)
 }
 
-export function fetchDecisionQuality(params?: { dimension?: "service" | "department"; windowDays?: number; serviceId?: number; departmentId?: number }) {
+export function fetchDecisionQuality(params?: { dimension?: DecisionQualityDimension; windowDays?: number; serviceId?: number; departmentId?: number }) {
   const p = new URLSearchParams()
   if (params?.dimension) p.set("dimension", params.dimension)
   if (params?.windowDays) p.set("windowDays", String(params.windowDays))
@@ -524,7 +541,7 @@ export function fetchMyTickets(params: {
 // ─── Service Desk ──────────────────────────────────────
 
 export interface ServiceDeskState {
-  stage: string
+  stage: ServiceDeskStage
   candidate_service_ids?: number[]
   top_match_service_id?: number
   confirmed_service_id?: number
@@ -546,9 +563,9 @@ export interface ServiceDeskSessionState {
   nextExpectedAction: string
 }
 
-export interface AgenticUISurface<TPayload = unknown> {
+export interface AgenticUISurface<TPayload extends object = Record<string, never>> {
   surfaceId: string
-  surfaceType: string
+  surfaceType: SurfaceType
   payload: TPayload
 }
 
@@ -558,7 +575,7 @@ export interface ITSMDraftFormSurfacePayload {
   serviceVersionId?: number
   title?: string
   summary?: string
-  schema?: unknown
+  schema?: FormSchema
   values?: Record<string, unknown>
   draftVersion?: number
   submitAction?: {
@@ -582,7 +599,7 @@ export interface SubmitDraftResponse {
   ok: boolean
   ticketId?: number
   ticketCode?: string
-  status?: string
+  status?: TicketStatus
   message?: string
   nextExpectedAction?: string
   failureReason?: string
@@ -591,7 +608,7 @@ export interface SubmitDraftResponse {
   warnings?: Array<{ type: string; field: string; message: string }>
   missingRequiredFields?: Array<{ key: string; label: string; type: string; required: boolean }>
   state?: ServiceDeskState
-  surface?: AgenticUISurface
+  surface?: ITSMDraftFormSurface
 }
 
 export function fetchServiceDeskSessionState(sessionId: number) {
@@ -634,12 +651,12 @@ export interface ActivityItem {
   ticketId: number
   name: string
   activityType: string
-  status: string
+  status: ActivityStatus
   nodeId: string
   executionMode: string
   sequenceOrder: number
-  formSchema: unknown
-  formData: unknown
+  formSchema: FormSchema | null
+  formData: Record<string, unknown>
   transitionOutcome: string
   aiDecision: string | null
   aiReasoning: string | null
@@ -697,7 +714,7 @@ export function retryAI(ticketId: number, reason?: string) {
   return api.post(`/api/v1/itsm/tickets/${ticketId}/override/retry-ai`, { reason })
 }
 
-export function recoverTicket(ticketId: number, data: { action: "retry" | "handoff_human" | "withdraw" | string; reason?: string }) {
+export function recoverTicket(ticketId: number, data: { action: RecoveryActionCode; reason?: string }) {
   return api.post<TicketItem>(`/api/v1/itsm/tickets/${ticketId}/recovery`, data)
 }
 
@@ -863,7 +880,7 @@ export function fetchModels(providerId: number) {
 // ─── Workflow Generate ──────────────────────────────────
 
 export interface WorkflowGenerateResponse {
-  workflowJson: unknown
+  workflowJson: WorkflowData
   retries: number
   errors?: { nodeId?: string; edgeId?: string; level?: "blocking" | "warning"; message: string }[]
   saved: boolean
@@ -873,6 +890,10 @@ export interface WorkflowGenerateResponse {
 
 export function generateWorkflow(data: { serviceId: number; collaborationSpec: string }) {
   return api.post<WorkflowGenerateResponse>("/api/v1/itsm/workflows/generate", data)
+}
+
+export function fetchWorkflowCapabilities() {
+  return api.get<WorkflowCapability>("/api/v1/itsm/workflows/capabilities")
 }
 
 // ─── Service Health ─────────────────────────────────────

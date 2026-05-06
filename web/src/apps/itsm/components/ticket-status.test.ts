@@ -51,27 +51,11 @@ describe("getTicketStatusView", () => {
     })
   })
 
-  test("uses the backend label for an unknown status", () => {
-    expect(getTicketStatusView(ticket({
-      status: "waiting_external_confirmation",
-      statusLabel: "等待外部确认",
-      statusTone: "warning",
-    }))).toMatchObject({
-      key: undefined,
-      label: "等待外部确认",
-      variant: "outline",
-    })
-  })
-
-  test("falls back to the raw status when an unknown status has no label", () => {
-    expect(getTicketStatusView(ticket({
-      status: "legacy_pending",
+  test("rejects an unknown backend status as a contract error", () => {
+    expect(() => getTicketStatusView(ticket({
+      status: "legacy_pending" as TicketItem["status"],
       statusLabel: "",
-      statusTone: "unknown-tone",
-    }))).toMatchObject({
-      key: undefined,
-      label: "legacy_pending",
-      variant: "secondary",
-    })
+      statusTone: "warning",
+    }))).toThrow("unknown ITSM ticket status")
   })
 })

@@ -16,7 +16,6 @@ import (
 	"time"
 
 	"github.com/casbin/casbin/v2"
-	"github.com/gin-gonic/gin"
 	"github.com/samber/do/v2"
 	"gorm.io/gorm"
 
@@ -179,17 +178,8 @@ func (a *ITSMApp) Providers(i do.Injector) {
 		db := do.MustInvoke[*database.DB](i)
 		submitter := &schedulerSubmitter{db: db.DB}
 
-		// Try to resolve AI App services (optional)
-		var decisionExecutor app.AIDecisionExecutor
+		decisionExecutor := newLazyDecisionExecutor(i)
 		var knowledgeSearcher engine.KnowledgeSearcher
-
-		de, err := do.InvokeAs[app.AIDecisionExecutor](i)
-		if err == nil && de != nil {
-			decisionExecutor = de
-			slog.Info("ITSM SmartEngine: AI DecisionExecutor available")
-		} else {
-			slog.Info("ITSM SmartEngine: AI DecisionExecutor not available, smart engine disabled")
-		}
 
 		aiKnowledge, err := do.InvokeAs[app.AIKnowledgeSearcher](i)
 		if err == nil && aiKnowledge != nil {
@@ -245,24 +235,18 @@ func (a *ITSMApp) Providers(i do.Injector) {
 	do.Provide(i, desk.NewServiceDeskHandler)
 
 	// ITSM tool chain (Operator, StateStore, Registry)
-	// NOTE: ticket.TicketService is resolved lazily inside withdrawFunc to break a circular
-	// dependency: ticket.TicketService → SmartEngine → AgentGateway → collectToolRegistries
-	// → tools.Registry → tools.Operator → ticket.TicketService.
 	do.Provide(i, func(i do.Injector) (*tools.Operator, error) {
 		db := do.MustInvoke[*database.DB](i)
 		resolver := do.MustInvoke[*engine.ParticipantResolver](i)
 		orgResolver, _ := do.InvokeAs[app.OrgResolver](i)
+		ticketSvc := do.MustInvoke[*ticket.TicketService](i)
 		withdrawFunc := func(ticketID uint, reason string, operatorID uint) error {
-			ticketSvc := do.MustInvoke[*ticket.TicketService](i)
 			_, err := ticketSvc.Withdraw(ticketID, reason, operatorID)
 			return err
 		}
-		// TicketCreator is resolved lazily (same pattern as withdrawFunc) to break circular dep.
-		var ticketCreator tools.TicketCreator
-		ticketCreator = &lazyTicketCreator{injector: i}
 		runtimeProvider := do.MustInvoke[*aiapp.ToolRuntimeService](i)
 		matcher := definition.NewLLMServiceMatcher(db.DB, runtimeProvider, nil)
-		return tools.NewOperator(db.DB, resolver, orgResolver, withdrawFunc, ticketCreator, matcher), nil
+		return tools.NewOperator(db.DB, resolver, orgResolver, withdrawFunc, ticketSvc, matcher), nil
 	})
 	do.Provide(i, func(i do.Injector) (*tools.SessionStateStore, error) {
 		db := do.MustInvoke[*database.DB](i)
@@ -275,117 +259,6 @@ func (a *ITSMApp) Providers(i do.Injector) {
 	})
 }
 
-func (a *ITSMApp) Routes(api *gin.RouterGroup) {
-	catalogH := do.MustInvoke[*catalog.CatalogHandler](a.injector)
-	serviceH := do.MustInvoke[*definition.ServiceDefHandler](a.injector)
-	actionH := do.MustInvoke[*definition.ServiceActionHandler](a.injector)
-	priorityH := do.MustInvoke[*sla.PriorityHandler](a.injector)
-	slaH := do.MustInvoke[*sla.SLATemplateHandler](a.injector)
-	escalationH := do.MustInvoke[*sla.EscalationRuleHandler](a.injector)
-	ticketH := do.MustInvoke[*ticket.TicketHandler](a.injector)
-	knowledgeDocH := do.MustInvoke[*definition.KnowledgeDocHandler](a.injector)
-	engineConfigH := do.MustInvoke[*config.EngineConfigHandler](a.injector)
-	workflowGenH := do.MustInvoke[*definition.WorkflowGenerateHandler](a.injector)
-	variableH := do.MustInvoke[*ticket.VariableHandler](a.injector)
-	tokenH := do.MustInvoke[*ticket.TokenHandler](a.injector)
-	serviceDeskH := do.MustInvoke[*desk.ServiceDeskHandler](a.injector)
-
-	g := api.Group("/itsm")
-	{
-		// Service Catalogs
-		g.POST("/catalogs", catalogH.Create)
-		g.GET("/catalogs/tree", catalogH.Tree)
-		g.GET("/catalogs/service-counts", catalogH.ServiceCounts)
-		g.PUT("/catalogs/:id", catalogH.Update)
-		g.DELETE("/catalogs/:id", catalogH.Delete)
-
-		// Service Definitions
-		g.POST("/services", serviceH.Create)
-		g.GET("/services", serviceH.List)
-		g.GET("/services/:id/health", serviceH.HealthCheck)
-		g.GET("/services/:id", serviceH.Get)
-		g.PUT("/services/:id", serviceH.Update)
-		g.DELETE("/services/:id", serviceH.Delete)
-
-		// Service Actions
-		g.POST("/services/:id/actions", actionH.Create)
-		g.GET("/services/:id/actions", actionH.List)
-		g.PUT("/services/:id/actions/:actionId", actionH.Update)
-		g.DELETE("/services/:id/actions/:actionId", actionH.Delete)
-
-		// Service Knowledge Documents
-		g.POST("/services/:id/knowledge-documents", knowledgeDocH.Upload)
-		g.GET("/services/:id/knowledge-documents", knowledgeDocH.List)
-		g.DELETE("/services/:id/knowledge-documents/:docId", knowledgeDocH.Delete)
-
-		// Smart Staffing
-		g.GET("/smart-staffing/config", engineConfigH.GetSmartStaffing)
-		g.PUT("/smart-staffing/config", engineConfigH.UpdateSmartStaffing)
-		g.GET("/engine-settings/config", engineConfigH.GetEngineSettings)
-		g.PUT("/engine-settings/config", engineConfigH.UpdateEngineSettings)
-
-		// Workflow Generate
-		g.POST("/workflows/generate", workflowGenH.Generate)
-
-		// Service Desk
-		g.GET("/service-desk/sessions/:sid/state", serviceDeskH.State)
-		g.POST("/service-desk/sessions/:sid/draft/submit", serviceDeskH.SubmitDraft)
-
-		// Priorities
-		g.POST("/priorities", priorityH.Create)
-		g.GET("/priorities", priorityH.List)
-		g.PUT("/priorities/:id", priorityH.Update)
-		g.DELETE("/priorities/:id", priorityH.Delete)
-
-		// SLA Templates
-		g.POST("/sla", slaH.Create)
-		g.GET("/sla", slaH.List)
-		g.GET("/sla/notification-channels", escalationH.NotificationChannels)
-		g.PUT("/sla/:id", slaH.Update)
-		g.DELETE("/sla/:id", slaH.Delete)
-
-		// Escalation Rules
-		g.POST("/sla/:id/escalations", escalationH.Create)
-		g.GET("/sla/:id/escalations", escalationH.List)
-		g.PUT("/sla/:id/escalations/:escalationId", escalationH.Update)
-		g.DELETE("/sla/:id/escalations/:escalationId", escalationH.Delete)
-
-		// Tickets — special views must come before :id routes
-		g.GET("/tickets/mine", ticketH.Mine)
-		g.GET("/tickets/approvals/pending", ticketH.PendingApprovals)
-		g.GET("/tickets/approvals/history", ticketH.ApprovalHistory)
-		g.GET("/tickets/monitor", ticketH.Monitor)
-		g.GET("/tickets/decision-quality", ticketH.DecisionQuality)
-		g.POST("/tickets", ticketH.Create)
-		g.GET("/tickets", ticketH.List)
-		g.GET("/tickets/:id", ticketH.Get)
-		g.PUT("/tickets/:id/assign", ticketH.Assign)
-		g.PUT("/tickets/:id/cancel", ticketH.Cancel)
-		g.PUT("/tickets/:id/withdraw", ticketH.Withdraw)
-		g.GET("/tickets/:id/timeline", ticketH.Timeline)
-		// Phase 2: Classic engine routes
-		g.POST("/tickets/:id/progress", ticketH.Progress)
-		g.POST("/tickets/:id/signal", ticketH.Signal)
-		g.GET("/tickets/:id/activities", ticketH.Activities)
-		// Process variables
-		g.GET("/tickets/:id/variables", variableH.List)
-		g.PUT("/tickets/:id/variables/:key", variableH.Update)
-		// Execution tokens
-		g.GET("/tickets/:id/tokens", tokenH.List)
-		g.POST("/tickets/:id/override/jump", ticketH.OverrideJump)
-		g.POST("/tickets/:id/override/reassign", ticketH.OverrideReassign)
-		g.POST("/tickets/:id/override/retry-ai", ticketH.RetryAI)
-		g.POST("/tickets/:id/recovery", ticketH.Recover)
-		// SLA pause/resume
-		g.PUT("/tickets/:id/sla/pause", ticketH.SLAPause)
-		g.PUT("/tickets/:id/sla/resume", ticketH.SLAResume)
-		// Task dispatch: transfer, delegate, claim
-		g.POST("/tickets/:id/transfer", ticketH.Transfer)
-		g.POST("/tickets/:id/delegate", ticketH.Delegate)
-		g.POST("/tickets/:id/claim", ticketH.Claim)
-	}
-}
-
 func (a *ITSMApp) Tasks() []scheduler.TaskDef {
 	db := do.MustInvoke[*database.DB](a.injector)
 	classicEngine := do.MustInvoke[*engine.ClassicEngine](a.injector)
@@ -393,10 +266,7 @@ func (a *ITSMApp) Tasks() []scheduler.TaskDef {
 	configProvider := do.MustInvoke[*config.EngineConfigService](a.injector)
 	resolver := do.MustInvoke[*engine.ParticipantResolver](a.injector)
 	knowledgeDocSvc := do.MustInvoke[*definition.KnowledgeDocService](a.injector)
-	var slaAssuranceExecutor app.AIDecisionExecutor
-	if executor, err := do.InvokeAs[app.AIDecisionExecutor](a.injector); err == nil {
-		slaAssuranceExecutor = executor
-	}
+	slaAssuranceExecutor := newLazyDecisionExecutor(a.injector)
 	var notifier engine.NotificationSender
 	if mcSvc, err := do.Invoke[*service.MessageChannelService](a.injector); err == nil && mcSvc != nil {
 		notifier = &notificationAdapter{svc: mcSvc, db: db.DB}
@@ -527,18 +397,6 @@ var _ engine.WorkflowEngine = (*engine.SmartEngine)(nil)
 var _ app.ToolRegistryProvider = (*ITSMApp)(nil)
 var _ app.AgentRuntimeContextProvider = (*ITSMApp)(nil)
 var _ app.SessionTitleProvider = (*ITSMApp)(nil)
-
-// lazyTicketCreator defers resolution of ticket.TicketService to break circular dependency.
-type lazyTicketCreator struct {
-	injector do.Injector
-}
-
-func (l *lazyTicketCreator) CreateFromAgent(ctx context.Context, req tools.AgentTicketRequest) (*tools.AgentTicketResult, error) {
-	ticketSvc := do.MustInvoke[*ticket.TicketService](l.injector)
-	return ticketSvc.CreateFromAgent(ctx, req)
-}
-
-var _ tools.TicketCreator = (*lazyTicketCreator)(nil)
 
 // Placeholder for background context usage
 var _ = context.Background

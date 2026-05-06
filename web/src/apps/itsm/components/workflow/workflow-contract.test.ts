@@ -7,6 +7,7 @@ import {
   prepareWorkflowForSave,
 } from "./workflow-contract"
 import type { WFNodeData } from "./types"
+import type { WorkflowCapability, WorkflowNodeType } from "../../contract"
 
 const t = (key: string) => key
 
@@ -44,7 +45,7 @@ describe("workflow contract", () => {
       edge("e5", "sub", "end"),
     ]
 
-    const messages = collectDraftIssues(nodes, edges).map((issue) => issue.message)
+    const messages = collectDraftIssues(nodes, edges, workflowCapability()).map((issue) => issue.message)
 
     expect(messages).toContain("人工节点缺少参与人")
     expect(messages).toContain("动作节点缺少 action_id")
@@ -69,6 +70,22 @@ describe("workflow contract", () => {
 
     expect(saved.nodes[0].data).toEqual({ label: "action", nodeType: "action", action_id: 9 })
     expect(saved.edges[0].data).toEqual({ default: true })
+  })
+
+  test("blocks non-executable backend node types", () => {
+    const nodes: Node[] = [
+      node("start", "start"),
+      node("timer", "timer"),
+      node("end", "end"),
+    ]
+    const edges: Edge[] = [
+      edge("e1", "start", "timer"),
+      edge("e2", "timer", "end"),
+    ]
+
+    const messages = collectDraftIssues(nodes, edges, workflowCapability()).map((issue) => issue.message)
+
+    expect(messages).toContain("当前后端尚未实现该节点运行逻辑")
   })
 
   test("removes transient layout metadata when saving", () => {
@@ -107,6 +124,36 @@ describe("workflow contract", () => {
     expect(data.subprocess).not.toHaveProperty("subprocessJson")
   })
 })
+
+function workflowCapability(): WorkflowCapability {
+  const executableTypes: WorkflowNodeType[] = [
+    "start",
+    "end",
+    "form",
+    "approve",
+    "process",
+    "action",
+    "notify",
+    "wait",
+    "exclusive",
+    "parallel",
+    "inclusive",
+    "script",
+    "subprocess",
+    "b_timer",
+    "b_error",
+  ]
+  const disabledTypes: WorkflowNodeType[] = ["timer", "signal"]
+  const nodeTypes = Object.fromEntries([
+    ...executableTypes.map((type) => [type, { type, executable: true }]),
+    ...disabledTypes.map((type) => [type, {
+      type,
+      executable: false,
+      disabledReason: "当前后端尚未实现该节点运行逻辑",
+    }]),
+  ]) as WorkflowCapability["nodeTypes"]
+  return { version: "test", nodeTypes }
+}
 
 function node(id: string, type: WFNodeData["nodeType"], data: Partial<WFNodeData> = {}): Node {
   return {

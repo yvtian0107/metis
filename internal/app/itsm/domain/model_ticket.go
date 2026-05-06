@@ -3,32 +3,33 @@ package domain
 import (
 	"time"
 
+	"metis/internal/app/itsm/contract"
 	"metis/internal/model"
 )
 
 // Ticket status constants
 const (
-	TicketStatusSubmitted           = "submitted"
-	TicketStatusWaitingHuman        = "waiting_human"
-	TicketStatusApprovedDecisioning = "approved_decisioning"
-	TicketStatusRejectedDecisioning = "rejected_decisioning"
-	TicketStatusDecisioning         = "decisioning"
-	TicketStatusExecutingAction     = "executing_action"
-	TicketStatusCompleted           = "completed"
-	TicketStatusRejected            = "rejected"
-	TicketStatusWithdrawn           = "withdrawn"
-	TicketStatusCancelled           = "cancelled"
-	TicketStatusFailed              = "failed"
+	TicketStatusSubmitted           = string(contract.TicketStatusSubmitted)
+	TicketStatusWaitingHuman        = string(contract.TicketStatusWaitingHuman)
+	TicketStatusApprovedDecisioning = string(contract.TicketStatusApprovedDecisioning)
+	TicketStatusRejectedDecisioning = string(contract.TicketStatusRejectedDecisioning)
+	TicketStatusDecisioning         = string(contract.TicketStatusDecisioning)
+	TicketStatusExecutingAction     = string(contract.TicketStatusExecutingAction)
+	TicketStatusCompleted           = string(contract.TicketStatusCompleted)
+	TicketStatusRejected            = string(contract.TicketStatusRejected)
+	TicketStatusWithdrawn           = string(contract.TicketStatusWithdrawn)
+	TicketStatusCancelled           = string(contract.TicketStatusCancelled)
+	TicketStatusFailed              = string(contract.TicketStatusFailed)
 )
 
 // Ticket outcome constants
 const (
-	TicketOutcomeApproved  = "approved"
-	TicketOutcomeRejected  = "rejected"
-	TicketOutcomeFulfilled = "fulfilled"
-	TicketOutcomeWithdrawn = "withdrawn"
-	TicketOutcomeCancelled = "cancelled"
-	TicketOutcomeFailed    = "failed"
+	TicketOutcomeApproved  = string(contract.TicketOutcomeApproved)
+	TicketOutcomeRejected  = string(contract.TicketOutcomeRejected)
+	TicketOutcomeFulfilled = string(contract.TicketOutcomeFulfilled)
+	TicketOutcomeWithdrawn = string(contract.TicketOutcomeWithdrawn)
+	TicketOutcomeCancelled = string(contract.TicketOutcomeCancelled)
+	TicketOutcomeFailed    = string(contract.TicketOutcomeFailed)
 )
 
 // Ticket source constants
@@ -46,15 +47,15 @@ const (
 
 // Assignment status constants
 const (
-	AssignmentPending        = "pending"
-	AssignmentInProgress     = "in_progress"
-	AssignmentApproved       = "approved"
-	AssignmentRejected       = "rejected"
-	AssignmentTransferred    = "transferred"
-	AssignmentDelegated      = "delegated"
-	AssignmentClaimedByOther = "claimed_by_other"
-	AssignmentCancelled      = "cancelled"
-	AssignmentFailed         = "failed"
+	AssignmentPending        = string(contract.ActivityStatusPending)
+	AssignmentInProgress     = string(contract.ActivityStatusInProgress)
+	AssignmentApproved       = string(contract.ActivityStatusApproved)
+	AssignmentRejected       = string(contract.ActivityStatusRejected)
+	AssignmentTransferred    = string(contract.ActivityStatusTransferred)
+	AssignmentDelegated      = string(contract.ActivityStatusDelegated)
+	AssignmentClaimedByOther = string(contract.ActivityStatusClaimedByOther)
+	AssignmentCancelled      = string(contract.ActivityStatusCancelled)
+	AssignmentFailed         = string(contract.ActivityStatusFailed)
 )
 
 // Ticket 工单

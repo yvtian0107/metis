@@ -80,7 +80,7 @@ func DefaultDevConfig() *MetisConfig {
 		DBDriver: "postgres",
 		DBDSN:    "host=localhost port=5432 user=postgres password=password dbname=postgres sslmode=disable",
 		ClickHouse: &ClickHouseConfig{
-			DSN: "clickhouse://default:@localhost:9000/otel",
+			DSN: "clickhouse://default:@localhost:19000/otel",
 		},
 		FalkorDB: &FalkorDBConfig{
 			Addr: "localhost:6379",

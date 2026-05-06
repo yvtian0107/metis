@@ -9,6 +9,7 @@ import { WorkflowNodeIconGlyph } from "./visual"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
 import { fetchServiceActions } from "../../api"
+import type { WorkflowCapability } from "../../contract"
 import { itsmQueryKeys } from "../../query-keys"
 import type { FormField, FormSchema } from "../form-engine"
 
@@ -16,6 +17,7 @@ interface NodePaletteProps {
   serviceId?: number
   nodes?: Node[]
   intakeFormSchema?: unknown
+  workflowCapability?: WorkflowCapability
 }
 
 function isFormSchema(raw: unknown): raw is FormSchema {
@@ -27,7 +29,7 @@ function fieldVariables(schema: unknown, prefix: string): Array<FormField & { va
   return schema.fields.map((field) => ({ ...field, variable: `${prefix}.${field.key}` }))
 }
 
-export function NodePalette({ serviceId, nodes = [], intakeFormSchema }: NodePaletteProps) {
+export function NodePalette({ serviceId, nodes = [], intakeFormSchema, workflowCapability }: NodePaletteProps) {
   const { t } = useTranslation("itsm")
   const { data: actions = [] } = useQuery({
     queryKey: serviceId ? itsmQueryKeys.services.actions(serviceId) : itsmQueryKeys.services.actions(0),
@@ -63,13 +65,16 @@ export function NodePalette({ serviceId, nodes = [], intakeFormSchema }: NodePal
         </TabsList>
         <TabsContent value="nodes" className="min-h-0 overflow-y-auto px-3 py-3">
           <div className="space-y-4 pr-1">
-            {WORKFLOW_NODE_GROUPS.map((group) => (
+            {WORKFLOW_NODE_GROUPS.map((group) => {
+              const executableTypes = group.types.filter((nt) => workflowCapability?.nodeTypes[nt]?.executable)
+              if (executableTypes.length === 0) return null
+              return (
               <section key={group.label}>
                 <div className="mb-1.5 px-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground/72">
                   {t(group.label)}
                 </div>
                 <div className="space-y-1.5">
-                  {group.types.map((nt) => {
+                  {executableTypes.map((nt) => {
                     const color = getNodeAccent(nt)
                     return (
                       <div
@@ -93,7 +98,7 @@ export function NodePalette({ serviceId, nodes = [], intakeFormSchema }: NodePal
                   })}
                 </div>
               </section>
-            ))}
+            )})}
           </div>
         </TabsContent>
         <TabsContent value="fields" className="min-h-0 overflow-y-auto px-3 py-3">

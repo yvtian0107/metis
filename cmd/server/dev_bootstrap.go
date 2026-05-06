@@ -249,6 +249,14 @@ func bindDevITSMEngine(db *gorm.DB, modelID uint) error {
 			"itsm.smart_ticket.path.temperature":                "0.3",
 			"itsm.smart_ticket.path.max_retries":                "1",
 			"itsm.smart_ticket.path.timeout_seconds":            "60",
+			"itsm.smart_ticket.session_title.model_id":          strconv.FormatUint(uint64(modelID), 10),
+			"itsm.smart_ticket.session_title.temperature":       "0.3",
+			"itsm.smart_ticket.session_title.max_retries":       "1",
+			"itsm.smart_ticket.session_title.timeout_seconds":   "60",
+			"itsm.smart_ticket.publish_health.model_id":         strconv.FormatUint(uint64(modelID), 10),
+			"itsm.smart_ticket.publish_health.temperature":      "0.3",
+			"itsm.smart_ticket.publish_health.max_retries":      "1",
+			"itsm.smart_ticket.publish_health.timeout_seconds":  "60",
 		}
 		for key, value := range values {
 			if err := upsertSystemConfig(tx, key, value); err != nil {

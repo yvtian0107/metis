@@ -75,7 +75,9 @@ func HandleActionExecute(db *gorm.DB, classicEngine *ClassicEngine, smartEngine 
 
 			if smartEngine != nil {
 				event := NewActionFinishedEvent(p.TicketID, p.ActivityID, outcome)
-				smartEngine.DispatchDecisionAsync(event.TicketID, event.CompletedActivityID, event.TriggerReason)
+				if err := smartEngine.SubmitDecisionTask(event.TicketID, event.CompletedActivityID, event.TriggerReason); err != nil {
+					return err
+				}
 			}
 			return nil
 		}
@@ -379,7 +381,12 @@ func HandleSmartRecovery(db *gorm.DB, smartEngine *SmartEngine) func(ctx context
 			}
 			recoverySubmissionsMu.Unlock()
 
-			smartEngine.DispatchDecisionAsync(t.ID, nil, TriggerReasonRecovery)
+			if err := smartEngine.SubmitDecisionTask(t.ID, nil, TriggerReasonRecovery); err != nil {
+				recoverySubmissionsMu.Lock()
+				delete(recoverySubmissions, t.ID)
+				recoverySubmissionsMu.Unlock()
+				return err
+			}
 
 			// Record submission time
 			recoverySubmissionsMu.Lock()

@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef, useEffect, useMemo, type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
+import { useQuery } from "@tanstack/react-query"
 import {
   ReactFlow,
   ReactFlowProvider,
@@ -45,6 +46,8 @@ import {
   normalizeWorkflowData,
   prepareWorkflowForSave,
 } from "./workflow-contract"
+import { fetchWorkflowCapabilities } from "../../api"
+import { itsmQueryKeys } from "../../query-keys"
 import "./style.css"
 
 const DEFAULT_VIEWPORT = { x: 96, y: 72, zoom: 0.86 }
@@ -81,6 +84,10 @@ function InnerEditor({
 
   const [nodes, setNodes, onNodesChange] = useNodesState(startingData.nodes)
   const [edges, setEdges, onEdgesChange] = useEdgesState(startingData.edges)
+  const { data: workflowCapability } = useQuery({
+    queryKey: itsmQueryKeys.workflows.capabilities(),
+    queryFn: fetchWorkflowCapabilities,
+  })
 
   const { undo, redo, push, canUndo, canRedo } = useUndoRedo()
   const clipboardRef = useRef<{ nodes: Node[]; edges: Edge[] } | null>(null)
@@ -158,6 +165,11 @@ function InnerEditor({
   }, [])
 
   function handleSave() {
+    const issues = collectDraftIssues(nodes as Node[], edges as Edge[], workflowCapability)
+    if (issues.length > 0) {
+      toast.error(issues[0]?.message ?? "工作流存在阻塞问题")
+      return
+    }
     onSave(prepareWorkflowForSave(nodes as Node[], edges as Edge[]))
   }
 
@@ -283,11 +295,11 @@ function InnerEditor({
   const edgeSourceNodeType = selectedEdge
     ? (nodes.find((n) => n.id === selectedEdge.source)?.data as unknown as WFNodeData | undefined)?.nodeType
     : undefined
-  const draftIssues = useMemo(() => collectDraftIssues(nodes as Node[], edges as Edge[]), [nodes, edges])
+  const draftIssues = useMemo(() => collectDraftIssues(nodes as Node[], edges as Edge[], workflowCapability), [nodes, edges, workflowCapability])
 
   return (
     <div className="flex h-full overflow-hidden bg-background" ref={reactFlowWrapper}>
-      <NodePalette serviceId={serviceId} nodes={nodes as Node[]} intakeFormSchema={intakeFormSchema} />
+      <NodePalette serviceId={serviceId} nodes={nodes as Node[]} intakeFormSchema={intakeFormSchema} workflowCapability={workflowCapability} />
       <div className="min-w-0 flex-1">
         <ContextMenu>
           <ContextMenuTrigger asChild>

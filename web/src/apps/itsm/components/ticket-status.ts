@@ -1,8 +1,9 @@
 import { type TicketItem } from "../api"
+import type { TicketStatus, StatusTone } from "../contract"
 
 type BadgeVariant = "default" | "secondary" | "destructive" | "outline"
 
-export const TICKET_STATUS_OPTIONS: Record<string, { variant: BadgeVariant; key: string }> = {
+export const TICKET_STATUS_OPTIONS: Record<TicketStatus, { variant: BadgeVariant; key: string }> = {
   submitted: { variant: "secondary", key: "statusSubmitted" },
   waiting_human: { variant: "outline", key: "statusWaitingHuman" },
   approved_decisioning: { variant: "outline", key: "statusApprovedDecisioning" },
@@ -16,7 +17,7 @@ export const TICKET_STATUS_OPTIONS: Record<string, { variant: BadgeVariant; key:
   failed: { variant: "destructive", key: "statusFailed" },
 }
 
-const TONE_VARIANT: Record<string, BadgeVariant> = {
+const TONE_VARIANT: Record<StatusTone, BadgeVariant> = {
   success: "default",
   destructive: "destructive",
   secondary: "secondary",
@@ -26,10 +27,13 @@ const TONE_VARIANT: Record<string, BadgeVariant> = {
 
 export function getTicketStatusView(ticket: TicketItem) {
   const option = TICKET_STATUS_OPTIONS[ticket.status]
-  const variant = TONE_VARIANT[ticket.statusTone] ?? option?.variant ?? "secondary"
+  if (!option) {
+    throw new Error(`unknown ITSM ticket status: ${ticket.status}`)
+  }
+  const variant = TONE_VARIANT[ticket.statusTone] ?? option.variant
   return {
-    key: option?.key,
+    key: option.key,
     variant,
-    label: ticket.statusLabel || ticket.status,
+    label: ticket.statusLabel,
   }
 }

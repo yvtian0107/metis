@@ -102,7 +102,9 @@ func (s *TicketService) Create(input CreateTicketInput, requesterID uint) (*Tick
 		return nil, err
 	}
 	if ticket.EngineType == "smart" {
-		s.smartEngine.DispatchDecisionAsync(ticket.ID, nil, engine.TriggerReasonTicketCreated)
+		if err := s.submitSmartDecisionTask(ticket.ID, nil, engine.TriggerReasonTicketCreated); err != nil {
+			return nil, err
+		}
 	}
 
 	return s.ticketRepo.FindByID(ticket.ID)
@@ -313,7 +315,9 @@ func (s *TicketService) createAgentTicket(ctx context.Context, input CreateTicke
 			return nil, err
 		}
 		if ticket.EngineType == "smart" {
-			s.smartEngine.DispatchDecisionAsync(ticket.ID, nil, engine.TriggerReasonTicketCreated)
+			if err := s.submitSmartDecisionTask(ticket.ID, nil, engine.TriggerReasonTicketCreated); err != nil {
+				return nil, err
+			}
 		}
 		return s.ticketRepo.FindByID(ticket.ID)
 	}
@@ -398,7 +402,9 @@ func (s *TicketService) createAgentTicket(ctx context.Context, input CreateTicke
 		return nil, err
 	}
 	if created.EngineType == "smart" {
-		s.smartEngine.DispatchDecisionAsync(created.ID, nil, engine.TriggerReasonTicketCreated)
+		if err := s.submitSmartDecisionTask(created.ID, nil, engine.TriggerReasonTicketCreated); err != nil {
+			return nil, err
+		}
 	}
 	return s.ticketRepo.FindByID(created.ID)
 }
@@ -488,7 +494,9 @@ func (s *TicketService) Progress(ticketID uint, activityID uint, outcome string,
 		updated, findErr := s.ticketRepo.FindByID(ticketID)
 		if findErr == nil && isDecisioningStatus(updated.Status) {
 			event := engine.NewActivityDecidedEvent(ticketID, activityID, outcome, operatorID)
-			s.smartEngine.DispatchDecisionAsync(event.TicketID, event.CompletedActivityID, event.TriggerReason)
+			if err := s.submitSmartDecisionTask(event.TicketID, event.CompletedActivityID, event.TriggerReason); err != nil {
+				return nil, err
+			}
 			return updated, nil
 		}
 	}
@@ -1880,8 +1888,17 @@ func (s *TicketService) retryAI(ticketID uint, reason string, operatorID uint, l
 	}); err != nil {
 		return nil, err
 	}
-	s.smartEngine.DispatchDecisionAsync(ticketID, nil, engine.TriggerReasonManualRetry)
+	if err := s.submitSmartDecisionTask(ticketID, nil, engine.TriggerReasonManualRetry); err != nil {
+		return nil, err
+	}
 	return s.ticketRepo.FindByID(ticketID)
+}
+
+func (s *TicketService) submitSmartDecisionTask(ticketID uint, completedActivityID *uint, triggerReason string) error {
+	if s.smartEngine == nil {
+		return errors.New("smart engine is not configured")
+	}
+	return s.smartEngine.SubmitDecisionTask(ticketID, completedActivityID, triggerReason)
 }
 
 func (s *TicketService) handoffHuman(ticketID uint, reason string, operatorID uint) (*Ticket, error) {

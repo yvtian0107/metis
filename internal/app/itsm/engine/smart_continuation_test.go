@@ -815,8 +815,8 @@ func TestSmartRecoveryFirstRunSubmits(t *testing.T) {
 		t.Fatalf("smart recovery handler: %v", err)
 	}
 
-	if submitter.calls != 0 {
-		t.Fatalf("expected recovery to avoid scheduler submit calls, got %d", submitter.calls)
+	if submitter.calls != 1 || submitter.lastName != "itsm-smart-progress" {
+		t.Fatalf("expected recovery to enqueue one smart-progress task, got calls=%d lastName=%q", submitter.calls, submitter.lastName)
 	}
 
 	// Verify dedup map was populated
@@ -845,20 +845,20 @@ func TestSmartRecoveryDedupSkipsRecent(t *testing.T) {
 	eng := NewSmartEngine(availableDecisionExecutor{}, nil, nil, nil, submitter, nil)
 	handler := HandleSmartRecovery(db, eng)
 
-	// First run should dispatch direct recovery and populate dedup.
+	// First run should enqueue recovery and populate dedup.
 	if err := handler(context.Background(), nil); err != nil {
 		t.Fatalf("first recovery run: %v", err)
 	}
-	if submitter.calls != 0 {
-		t.Fatalf("expected no scheduler submit after first run, got %d", submitter.calls)
+	if submitter.calls != 1 || submitter.lastName != "itsm-smart-progress" {
+		t.Fatalf("expected first run to enqueue one smart-progress task, got calls=%d lastName=%q", submitter.calls, submitter.lastName)
 	}
 
 	// Second run within 10 minutes — should skip (dedup)
 	if err := handler(context.Background(), nil); err != nil {
 		t.Fatalf("second recovery run: %v", err)
 	}
-	if submitter.calls != 0 {
-		t.Fatalf("expected still no scheduler submit after second run, got %d", submitter.calls)
+	if submitter.calls != 1 {
+		t.Fatalf("expected second run to be deduped without another scheduler submit, got %d", submitter.calls)
 	}
 }
 
@@ -888,8 +888,8 @@ func TestSmartRecoveryDedupExpiresAfter10Min(t *testing.T) {
 		t.Fatalf("recovery after expiry: %v", err)
 	}
 
-	if submitter.calls != 0 {
-		t.Fatalf("expected no scheduler submit after dedup entry expired, got %d", submitter.calls)
+	if submitter.calls != 1 || submitter.lastName != "itsm-smart-progress" {
+		t.Fatalf("expected expired dedup entry to enqueue one smart-progress task, got calls=%d lastName=%q", submitter.calls, submitter.lastName)
 	}
 
 	// Verify the dedup map was updated with a fresh timestamp

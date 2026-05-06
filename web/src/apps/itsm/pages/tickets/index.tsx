@@ -73,6 +73,7 @@ import {
   type TicketMonitorItem,
   type TimelineItem,
 } from "../../api"
+import type { EngineType, RiskLevel, TicketStatus } from "../../contract"
 import { OverrideActions } from "../../components/override-actions"
 import { SLABadge } from "../../components/sla-badge"
 import { TicketStatusBadge } from "../../components/ticket-status-badge"
@@ -192,9 +193,9 @@ export function Component() {
   const { t } = useTranslation(["itsm", "common"])
   const [keyword, setKeyword] = useState("")
   const [submittedKeyword, setSubmittedKeyword] = useState("")
-  const [riskFilter, setRiskFilter] = useState("all")
-  const [engineFilter, setEngineFilter] = useState("all")
-  const [statusFilter, setStatusFilter] = useState("all")
+  const [riskFilter, setRiskFilter] = useState<RiskLevel | "all">("all")
+  const [engineFilter, setEngineFilter] = useState<EngineType | "all">("all")
+  const [statusFilter, setStatusFilter] = useState<TicketStatus | "all">("all")
   const [priorityFilter, setPriorityFilter] = useState("all")
   const [serviceFilter, setServiceFilter] = useState("all")
   const [qualityDimension, setQualityDimension] = useState<"service" | "department">("service")
@@ -374,7 +375,7 @@ export function Component() {
           </ButtonGroup>
         </DataTableToolbarGroup>
         <div className="flex flex-wrap items-center gap-2">
-          <Select value={engineFilter} onValueChange={(v) => resetPageAnd(() => setEngineFilter(v))}>
+          <Select value={engineFilter} onValueChange={(v) => resetPageAnd(() => setEngineFilter(v as EngineType | "all"))}>
             <SelectTrigger className="h-8 w-[128px]"><SelectValue /></SelectTrigger>
             <SelectContent>
               <SelectItem value="all">{t("monitor.engineAll")}</SelectItem>
@@ -382,7 +383,7 @@ export function Component() {
               <SelectItem value="classic">{t("monitor.engineClassic")}</SelectItem>
             </SelectContent>
           </Select>
-          <Select value={statusFilter} onValueChange={(v) => resetPageAnd(() => setStatusFilter(v))}>
+          <Select value={statusFilter} onValueChange={(v) => resetPageAnd(() => setStatusFilter(v as TicketStatus | "all"))}>
             <SelectTrigger className="h-8 w-[136px]"><SelectValue /></SelectTrigger>
             <SelectContent>
               <SelectItem value="all">{t("tickets.allStatuses")}</SelectItem>

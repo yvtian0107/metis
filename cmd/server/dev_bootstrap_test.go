@@ -154,12 +154,20 @@ METIS_DEV_AI_API_KEY=sk-new
 		"itsm.smart_ticket.sla_assurance.agent_id":          "3",
 		"itsm.smart_ticket.service_matcher.model_id":        "1",
 		"itsm.smart_ticket.path.model_id":                   "1",
+		"itsm.smart_ticket.session_title.model_id":          "1",
+		"itsm.smart_ticket.publish_health.model_id":         "1",
 		"itsm.smart_ticket.service_matcher.temperature":     "0.2",
 		"itsm.smart_ticket.service_matcher.max_tokens":      "1024",
 		"itsm.smart_ticket.service_matcher.timeout_seconds": "30",
 		"itsm.smart_ticket.path.temperature":                "0.3",
 		"itsm.smart_ticket.path.max_retries":                "1",
 		"itsm.smart_ticket.path.timeout_seconds":            "60",
+		"itsm.smart_ticket.session_title.temperature":       "0.3",
+		"itsm.smart_ticket.session_title.max_retries":       "1",
+		"itsm.smart_ticket.session_title.timeout_seconds":   "60",
+		"itsm.smart_ticket.publish_health.temperature":      "0.3",
+		"itsm.smart_ticket.publish_health.max_retries":      "1",
+		"itsm.smart_ticket.publish_health.timeout_seconds":  "60",
 		"itsm.smart_ticket.decision.mode":                   "direct_first",
 	}
 	for key, want := range expectedConfig {
@@ -239,6 +247,8 @@ METIS_DEV_AI_API_KEY=sk-dev
 		"itsm.smart_ticket.sla_assurance.agent_id",
 		"itsm.smart_ticket.service_matcher.model_id",
 		"itsm.smart_ticket.path.model_id",
+		"itsm.smart_ticket.session_title.model_id",
+		"itsm.smart_ticket.publish_health.model_id",
 	} {
 		var cfg model.SystemConfig
 		if err := db.Where("\"key\" = ?", key).First(&cfg).Error; err != nil {

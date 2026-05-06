@@ -169,45 +169,28 @@ func (e *SmartEngine) SetDB(db *gorm.DB) {
 	e.db = db
 }
 
-func (e *SmartEngine) DispatchDecisionAsync(ticketID uint, completedActivityID *uint, triggerReason string) {
-	if e == nil || e.db == nil {
-		return
+func (e *SmartEngine) SubmitDecisionTask(ticketID uint, completedActivityID *uint, triggerReason string) error {
+	payload, err := json.Marshal(SmartProgressPayload{
+		TicketID:            ticketID,
+		CompletedActivityID: completedActivityID,
+		TriggerReason:       triggerReason,
+	})
+	if err != nil {
+		return err
 	}
-	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				slog.Error("direct decision dispatch panic", "ticketID", ticketID, "panic", r)
-				_ = e.db.Session(&gorm.Session{NewDB: true}).Create(&timelineModel{
-					TicketID:   ticketID,
-					OperatorID: 0,
-					EventType:  "ai_decision_failed",
-					Message:    fmt.Sprintf("AI 决策异常: %v", r),
-				}).Error
-			}
-		}()
+	return e.SubmitProgressTask(payload)
+}
 
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
-		defer cancel()
-
-		db := e.db.Session(&gorm.Session{NewDB: true}).WithContext(ctx)
-		slog.Info("direct decision dispatch: starting", "ticketID", ticketID, "completedActivityID", completedActivityID, "triggerReason", triggerReason)
-		err := e.RunDecisionCycleForTicket(ctx, db, ticketID, completedActivityID, triggerReason)
-		if err != nil {
-			if err == ErrAIDecisionFailed || err == ErrAIDisabled {
-				slog.Warn("direct decision dispatch: handled decision error", "ticketID", ticketID, "error", err)
-				return
-			}
-			slog.Error("direct decision dispatch: failed", "ticketID", ticketID, "error", err)
-			_ = db.Create(&timelineModel{
-				TicketID:   ticketID,
-				OperatorID: 0,
-				EventType:  "ai_decision_failed",
-				Message:    fmt.Sprintf("AI 决策调度失败: %v", err),
-			}).Error
-			return
-		}
-		slog.Info("direct decision dispatch: completed", "ticketID", ticketID, "completedActivityID", completedActivityID)
-	}()
+func (e *SmartEngine) SubmitDecisionTaskTx(tx *gorm.DB, ticketID uint, completedActivityID *uint, triggerReason string) error {
+	payload, err := json.Marshal(SmartProgressPayload{
+		TicketID:            ticketID,
+		CompletedActivityID: completedActivityID,
+		TriggerReason:       triggerReason,
+	})
+	if err != nil {
+		return err
+	}
+	return e.SubmitProgressTaskTx(tx, payload)
 }
 
 // Start initialises the workflow for a smart-engine ticket.

@@ -4,6 +4,7 @@
 EDITION ?=
 APPS    ?=
 BUN     ?= $(shell command -v bun 2>/dev/null || echo $(HOME)/.bun/bin/bun)
+DEV_COMPOSE := support-files/dev/docker-compose.yml
 
 GO_TAGS := $(if $(EDITION),-tags $(EDITION),)
 
@@ -40,8 +41,21 @@ web-install:
 #   make dev            — PostgreSQL (requires docker-compose, see support-files/dev/)
 #   make dev-sqlite     — SQLite (zero dependencies, single file)
 #   make reset-pg       — DROP + CREATE postgres DB, then re-seed
+#   make compose-up     — Start development dependencies
+#   make compose-down   — Stop development dependencies
+#   make compose-reset  — Recreate development dependencies from empty volumes
 #
 # Both modes read .env.dev for AI provider config on first seed.
+
+compose-up:
+	docker compose -f $(DEV_COMPOSE) up -d
+
+compose-down:
+	docker compose -f $(DEV_COMPOSE) down
+
+compose-reset:
+	docker compose -f $(DEV_COMPOSE) down -v
+	docker compose -f $(DEV_COMPOSE) up -d
 
 dev: web-full-registry
 	@if [ -f .env.dev ]; then $(MAKE) seed-dev; fi
@@ -256,7 +270,7 @@ test-bdd-agentic-server-access:
 	ITSM_BDD_PATHS=features/agentic/server_access_branch_decision.feature,features/agentic/server_access_corner_cases.feature \
 	go test ./internal/app/itsm/bdd -run '^TestBDDAgentic$$' -v -timeout 30m
 
-.PHONY: web-full-registry web-build web-install web-dev dev dev-sqlite stop-all build run release release-license build-license build-sidecar release-sidecar refer-clone seed seed-dev seed-dev-sqlite reset-pg clean push test test-license test-fuzz test-llm test-pretty test-cover test-report test-llm-report test-tdd test-bdd test-bdd-vpn test-bdd-api test-bdd-agentic test-bdd-agentic-vpn test-bdd-agentic-server-access
+.PHONY: web-full-registry web-build web-install web-dev compose-up compose-down compose-reset dev dev-sqlite stop-all build run release release-license build-license build-sidecar release-sidecar refer-clone seed seed-dev seed-dev-sqlite reset-pg clean push test test-license test-fuzz test-llm test-pretty test-cover test-report test-llm-report test-tdd test-bdd test-bdd-vpn test-bdd-api test-bdd-agentic test-bdd-agentic-vpn test-bdd-agentic-server-access
 
 # Backward-compat aliases
 license: build-license

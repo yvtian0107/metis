@@ -728,6 +728,7 @@ func seedPolicies(enforcer *casbin.Enforcer) error {
 		{"admin", "/api/v1/itsm/engine-settings/config", "PUT"},
 		// Workflow Generate
 		{"admin", "/api/v1/itsm/workflows/generate", "POST"},
+		{"admin", "/api/v1/itsm/workflows/capabilities", "GET"},
 		// Service Desk
 		{"user", "/api/v1/itsm/smart-staffing/config", "GET"},
 		{"admin", "/api/v1/itsm/service-desk/sessions/:sid/state", "GET"},

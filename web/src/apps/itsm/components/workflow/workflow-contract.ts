@@ -1,5 +1,6 @@
 import { MarkerType, type Edge, type Node } from "@xyflow/react"
 import type { NodeType, WFEdgeData, WFNodeData } from "./types"
+import type { WorkflowCapability } from "../../contract"
 
 let nodeId = 0
 
@@ -79,8 +80,12 @@ export function normalizeWorkflowData(data: { nodes?: Node[]; edges?: Edge[] } |
   return { nodes, edges }
 }
 
-export function collectDraftIssues(nodes: Node[], edges: Edge[]) {
+export function collectDraftIssues(nodes: Node[], edges: Edge[], capability: WorkflowCapability | undefined) {
   const issues: Array<{ nodeId?: string; edgeId?: string; message: string }> = []
+  if (!capability) {
+    issues.push({ message: "工作流能力未加载" })
+    return issues
+  }
   const startNodes = nodes.filter((node) => ((node.data ?? {}) as unknown as WFNodeData).nodeType === "start" || node.type === "start")
   const endNodes = nodes.filter((node) => ((node.data ?? {}) as unknown as WFNodeData).nodeType === "end" || node.type === "end")
   const nodeIds = new Set(nodes.map((node) => node.id))
@@ -104,6 +109,15 @@ export function collectDraftIssues(nodes: Node[], edges: Edge[]) {
   for (const node of nodes) {
     const data = (node.data ?? {}) as unknown as WFNodeData
     const nodeType = data.nodeType ?? (node.type as NodeType)
+    const nodeCapability = capability.nodeTypes[nodeType]
+    if (!nodeCapability) {
+      issues.push({ nodeId: node.id, message: `未知节点类型: ${nodeType}` })
+      continue
+    }
+    if (!nodeCapability.executable) {
+      issues.push({ nodeId: node.id, message: nodeCapability.disabledReason || `节点不可执行: ${nodeType}` })
+      continue
+    }
     if (nodeType !== "start" && (incoming.get(node.id) ?? 0) === 0) {
       issues.push({ nodeId: node.id, message: "节点不可达" })
     }

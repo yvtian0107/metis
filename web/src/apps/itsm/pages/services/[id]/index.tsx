@@ -7,7 +7,7 @@ import { useForm, useWatch } from "react-hook-form"
 import { z } from "zod"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { useQuery, useMutation, useQueryClient, useIsMutating } from "@tanstack/react-query"
-import { ArrowLeft, Pencil, Save, Loader2, Sparkles, ShieldCheck, CheckCircle2, AlertTriangle, XCircle, RefreshCw } from "lucide-react"
+import { ArrowLeft, Save, Loader2, Sparkles, ShieldCheck, CheckCircle2, AlertTriangle, XCircle, RefreshCw } from "lucide-react"
 import { usePermission } from "@/hooks/use-permission"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
@@ -575,13 +575,8 @@ export function Component() {
 
   const workflowSection = (
     <SectionFrame
-      noSurface={service.engineType === "smart"}
-      title={service.engineType === "smart" ? "参考路径/策略草图" : t("itsm:services.tabWorkflow")}
-      action={service.engineType === "classic" && !!service.workflowJson ? (
-        <Button variant="outline" size="sm" onClick={() => navigate(`/itsm/services/${serviceId}/workflow`)}>
-          <Pencil className="mr-1.5 h-3.5 w-3.5" />{t("itsm:workflow.editWorkflow")}
-        </Button>
-      ) : undefined}
+      noSurface
+      title="参考路径/策略草图"
     >
       {isGeneratingWorkflow ? (
         <div className="flex min-h-32 flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-border/70 bg-background/25 px-4 py-7 text-muted-foreground">
@@ -591,15 +586,9 @@ export function Component() {
       ) : !service.workflowJson ? (
         <div className="flex min-h-32 flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-border/70 bg-background/25 px-4 py-7 text-muted-foreground">
           <p className="text-sm">
-            {service.engineType === "smart" ? "暂无参考路径" : t("itsm:services.workflowEmpty")}
+            暂无参考路径
           </p>
-          {service.engineType === "classic" ? (
-            <Button variant="outline" size="sm" onClick={() => navigate(`/itsm/services/${serviceId}/workflow`)}>
-              <Pencil className="mr-1.5 h-3.5 w-3.5" />{t("itsm:workflow.designWorkflow")}
-            </Button>
-          ) : (
-            <p className="text-xs">{t("itsm:generate.workflowEmptySmartHint")}</p>
-          )}
+          <p className="text-xs">{t("itsm:generate.workflowEmptySmartHint")}</p>
         </div>
       ) : (
         <Suspense fallback={<div className="flex h-80 items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>}>

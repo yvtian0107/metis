@@ -21,4 +21,8 @@ export const itsmQueryKeys = {
     escalations: (slaId: number) => [...itsmQueryKeys.sla.all, slaId, "escalations"] as const,
     notificationChannels: ["itsm", "sla", "notification-channels"] as const,
   },
+  workflows: {
+    all: ["itsm", "workflows"] as const,
+    capabilities: () => [...itsmQueryKeys.workflows.all, "capabilities"] as const,
+  },
 }

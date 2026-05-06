@@ -6,6 +6,7 @@ import (
 	"errors"
 
 	"gorm.io/gorm"
+	"metis/internal/app/itsm/contract"
 )
 
 // WorkflowEngine defines the contract for workflow execution engines.
@@ -74,27 +75,27 @@ var (
 
 // Node types
 const (
-	NodeStart   = "start"
-	NodeEnd     = "end"
-	NodeForm    = "form"
-	NodeApprove = "approve"
-	NodeProcess = "process"
-	NodeAction  = "action"
-	NodeNotify  = "notify"
-	NodeWait    = "wait"
+	NodeStart   = string(contract.NodeTypeStart)
+	NodeEnd     = string(contract.NodeTypeEnd)
+	NodeForm    = string(contract.NodeTypeForm)
+	NodeApprove = string(contract.NodeTypeApprove)
+	NodeProcess = string(contract.NodeTypeProcess)
+	NodeAction  = string(contract.NodeTypeAction)
+	NodeNotify  = string(contract.NodeTypeNotify)
+	NodeWait    = string(contract.NodeTypeWait)
 
 	// Gateway types (③ itsm-execution-tokens: exclusive implemented; ④: parallel/inclusive)
-	NodeExclusive = "exclusive"
-	NodeParallel  = "parallel"  // registered only — execution logic in ④ itsm-gateway-parallel
-	NodeInclusive = "inclusive" // registered only — execution logic in ④ itsm-gateway-parallel
+	NodeExclusive = string(contract.NodeTypeExclusive)
+	NodeParallel  = string(contract.NodeTypeParallel)  // registered only — execution logic in ④ itsm-gateway-parallel
+	NodeInclusive = string(contract.NodeTypeInclusive) // registered only — execution logic in ④ itsm-gateway-parallel
 
 	// Advanced node types — registered only, execution logic in ⑤ itsm-advanced-nodes
-	NodeScript     = "script"
-	NodeSubprocess = "subprocess"
-	NodeTimer      = "timer"   // intermediate timer event
-	NodeSignal     = "signal"  // intermediate signal event
-	NodeBTimer     = "b_timer" // boundary timer event
-	NodeBError     = "b_error" // boundary error event
+	NodeScript     = string(contract.NodeTypeScript)
+	NodeSubprocess = string(contract.NodeTypeSubprocess)
+	NodeTimer      = string(contract.NodeTypeTimer)  // intermediate timer event
+	NodeSignal     = string(contract.NodeTypeSignal) // intermediate signal event
+	NodeBTimer     = string(contract.NodeTypeBTimer) // boundary timer event
+	NodeBError     = string(contract.NodeTypeBError) // boundary error event
 )
 
 var ValidNodeTypes = map[string]bool{
@@ -151,35 +152,35 @@ const (
 
 // Activity status constants
 const (
-	ActivityPending    = "pending"
-	ActivityInProgress = "in_progress"
-	ActivityApproved   = "approved"
-	ActivityRejected   = "rejected"
-	ActivityCompleted  = "completed"
-	ActivityCancelled  = "cancelled"
+	ActivityPending    = string(contract.ActivityStatusPending)
+	ActivityInProgress = string(contract.ActivityStatusInProgress)
+	ActivityApproved   = string(contract.ActivityStatusApproved)
+	ActivityRejected   = string(contract.ActivityStatusRejected)
+	ActivityCompleted  = string(contract.ActivityStatusCompleted)
+	ActivityCancelled  = string(contract.ActivityStatusCancelled)
 )
 
 const (
-	TicketStatusSubmitted           = "submitted"
-	TicketStatusWaitingHuman        = "waiting_human"
-	TicketStatusApprovedDecisioning = "approved_decisioning"
-	TicketStatusRejectedDecisioning = "rejected_decisioning"
-	TicketStatusDecisioning         = "decisioning"
-	TicketStatusExecutingAction     = "executing_action"
-	TicketStatusCompleted           = "completed"
-	TicketStatusRejected            = "rejected"
-	TicketStatusWithdrawn           = "withdrawn"
-	TicketStatusCancelled           = "cancelled"
-	TicketStatusFailed              = "failed"
+	TicketStatusSubmitted           = string(contract.TicketStatusSubmitted)
+	TicketStatusWaitingHuman        = string(contract.TicketStatusWaitingHuman)
+	TicketStatusApprovedDecisioning = string(contract.TicketStatusApprovedDecisioning)
+	TicketStatusRejectedDecisioning = string(contract.TicketStatusRejectedDecisioning)
+	TicketStatusDecisioning         = string(contract.TicketStatusDecisioning)
+	TicketStatusExecutingAction     = string(contract.TicketStatusExecutingAction)
+	TicketStatusCompleted           = string(contract.TicketStatusCompleted)
+	TicketStatusRejected            = string(contract.TicketStatusRejected)
+	TicketStatusWithdrawn           = string(contract.TicketStatusWithdrawn)
+	TicketStatusCancelled           = string(contract.TicketStatusCancelled)
+	TicketStatusFailed              = string(contract.TicketStatusFailed)
 )
 
 const (
-	TicketOutcomeApproved  = "approved"
-	TicketOutcomeRejected  = "rejected"
-	TicketOutcomeFulfilled = "fulfilled"
-	TicketOutcomeWithdrawn = "withdrawn"
-	TicketOutcomeCancelled = "cancelled"
-	TicketOutcomeFailed    = "failed"
+	TicketOutcomeApproved  = string(contract.TicketOutcomeApproved)
+	TicketOutcomeRejected  = string(contract.TicketOutcomeRejected)
+	TicketOutcomeFulfilled = string(contract.TicketOutcomeFulfilled)
+	TicketOutcomeWithdrawn = string(contract.TicketOutcomeWithdrawn)
+	TicketOutcomeCancelled = string(contract.TicketOutcomeCancelled)
+	TicketOutcomeFailed    = string(contract.TicketOutcomeFailed)
 )
 
 func IsTerminalTicketStatus(status string) bool {

@@ -39,7 +39,7 @@ function useCreateSchema() {
     name: z.string().min(1, t("validation.nameRequired")),
     code: z.string().min(1, t("validation.codeRequired")),
     catalogId: z.number().min(1),
-    engineType: z.string().default("smart"),
+    engineType: z.enum(["classic", "smart"]),
     description: z.string().optional(),
   })
 }
@@ -162,8 +162,7 @@ export function Component() {
   // ── Create service form ──────────────────────────────
 
   const createForm = useForm<CreateFormValues>({
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    resolver: zodResolver(createSchema as any),
+    resolver: zodResolver(createSchema),
     defaultValues: { name: "", code: "", catalogId: 0, engineType: "smart", description: "" },
   })
 
