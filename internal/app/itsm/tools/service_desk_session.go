@@ -17,6 +17,13 @@ func NewServiceDeskSession(op ServiceDeskOperator, store StateStore) *ServiceDes
 	return &ServiceDeskSession{op: op, store: store}
 }
 
+func clearPendingNextRequiredTool(state *ServiceDeskState) {
+	if state == nil {
+		return
+	}
+	state.PendingNextRequiredTool = ""
+}
+
 func (s *ServiceDeskSession) state(sessionID uint) (*ServiceDeskState, error) {
 	state, err := s.store.GetState(sessionID)
 	if err != nil {
@@ -129,6 +136,7 @@ func (s *ServiceDeskSession) MatchServices(ctx context.Context, sessionID uint, 
 	state.ServiceVersionHash = ""
 	state.RequestText = requestText
 	state.PrefillFormData = nil
+	clearPendingNextRequiredTool(state)
 	if err := s.save(sessionID, state); err != nil {
 		return nil, fmt.Errorf("save state: %w", err)
 	}
@@ -164,6 +172,7 @@ func (s *ServiceDeskSession) ConfirmService(sessionID uint, requestedServiceID u
 	if err := state.TransitionTo("service_selected"); err != nil {
 		return nil, err
 	}
+	clearPendingNextRequiredTool(state)
 	if err := s.save(sessionID, state); err != nil {
 		return nil, fmt.Errorf("save state: %w", err)
 	}
@@ -217,6 +226,7 @@ func (s *ServiceDeskSession) LoadService(sessionID uint, requestedServiceID uint
 			state.ConfirmedDraftVersion = 0
 		}
 		state.PrefillFormData = detail.PrefillSuggestions
+		clearPendingNextRequiredTool(state)
 		if err := s.save(sessionID, state); err != nil {
 			return nil, fmt.Errorf("save state: %w", err)
 		}
@@ -238,6 +248,7 @@ func (s *ServiceDeskSession) LoadService(sessionID uint, requestedServiceID uint
 	if err := state.TransitionTo("service_loaded"); err != nil {
 		return nil, err
 	}
+	clearPendingNextRequiredTool(state)
 	if err := s.save(sessionID, state); err != nil {
 		return nil, fmt.Errorf("save state: %w", err)
 	}
@@ -246,6 +257,7 @@ func (s *ServiceDeskSession) LoadService(sessionID uint, requestedServiceID uint
 
 func (s *ServiceDeskSession) Reset(sessionID uint) (*ServiceDeskCommandResult, error) {
 	state := defaultState()
+	clearPendingNextRequiredTool(state)
 	if err := s.save(sessionID, state); err != nil {
 		return nil, fmt.Errorf("save state: %w", err)
 	}
@@ -269,6 +281,10 @@ func (s *ServiceDeskSession) PrepareDraft(sessionID uint, summary string, formDa
 		return nil, err
 	}
 	if detail.EngineType == "smart" && len(detail.FormFields) == 0 {
+		state.PendingNextRequiredTool = "generate_reference_path"
+		if err := s.save(sessionID, state); err != nil {
+			return nil, fmt.Errorf("save state: %w", err)
+		}
 		payload := map[string]any{
 			"ok":                      false,
 			"ready_for_confirmation":  false,
@@ -286,6 +302,14 @@ func (s *ServiceDeskSession) PrepareDraft(sessionID uint, summary string, formDa
 		return s.result(false, state, payload), nil
 	}
 
+	// Guard: agent retrying draft_prepare without collecting from user.
+	// If we already flagged collect_missing_fields and the new form_data is still
+	// empty/nil, the agent is looping without making progress. Return an explicit
+	// error so the LLM stops retrying and asks the user instead.
+	if pendingNextRequiredTool(state) == "collect_missing_fields" && len(formData) == 0 {
+		return nil, fmt.Errorf("draft_prepare 已阻塞（next_required_tool=collect_missing_fields），禁止在未收到用户新信息的情况下以空 form_data 重复调用；请先向用户逐项追问 missing_required_fields 中的缺口，待用户回复后再重新调用。")
+	}
+
 	formData = normalizeFormDataKeys(formData, detail.FormFields)
 	formData = mergePrefillFormData(formData, state.PrefillFormData)
 	validationContext := buildValidationContext(state.RequestText, summary)
@@ -298,6 +322,7 @@ func (s *ServiceDeskSession) PrepareDraft(sessionID uint, summary string, formDa
 	syncConversationProgress(state, missingRequired)
 
 	if blocking {
+		state.PendingNextRequiredTool = "collect_missing_fields"
 		if err := s.save(sessionID, state); err != nil {
 			return nil, fmt.Errorf("save state: %w", err)
 		}
@@ -327,6 +352,7 @@ func (s *ServiceDeskSession) PrepareDraft(sessionID uint, summary string, formDa
 	if err := state.TransitionTo("awaiting_confirmation"); err != nil {
 		return nil, err
 	}
+	clearPendingNextRequiredTool(state)
 	if err := s.save(sessionID, state); err != nil {
 		return nil, fmt.Errorf("save state: %w", err)
 	}
@@ -388,6 +414,7 @@ func (s *ServiceDeskSession) ConfirmDraft(sessionID uint) (*ServiceDeskCommandRe
 	if err := state.TransitionTo("confirmed"); err != nil {
 		return nil, err
 	}
+	clearPendingNextRequiredTool(state)
 	if err := s.save(sessionID, state); err != nil {
 		return nil, fmt.Errorf("save state: %w", err)
 	}
@@ -467,6 +494,7 @@ func (s *ServiceDeskSession) CreateTicket(sessionID uint, userID uint, requested
 		return nil, fmt.Errorf("create ticket: %w", err)
 	}
 	resetState := defaultState()
+	clearPendingNextRequiredTool(resetState)
 	if err := s.save(sessionID, resetState); err != nil {
 		return nil, fmt.Errorf("save state: %w", err)
 	}
@@ -558,6 +586,7 @@ func (s *ServiceDeskSession) SubmitDraft(sessionID uint, userID uint, req DraftS
 		return nil, fmt.Errorf("create ticket: %w", err)
 	}
 	resetState := defaultState()
+	clearPendingNextRequiredTool(resetState)
 	if err := s.save(sessionID, resetState); err != nil {
 		return nil, fmt.Errorf("save reset state: %w", err)
 	}
@@ -634,25 +663,26 @@ func CommandPayload(result *ServiceDeskCommandResult) map[string]any {
 
 func statePayload(state *ServiceDeskState) map[string]any {
 	return map[string]any{
-		"stage":                   state.Stage,
-		"candidate_service_ids":   state.CandidateServiceIDs,
-		"top_match_service_id":    state.TopMatchServiceID,
-		"confirmed_service_id":    state.ConfirmedServiceID,
-		"confirmation_required":   state.ConfirmationRequired,
-		"loaded_service_id":       state.LoadedServiceID,
-		"service_version_id":      state.ServiceVersionID,
-		"service_version_hash":    state.ServiceVersionHash,
-		"request_text":            state.RequestText,
-		"prefill_form_data":       state.PrefillFormData,
-		"draft_summary":           state.DraftSummary,
-		"draft_form_data":         state.DraftFormData,
-		"draft_version":           state.DraftVersion,
-		"confirmed_draft_version": state.ConfirmedDraftVersion,
-		"missing_fields":          state.MissingFields,
-		"asked_fields":            state.AskedFields,
-		"min_decision_ready":      state.MinDecisionReady,
-		"next_expected_action":    NextExpectedAction(state),
-		"nextExpectedAction":      NextExpectedAction(state),
+		"stage":                      state.Stage,
+		"candidate_service_ids":      state.CandidateServiceIDs,
+		"top_match_service_id":       state.TopMatchServiceID,
+		"confirmed_service_id":       state.ConfirmedServiceID,
+		"confirmation_required":      state.ConfirmationRequired,
+		"loaded_service_id":          state.LoadedServiceID,
+		"service_version_id":         state.ServiceVersionID,
+		"service_version_hash":       state.ServiceVersionHash,
+		"request_text":               state.RequestText,
+		"prefill_form_data":          state.PrefillFormData,
+		"draft_summary":              state.DraftSummary,
+		"draft_form_data":            state.DraftFormData,
+		"draft_version":              state.DraftVersion,
+		"confirmed_draft_version":    state.ConfirmedDraftVersion,
+		"missing_fields":             state.MissingFields,
+		"asked_fields":               state.AskedFields,
+		"min_decision_ready":         state.MinDecisionReady,
+		"pending_next_required_tool": pendingNextRequiredTool(state),
+		"next_expected_action":       NextExpectedAction(state),
+		"nextExpectedAction":         NextExpectedAction(state),
 	}
 }
 

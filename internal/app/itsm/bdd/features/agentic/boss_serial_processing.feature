@@ -52,6 +52,13 @@ Feature: 高风险变更协同申请（Boss）— 两级串行处理
     Then 工单状态为 "completed"
     And 工单的表单数据中包含完整的 change_items 明细表格
 
+  Scenario: 申请人不能认领任意关的工单
+    Given "boss-requester-1" 已创建高风险变更工单，场景为 "requester-1"
+    When 智能引擎执行决策循环
+    Then 工单状态为 "waiting_human"
+    And 当前处理任务分配到岗位部门 "headquarters/serial_reviewer"
+    And 申请人不能认领当前工单
+
   Scenario: 并行工单——两张串行处理工单的处理指派完全隔离
     Given "boss-requester-1" 已创建高风险变更工单 "A"，场景为 "requester-1"
     When 智能引擎执行决策循环

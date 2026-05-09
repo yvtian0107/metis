@@ -34,6 +34,7 @@ func registerSmartSteps(sc *godog.ScenarioContext, bc *bddContext) {
 	sc.When(`^管理员接管该人工处置决策$`, bc.whenAdminConfirmsPendingDecision)
 	sc.When(`^管理员确认该人工处置决策$`, bc.whenAdminConfirmsPendingDecision)
 	sc.When(`^当前活动的被分配人认领并处理完成$`, bc.whenAssigneeClaimsAndProcesss)
+	sc.When(`^当前活动的被分配人认领并处理驳回$`, bc.whenAssigneeRejects)
 	sc.When(`^当前活动的被分配人驳回，意见为 "([^"]*)"$`, bc.whenAssigneeRejectsWithOpinion)
 	sc.When(`^智能引擎再次执行决策循环$`, bc.whenSmartEngineDecisionCycleAgain)
 
@@ -533,6 +534,10 @@ func (bc *bddContext) whenAssigneeClaimsAndProcesss() error {
 	return bc.progressCurrentActivity("completed", "")
 }
 
+func (bc *bddContext) whenAssigneeRejects() error {
+	return bc.progressCurrentActivity("rejected", "")
+}
+
 func (bc *bddContext) whenAssigneeRejectsWithOpinion(opinion string) error {
 	return bc.progressCurrentActivity("rejected", opinion)
 }
@@ -602,6 +607,7 @@ func (bc *bddContext) progressCurrentActivity(outcome, opinion string) error {
 		bc.lastErr = err
 		return fmt.Errorf("smart engine progress: %w", err)
 	}
+	bc.lastCompletedUserID = operatorID
 
 	return bc.db.First(bc.ticket, bc.ticket.ID).Error
 }

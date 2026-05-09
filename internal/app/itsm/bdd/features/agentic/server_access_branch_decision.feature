@@ -53,6 +53,54 @@ Feature: 生产服务器临时访问申请 — 智能引擎分支决策
     And 智能引擎执行决策循环直到工单完成
     Then 工单状态为 "completed"
 
+  @routing-synonyms
+  Scenario: 运维同义词写法路由到运维管理员
+    Given "ops-access-requester" 已创建生产服务器访问工单，场景为 "ops_synonym"
+    When 智能引擎执行决策循环
+    Then 工单状态为 "waiting_human"
+    And 当前活动类型为 "process"
+    And 当前处理任务分配到岗位 "ops_admin"
+
+  @routing-synonyms
+  Scenario: 运维词序变体路由到运维管理员
+    Given "ops-access-requester" 已创建生产服务器访问工单，场景为 "ops_reordered"
+    When 智能引擎执行决策循环
+    Then 工单状态为 "waiting_human"
+    And 当前活动类型为 "process"
+    And 当前处理任务分配到岗位 "ops_admin"
+
+  @routing-synonyms
+  Scenario: 运维长句描述路由到运维管理员
+    Given "ops-access-requester" 已创建生产服务器访问工单，场景为 "ops_long_sentence"
+    When 智能引擎执行决策循环
+    Then 工单状态为 "waiting_human"
+    And 当前活动类型为 "process"
+    And 当前处理任务分配到岗位 "ops_admin"
+
+  @routing-synonyms
+  Scenario: 网络组合描述路由到网络管理员
+    Given "ops-access-requester" 已创建生产服务器访问工单，场景为 "network_combined"
+    When 智能引擎执行决策循环
+    Then 工单状态为 "waiting_human"
+    And 当前活动类型为 "process"
+    And 当前处理任务分配到岗位 "network_admin"
+
+  @routing-synonyms
+  Scenario: 安全组合描述路由到安全管理员
+    Given "ops-access-requester" 已创建生产服务器访问工单，场景为 "security_combined"
+    When 智能引擎执行决策循环
+    Then 工单状态为 "waiting_human"
+    And 当前活动类型为 "process"
+    And 当前处理任务分配到岗位 "security_admin"
+
+  @routing-synonyms
+  Scenario: 未分类事项走默认安全兜底
+    Given "ops-access-requester" 已创建生产服务器访问工单，场景为 "default_security"
+    When 智能引擎执行决策循环
+    Then 工单状态为 "waiting_human"
+    And 当前活动类型为 "process"
+    And 当前处理任务分配到岗位 "security_admin"
+
   Scenario: 运维分支处理的责任边界验证
     Given "ops-access-requester" 已创建生产服务器访问工单，场景为 "ops"
     When 智能引擎执行决策循环

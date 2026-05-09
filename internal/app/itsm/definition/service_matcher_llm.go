@@ -129,6 +129,7 @@ func (m *LLMServiceMatcher) loadCandidates() ([]serviceMatchCandidate, error) {
 	var rows []row
 	if err := m.db.Table("itsm_service_definitions").
 		Where("is_active = ? AND deleted_at IS NULL", true).
+		Where("COALESCE(publish_health_status, '') <> ?", "fail").
 		Select("id, name, description, catalog_id").
 		Order("sort_order ASC, id ASC").
 		Find(&rows).Error; err != nil {

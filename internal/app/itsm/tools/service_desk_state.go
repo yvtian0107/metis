@@ -8,24 +8,25 @@ import (
 
 // ServiceDeskState represents the multi-turn conversation state for the service desk flow.
 type ServiceDeskState struct {
-	Stage                 string         `json:"stage"` // idle|candidates_ready|service_selected|service_loaded|awaiting_confirmation|confirmed|submitted
-	CandidateServiceIDs   []uint         `json:"candidate_service_ids,omitempty"`
-	TopMatchServiceID     uint           `json:"top_match_service_id,omitempty"`
-	ConfirmedServiceID    uint           `json:"confirmed_service_id,omitempty"`
-	ConfirmationRequired  bool           `json:"confirmation_required"`
-	LoadedServiceID       uint           `json:"loaded_service_id,omitempty"`
-	ServiceVersionID      uint           `json:"service_version_id,omitempty"`
-	ServiceVersionHash    string         `json:"service_version_hash,omitempty"`
-	DraftSummary          string         `json:"draft_summary,omitempty"`
-	DraftFormData         map[string]any `json:"draft_form_data,omitempty"`
-	RequestText           string         `json:"request_text,omitempty"`
-	PrefillFormData       map[string]any `json:"prefill_form_data,omitempty"`
-	DraftVersion          int            `json:"draft_version"`
-	ConfirmedDraftVersion int            `json:"confirmed_draft_version"`
-	FieldsHash            string         `json:"fields_hash,omitempty"`
-	MissingFields         []string       `json:"missing_fields,omitempty"`
-	AskedFields           []string       `json:"asked_fields,omitempty"`
-	MinDecisionReady      bool           `json:"min_decision_ready"`
+	Stage                   string         `json:"stage"` // idle|candidates_ready|service_selected|service_loaded|awaiting_confirmation|confirmed|submitted
+	CandidateServiceIDs     []uint         `json:"candidate_service_ids,omitempty"`
+	TopMatchServiceID       uint           `json:"top_match_service_id,omitempty"`
+	ConfirmedServiceID      uint           `json:"confirmed_service_id,omitempty"`
+	ConfirmationRequired    bool           `json:"confirmation_required"`
+	LoadedServiceID         uint           `json:"loaded_service_id,omitempty"`
+	ServiceVersionID        uint           `json:"service_version_id,omitempty"`
+	ServiceVersionHash      string         `json:"service_version_hash,omitempty"`
+	DraftSummary            string         `json:"draft_summary,omitempty"`
+	DraftFormData           map[string]any `json:"draft_form_data,omitempty"`
+	RequestText             string         `json:"request_text,omitempty"`
+	PrefillFormData         map[string]any `json:"prefill_form_data,omitempty"`
+	DraftVersion            int            `json:"draft_version"`
+	ConfirmedDraftVersion   int            `json:"confirmed_draft_version"`
+	FieldsHash              string         `json:"fields_hash,omitempty"`
+	MissingFields           []string       `json:"missing_fields,omitempty"`
+	AskedFields             []string       `json:"asked_fields,omitempty"`
+	MinDecisionReady        bool           `json:"min_decision_ready"`
+	PendingNextRequiredTool string         `json:"pending_next_required_tool,omitempty"`
 }
 
 var validTransitions = map[string][]string{

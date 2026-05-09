@@ -45,7 +45,7 @@ func (bc *bddContext) givenServerAccessTicketCreated(username, caseKey string) e
 
 	payload, ok := serverAccessCasePayloads[caseKey]
 	if !ok {
-		return fmt.Errorf("unknown case key %q, expected one of: ops, network, security, boundary_security", caseKey)
+		return fmt.Errorf("unknown case key %q", caseKey)
 	}
 
 	formJSON, _ := json.Marshal(payload.FormData)
@@ -63,6 +63,14 @@ func (bc *bddContext) givenServerAccessTicketCreated(username, caseKey string) e
 	}
 	if err := bc.db.Create(ticket).Error; err != nil {
 		return fmt.Errorf("create ticket: %w", err)
+	}
+	if err := bc.db.Create(&TicketTimeline{
+		TicketID:   ticket.ID,
+		OperatorID: user.ID,
+		EventType:  "ticket_created",
+		Message:    "BDD server access ticket created",
+	}).Error; err != nil {
+		return fmt.Errorf("create ticket timeline: %w", err)
 	}
 	bc.ticket = ticket
 	return nil

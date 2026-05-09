@@ -7,6 +7,7 @@ import (
 
 	"github.com/casbin/casbin/v2"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"metis/internal/model"
 )
@@ -283,28 +284,26 @@ func seedAdminOrgIdentity(db *gorm.DB) error {
 				continue
 			}
 
-			var existing domain.UserPosition
-			err = tx.Where("user_id = ? AND department_id = ? AND position_id = ?", user.ID, deptID, posID).
-				First(&existing).Error
-			switch {
-			case err == nil:
-				if existing.IsPrimary != identity.Primary {
-					if err := tx.Model(&existing).Update("is_primary", identity.Primary).Error; err != nil {
-						return err
-					}
-				}
-			case errors.Is(err, gorm.ErrRecordNotFound):
-				if err := tx.Create(&domain.UserPosition{
-					UserID:       user.ID,
-					DepartmentID: deptID,
-					PositionID:   posID,
-					IsPrimary:    identity.Primary,
-				}).Error; err != nil {
-					return err
-				}
+			assignment := domain.UserPosition{
+				UserID:       user.ID,
+				DepartmentID: deptID,
+				PositionID:   posID,
+				IsPrimary:    identity.Primary,
+			}
+			result := tx.Clauses(clause.OnConflict{
+				Columns:   []clause.Column{{Name: "user_id"}, {Name: "department_id"}, {Name: "position_id"}},
+				DoNothing: true,
+			}).Create(&assignment)
+			if result.Error != nil {
+				return result.Error
+			}
+			if result.RowsAffected > 0 {
 				slog.Info("seed: assigned admin org identity",
 					"department", identity.DepartmentCode, "position", identity.PositionCode, "primary", identity.Primary)
-			default:
+			}
+			if err := tx.Model(&domain.UserPosition{}).
+				Where("user_id = ? AND department_id = ? AND position_id = ?", user.ID, deptID, posID).
+				Update("is_primary", identity.Primary).Error; err != nil {
 				return err
 			}
 		}

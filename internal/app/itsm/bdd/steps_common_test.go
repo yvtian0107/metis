@@ -52,7 +52,8 @@ type bddContext struct {
 	priority            *Priority
 	ticket              *Ticket
 	tickets             map[string]*Ticket // multi-ticket scenarios, key = alias
-	fallbackUserID      uint               // fallback assignee for participant validation scenarios
+	lastCompletedUserID uint
+	fallbackUserID      uint // fallback assignee for participant validation scenarios
 	slaAssuranceAgentID uint
 	toolCalls           []bddToolCall
 	toolResults         []bddToolResult
@@ -101,6 +102,7 @@ func (bc *bddContext) reset() {
 	bc.positions = make(map[string]*org.Position)
 	bc.departments = make(map[string]*org.Department)
 	bc.tickets = make(map[string]*Ticket)
+	bc.lastCompletedUserID = 0
 	bc.fallbackUserID = 0
 	bc.slaAssuranceAgentID = 0
 	bc.toolCalls = nil
@@ -134,6 +136,7 @@ func (bc *bddContext) reset() {
 		// ITSM — configuration
 		&ServiceCatalog{},
 		&ServiceDefinition{},
+		&ServiceDefinitionVersion{},
 		&ServiceAction{},
 		&Priority{},
 		&SLATemplate{},

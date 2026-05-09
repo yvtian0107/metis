@@ -92,7 +92,7 @@ func AllTools() []ITSMTool {
 		{
 			Name:        "itsm.draft_prepare",
 			DisplayName: "草稿整理",
-			Description: "在向用户展示任何拟提单草稿前必须先调用：登记当前草稿版本，并返回 ready_for_confirmation、missing_required_fields 和 next_required_tool。form_data 必须使用 service_load 返回的字段 key；缺少必填字段时不会进入可确认状态。",
+			Description: "登记草稿并返回 ready_for_confirmation、missing_required_fields 和 next_required_tool。form_data 必须使用 service_load 返回的字段 key 和完整值；ready_for_confirmation=false 时必须停止当轮调用、转向用户追问缺口，禁止在同轮内重复调用此工具（空 form_data 二次重入会返回错误）。",
 			ParametersSchema: json.RawMessage(`{
 				"type": "object",
 				"properties": {
@@ -345,7 +345,7 @@ itsm.service_match ->（需要确认时 itsm.service_confirm）-> itsm.service_l
 - 已有 loaded_service_id 且 next_expected_action 指向 draft_prepare/draft_confirm/validate_participants 时，不要重新 service_match 或 service_load，除非用户明确说“新开/再提/换一个服务”。
 - service_match 是服务选择的唯一事实来源。service_locked=true 时直接 service_load；confirmation_required=true 时先让用户选候选，再 service_confirm。
 - service_load 返回服务规范、字段定义、prefill_suggestions 和 field_collection。后续字段判断以这些工具事实为准。
-- draft_prepare 是展示任何草稿前的唯一入口。ready_for_confirmation=false 时先看 warnings：有 warning 时优先按 warning 追问/纠正；warnings 为空时再追问 missing_required_fields；ready_for_confirmation=true 时才能把草稿展示给用户确认。
+- draft_prepare 是展示任何草稿前的唯一入口，不是探测字段缺口的工具；调用前必须已从用户处取得所有必填字段的值。ready_for_confirmation=false 时：当轮立即停止工具调用，向用户说明缺失内容并逐项追问 missing_required_fields；等用户回复后在下一轮才能重新 draft_prepare；**绝对禁止**在未收到用户新信息的情况下于同一轮内用相同或更少数据重复调用 draft_prepare——工具检测到这一模式时会直接返回错误。ready_for_confirmation=true 时才能把草稿展示给用户确认。
 - 用户确认当前草稿版本后才能 draft_confirm。创建工单前必须 validate_participants，失败时告知 failure_reason，不得 ticket_create。
 - 用户说“再次申请”“再提一张”“新开一张”时，先调用 itsm.new_request，再重新匹配服务，不能复用上一张草稿。
 

@@ -170,18 +170,50 @@ func compareEqual(a, b any) bool {
 }
 
 func containsAny(fieldVal, condVal any) bool {
+	switch field := fieldVal.(type) {
+	case []any:
+		switch cond := condVal.(type) {
+		case []any:
+			for _, fieldItem := range field {
+				fieldStr := fmt.Sprintf("%v", fieldItem)
+				for _, condItem := range cond {
+					if strings.EqualFold(fieldStr, fmt.Sprintf("%v", condItem)) {
+						return true
+					}
+				}
+			}
+		case []string:
+			for _, fieldItem := range field {
+				fieldStr := fmt.Sprintf("%v", fieldItem)
+				for _, condItem := range cond {
+					if strings.EqualFold(fieldStr, condItem) {
+						return true
+					}
+				}
+			}
+		case string:
+			for _, fieldItem := range field {
+				if strings.Contains(strings.ToLower(fmt.Sprintf("%v", fieldItem)), strings.ToLower(cond)) {
+					return true
+				}
+			}
+		}
+		return false
+	}
+
 	fieldStr := fmt.Sprintf("%v", fieldVal)
 
 	switch v := condVal.(type) {
 	case []any:
 		for _, item := range v {
-			if strings.EqualFold(fieldStr, fmt.Sprintf("%v", item)) {
+			itemStr := fmt.Sprintf("%v", item)
+			if strings.EqualFold(fieldStr, itemStr) || strings.Contains(strings.ToLower(fieldStr), strings.ToLower(itemStr)) {
 				return true
 			}
 		}
 	case []string:
 		for _, item := range v {
-			if strings.EqualFold(fieldStr, item) {
+			if strings.EqualFold(fieldStr, item) || strings.Contains(strings.ToLower(fieldStr), strings.ToLower(item)) {
 				return true
 			}
 		}

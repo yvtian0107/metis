@@ -47,6 +47,63 @@ func TestEvaluateCondition_ContainsAny(t *testing.T) {
 	}
 }
 
+func TestEvaluateCondition_ContainsAnyStringFieldAgainstArrayUsesSubstringMatch(t *testing.T) {
+	tests := []struct {
+		name  string
+		field string
+		cond  any
+		want  bool
+	}{
+		{
+			name:  "ops long sentence matches log phrase",
+			field: "生产发布后需要日志排查",
+			cond:  []any{"日志排查", "磁盘清理"},
+			want:  true,
+		},
+		{
+			name:  "ops synonym phrase matches array",
+			field: "需要进程排查",
+			cond:  []any{"进程排障", "进程排查"},
+			want:  true,
+		},
+		{
+			name:  "ops reordered phrase matches array",
+			field: "请协助清理磁盘空间",
+			cond:  []string{"磁盘清理", "清理磁盘"},
+			want:  true,
+		},
+		{
+			name:  "vpn enum remains compatible",
+			field: "network_access_issue",
+			cond:  []string{"online_support", "network_access_issue"},
+			want:  true,
+		},
+		{
+			name:  "unrelated security phrase does not match network",
+			field: "安全审计",
+			cond:  []string{"网络抓包", "连通性诊断"},
+			want:  false,
+		},
+		{
+			name:  "generic patrol does not match ops keywords",
+			field: "普通巡检",
+			cond:  []string{"进程排障", "磁盘清理"},
+			want:  false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := evalContext{"form.access_reason": tt.field}
+			cond := GatewayCondition{Field: "form.access_reason", Operator: "contains_any", Value: tt.cond}
+			got := evaluateCondition(cond, ctx)
+			if got != tt.want {
+				t.Fatalf("evaluateCondition() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestEvaluateCondition_NumericComparisons(t *testing.T) {
 	ctx := evalContext{"ticket.priority_id": float64(3)}
 

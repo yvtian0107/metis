@@ -1,12 +1,12 @@
 {
-  "lastRunAt": "2026-05-06T18:40:00+08:00",
+  "lastRunAt": "2026-05-07T18:00:00+08:00",
   "scope": "system-management",
   "roundResult": {
     "type": "review",
-    "module": "系统设置",
-    "docPath": "docs/system-management/system-settings.md",
+    "module": "认证源",
+    "docPath": "docs/system-management/auth-provider-management.md",
     "changed": false,
-    "reason": "文档与路由、页面结构、中文文案一致，执行最小改动策略。"
+    "reason": "文档与代码能力一致，本轮复核无需改动正文。"
   },
   "discovered": {
     "businessDomains": [

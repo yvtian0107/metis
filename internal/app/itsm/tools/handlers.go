@@ -375,10 +375,20 @@ func requestHash(data map[string]any) string {
 	return fmt.Sprintf("%x", sum[:])
 }
 
+func pendingNextRequiredTool(state *ServiceDeskState) string {
+	if state == nil {
+		return ""
+	}
+	return strings.TrimSpace(state.PendingNextRequiredTool)
+}
+
 // NextExpectedAction returns the next service desk tool/action implied by state.
 func NextExpectedAction(state *ServiceDeskState) string {
 	if state == nil {
 		return "itsm.service_match"
+	}
+	if pending := pendingNextRequiredTool(state); pending != "" {
+		return pending
 	}
 	switch state.Stage {
 	case "idle":

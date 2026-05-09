@@ -35,6 +35,8 @@ func (h *WorkflowGenerateHandler) Generate(c *gin.Context) {
 			status = http.StatusBadRequest
 		} else if errors.Is(err, ErrPathEngineUpstream) {
 			status = http.StatusBadGateway
+		} else if errors.Is(err, ErrWorkflowGeneration) || errors.Is(err, ErrGeneratedReferenceContract) {
+			status = http.StatusUnprocessableEntity
 		}
 		handler.Fail(c, status, err.Error())
 		return

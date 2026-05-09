@@ -23,6 +23,9 @@ func SeedITSM(db *gorm.DB, enforcer *casbin.Enforcer) error {
 	if err := MigrateTicketStatusModel(db); err != nil {
 		return err
 	}
+	if err := migrateServiceDeskSubmissionIndex(db); err != nil {
+		return err
+	}
 
 	if err := seedMenus(db); err != nil {
 		return err
@@ -55,6 +58,67 @@ func SeedITSM(db *gorm.DB, enforcer *casbin.Enforcer) error {
 		return err
 	}
 	return RepairCompletedHumanAssignments(db)
+}
+
+func migrateServiceDeskSubmissionIndex(db *gorm.DB) error {
+	if !db.Migrator().HasTable(&ServiceDeskSubmission{}) {
+		return nil
+	}
+	if !db.Migrator().HasIndex(&ServiceDeskSubmission{}, "idx_itsm_submission_draft") {
+		return db.AutoMigrate(&ServiceDeskSubmission{})
+	}
+
+	legacy, err := hasLegacyServiceDeskSubmissionIndex(db)
+	if err != nil {
+		return err
+	}
+	if !legacy {
+		return nil
+	}
+	if err := db.Migrator().DropIndex(&ServiceDeskSubmission{}, "idx_itsm_submission_draft"); err != nil {
+		return err
+	}
+	if err := db.AutoMigrate(&ServiceDeskSubmission{}); err != nil {
+		return err
+	}
+	slog.Info("seed: rebuilt idx_itsm_submission_draft with request_hash")
+	return nil
+}
+
+func hasLegacyServiceDeskSubmissionIndex(db *gorm.DB) (bool, error) {
+	expected := "(session_id, draft_version, fields_hash, request_hash)"
+	switch db.Dialector.Name() {
+	case "postgres":
+		var indexDef string
+		row := db.Raw(`
+			SELECT indexdef
+			FROM pg_indexes
+			WHERE schemaname = ANY (current_schemas(false))
+			  AND tablename = ?
+			  AND indexname = ?
+			LIMIT 1
+		`, (&ServiceDeskSubmission{}).TableName(), "idx_itsm_submission_draft").Row()
+		if err := row.Scan(&indexDef); err != nil {
+			return false, err
+		}
+		normalized := strings.ToLower(strings.Join(strings.Fields(indexDef), " "))
+		return !strings.Contains(normalized, expected), nil
+	case "sqlite":
+		type indexInfoRow struct {
+			Seqno int    `gorm:"column:seqno"`
+			Name  string `gorm:"column:name"`
+		}
+		var rows []indexInfoRow
+		if err := db.Raw("PRAGMA index_info('idx_itsm_submission_draft')").Scan(&rows).Error; err != nil {
+			return false, err
+		}
+		if len(rows) != 4 {
+			return true, nil
+		}
+		return rows[0].Name != "session_id" || rows[1].Name != "draft_version" || rows[2].Name != "fields_hash" || rows[3].Name != "request_hash", nil
+	default:
+		return false, nil
+	}
 }
 
 func migrateServiceRuntimeVersions(db *gorm.DB) error {
@@ -924,6 +988,7 @@ func seedServiceDefinitions(db *gorm.DB) error {
 	serverAccessFormSchema := `{"version":1,"fields":[{"key":"target_servers","type":"textarea","label":"\u8bbf\u95ee\u670d\u52a1\u5668","description":"\u586b\u5199\u9700\u8981\u4e34\u65f6\u8bbf\u95ee\u7684\u751f\u4ea7\u670d\u52a1\u5668\u3001\u4e3b\u673a\u540d\u3001IP \u6216\u8d44\u6e90\u8303\u56f4\u3002","placeholder":"\u4f8b\u5982\uff1aprod-api-01 / 10.0.8.21\uff0c\u53ef\u586b\u591a\u53f0","required":true,"validation":[{"rule":"required","message":"\u8bf7\u586b\u5199\u8bbf\u95ee\u670d\u52a1\u5668"}],"width":"full","props":{"rows":3}},{"key":"access_window","type":"date_range","label":"\u8bbf\u95ee\u65f6\u6bb5","description":"\u4e34\u65f6\u8bbf\u95ee\u7684\u8d77\u6b62\u65f6\u95f4\u6216\u7ef4\u62a4\u7a97\u53e3\u3002","required":true,"validation":[{"rule":"required","message":"\u8bf7\u9009\u62e9\u8bbf\u95ee\u65f6\u6bb5"}],"width":"half","props":{"withTime":true,"mode":"datetime"}},{"key":"operation_purpose","type":"textarea","label":"\u64cd\u4f5c\u76ee\u7684","description":"\u8bf4\u660e\u672c\u6b21\u767b\u5f55\u6216\u8bbf\u95ee\u8981\u5b8c\u6210\u7684\u5177\u4f53\u64cd\u4f5c\u3002","placeholder":"\u4f8b\u5982\uff1a\u6392\u67e5\u5e94\u7528\u8fdb\u7a0b\u5f02\u5e38\u3001\u6293\u5305\u5b9a\u4f4d\u8fde\u901a\u6027\u95ee\u9898\u3001\u5b89\u5168\u53d6\u8bc1","required":true,"validation":[{"rule":"required","message":"\u8bf7\u586b\u5199\u64cd\u4f5c\u76ee\u7684"}],"width":"full","props":{"rows":3}},{"key":"access_reason","type":"textarea","label":"\u8bbf\u95ee\u539f\u56e0","description":"\u8bf7\u7528\u81ea\u7136\u8bed\u8a00\u8bf4\u660e\u8bbf\u95ee\u539f\u56e0\uff0c\u7cfb\u7edf\u5c06\u7531\u667a\u80fd\u5f15\u64ce\u5224\u65ad\u8fd0\u7ef4\u3001\u7f51\u7edc\u6216\u5b89\u5168\u8def\u7531\u3002","placeholder":"\u4f8b\u5982\uff1a\u751f\u4ea7\u53d1\u5e03\u540e\u9700\u8981\u67e5\u770b\u65e5\u5fd7\uff0c\u6216\u914d\u5408\u7f51\u7edc\u94fe\u8def\u8bca\u65ad\uff0c\u6216\u505a\u5b89\u5168\u5ba1\u8ba1\u53d6\u8bc1","required":true,"validation":[{"rule":"required","message":"\u8bf7\u586b\u5199\u8bbf\u95ee\u539f\u56e0"}],"width":"full","props":{"rows":4}}],"layout":{"columns":2,"sections":[{"title":"\u8bbf\u95ee\u8303\u56f4","fields":["target_servers","access_window"]},{"title":"\u76ee\u7684\u4e0e\u539f\u56e0","fields":["operation_purpose","access_reason"]}]}}`
 	serverAccessWorkflowJSON := `{"nodes":[{"id":"start","type":"start","position":{"x":400,"y":50},"data":{"label":"开始","nodeType":"start"}},{"id":"request","type":"form","position":{"x":400,"y":200},"data":{"label":"填写服务器临时访问申请","nodeType":"form","participants":[{"type":"requester"}],"formSchema":{"fields":[{"key":"target_servers","type":"textarea","label":"访问服务器"},{"key":"access_window","type":"date_range","label":"访问时段"},{"key":"operation_purpose","type":"textarea","label":"操作目的"},{"key":"access_reason","type":"textarea","label":"访问原因"}]}}},{"id":"route","type":"exclusive","position":{"x":400,"y":380},"data":{"label":"访问原因智能参考路由","nodeType":"exclusive"}},{"id":"ops_process","type":"process","position":{"x":120,"y":580},"data":{"label":"运维管理员处理","nodeType":"process","participants":[{"type":"position_department","department_code":"it","position_code":"ops_admin"}]}},{"id":"network_process","type":"process","position":{"x":400,"y":580},"data":{"label":"网络管理员处理","nodeType":"process","participants":[{"type":"position_department","department_code":"it","position_code":"network_admin"}]}},{"id":"security_process","type":"process","position":{"x":680,"y":580},"data":{"label":"安全管理员处理","nodeType":"process","participants":[{"type":"position_department","department_code":"it","position_code":"security_admin"}]}},{"id":"end","type":"end","position":{"x":400,"y":820},"data":{"label":"结束","nodeType":"end"}}],"edges":[{"id":"edge_start_request","source":"start","target":"request"},{"id":"edge_request_route","source":"request","target":"route"},{"id":"edge_route_ops","source":"route","target":"ops_process","data":{"condition":{"field":"form.access_reason","operator":"contains_any","value":["应用发布","进程排障","日志排查","磁盘清理","主机巡检","生产运维操作"],"edge_id":"edge_route_ops"}}},{"id":"edge_route_network","source":"route","target":"network_process","data":{"condition":{"field":"form.access_reason","operator":"contains_any","value":["网络抓包","连通性诊断","ACL调整","负载均衡变更","防火墙策略调整"],"edge_id":"edge_route_network"}}},{"id":"edge_route_security","source":"route","target":"security_process","data":{"condition":{"field":"form.access_reason","operator":"contains_any","value":["安全审计","入侵排查","漏洞修复验证","取证分析","合规检查"],"edge_id":"edge_route_security"}}},{"id":"edge_route_default","source":"route","target":"security_process","data":{"default":true}},{"id":"edge_ops_end","source":"ops_process","target":"end","data":{"outcome":"approved"}},{"id":"edge_ops_rejected","source":"ops_process","target":"request","data":{"outcome":"rejected"}},{"id":"edge_network_end","source":"network_process","target":"end","data":{"outcome":"approved"}},{"id":"edge_network_rejected","source":"network_process","target":"request","data":{"outcome":"rejected"}},{"id":"edge_security_end","source":"security_process","target":"end","data":{"outcome":"approved"}},{"id":"edge_security_rejected","source":"security_process","target":"request","data":{"outcome":"rejected"}}]}`
 
+	bossSerialChangeWorkflowJSON := `{"nodes":[{"id":"start","type":"start","position":{"x":400,"y":50},"data":{"label":"开始","nodeType":"start"}},{"id":"request","type":"form","position":{"x":400,"y":200},"data":{"label":"填写高风险变更申请","nodeType":"form","participants":[{"type":"requester"}],"formSchema":{"fields":[{"key":"subject","type":"text","label":"申请主题"},{"key":"request_category","type":"select","label":"申请类别"},{"key":"risk_level","type":"radio","label":"风险等级"},{"key":"change_window","type":"date_range","label":"变更窗口"},{"key":"impact_scope","type":"textarea","label":"影响范围"},{"key":"rollback_required","type":"select","label":"回滚要求"},{"key":"impact_modules","type":"multi_select","label":"影响模块"},{"key":"change_items","type":"table","label":"变更明细表"}]}}},{"id":"hq_review","type":"process","position":{"x":400,"y":400},"data":{"label":"总部处理人审核","nodeType":"process","participants":[{"type":"position_department","department_code":"headquarters","position_code":"serial_reviewer"}]}},{"id":"ops_review","type":"process","position":{"x":400,"y":600},"data":{"label":"运维管理员处理","nodeType":"process","participants":[{"type":"position_department","department_code":"it","position_code":"ops_admin"}]}},{"id":"end","type":"end","position":{"x":400,"y":800},"data":{"label":"结束","nodeType":"end"}}],"edges":[{"id":"edge_start_request","source":"start","target":"request"},{"id":"edge_request_hq","source":"request","target":"hq_review"},{"id":"edge_hq_approved","source":"hq_review","target":"ops_review","data":{"outcome":"approved"}},{"id":"edge_hq_rejected","source":"hq_review","target":"end","data":{"outcome":"rejected"}},{"id":"edge_ops_approved","source":"ops_review","target":"end","data":{"outcome":"approved"}},{"id":"edge_ops_rejected","source":"ops_review","target":"end","data":{"outcome":"rejected"}}]}`
 	seeds := []serviceSeed{
 		{
 			Name:              "Copilot 账号申请",
@@ -941,6 +1006,7 @@ func seedServiceDefinitions(db *gorm.DB) error {
 			CatalogCode:      "application-platform:release",
 			SLACode:          "infra-change",
 			IntakeFormSchema: bossSerialChangeFormSchema,
+			WorkflowJSON:     bossSerialChangeWorkflowJSON,
 			CollaborationSpec: `员工在 IT 服务台提交高风险变更协同申请时，服务台需要确认申请主题、申请类别、风险等级、期望完成时间、变更窗口、影响范围、回滚要求、影响模块，以及每一项变更明细。
 申请类别包括生产变更、访问授权和应急支持；风险等级包括低、中、高；回滚要求包括需要和不需要；影响模块可选择网关、支付、监控和订单。变更明细需要说明系统、资源、权限级别、生效时段和变更理由，权限级别包括只读和读写。
 申请提交后，先交给总部处理人处理；总部处理人完成后，再交给信息部运维管理员处理。运维管理员完成处理后流程结束。`,

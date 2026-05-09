@@ -5,6 +5,7 @@ import (
 	. "metis/internal/app/itsm/config"
 	. "metis/internal/app/itsm/domain"
 	"strconv"
+	"strings"
 	"testing"
 
 	"gorm.io/gorm"
@@ -138,6 +139,32 @@ func TestLLMServiceMatcher_NoMatchReturnsEmptyMatches(t *testing.T) {
 	}
 	if decision.Kind != tools.MatchDecisionNoMatch || len(matches) != 0 {
 		t.Fatalf("expected no match, got decision=%+v matches=%+v", decision, matches)
+	}
+}
+
+func TestLLMServiceMatcher_ExcludesPublishHealthFailuresFromCandidates(t *testing.T) {
+	db := newTestDB(t)
+	vpn, copilot := seedLLMMatcherCatalogAndServices(t, db)
+	if err := db.Model(&ServiceDefinition{}).Where("id = ?", vpn.ID).Update("publish_health_status", "fail").Error; err != nil {
+		t.Fatalf("mark vpn unhealthy: %v", err)
+	}
+	client := &fakeServiceMatchLLMClient{resp: &llm.ChatResponse{
+		ToolCalls: []llm.ToolCall{{Name: "select_service", Arguments: `{"service_id":` + strconv.FormatUint(uint64(copilot.ID), 10) + `,"confidence":0.92,"reason":"only healthy candidate remains"}`}},
+	}}
+	matcher := newTestLLMServiceMatcher(t, client, db)
+
+	matches, decision, err := matcher.MatchServices(context.Background(), "我要申请 Copilot 账号")
+	if err != nil {
+		t.Fatalf("match services: %v", err)
+	}
+	if decision.SelectedServiceID != copilot.ID {
+		t.Fatalf("expected healthy service to be selected, got %+v", decision)
+	}
+	if len(matches) != 1 || matches[0].ID != copilot.ID {
+		t.Fatalf("expected only healthy service match, got %+v", matches)
+	}
+	if strings.Contains(client.req.Messages[1].Content, "VPN 开通申请") {
+		t.Fatalf("expected unhealthy service to be excluded from model candidates, got %q", client.req.Messages[1].Content)
 	}
 }
 

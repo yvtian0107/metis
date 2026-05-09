@@ -95,6 +95,29 @@ Feature: 高风险变更协同申请（Boss）— Agentic 边界场景
     Then 不得创建申请人补充表单
     And 工单处于驳回终态或已有决策诊断
 
+  Scenario: 次关已存在待处理任务时再次决策不得重复创建
+    Given "boss-requester-1" 已创建高风险变更工单，场景为 "requester-1"
+    When 智能引擎执行决策循环
+    Then 工单状态为 "waiting_human"
+    When 当前活动的被分配人认领并处理完成
+    And 智能引擎再次执行决策循环
+    Then 当前处理任务分配到岗位部门 "it/ops_admin"
+    And 当前岗位部门 "it/ops_admin" 的活跃处理任务数为 1
+    When 智能引擎再次执行决策循环
+    Then 当前活跃人工任务数为 1
+    And 当前岗位部门 "it/ops_admin" 的活跃处理任务数为 1
+
+  Scenario: 次关岗位无人时不得静默卡死
+    Given 次关岗位 "it/ops_admin" 处理人已停用
+    And "boss-requester-1" 已创建高风险变更工单，场景为 "requester-1"
+    When 智能引擎执行决策循环
+    Then 工单状态为 "waiting_human"
+    When 当前活动的被分配人认领并处理完成
+    And 智能引擎再次执行决策循环
+    Then 工单状态不为 "failed"
+    And 当前岗位部门 "it/ops_admin" 的活跃处理任务数为 0
+    And 决策诊断事件已记录
+
   Scenario: 复杂表单异常枚举不驱动乱路由
     Given "boss-requester-1" 已创建高风险变更工单，表单数据为:
       """

@@ -465,6 +465,14 @@ func (s *ServiceDefService) checkReferencePathRisk(svc *ServiceDefinition, decis
 	if decisionMode == "direct_first" && !workflowHasExtractableHints(def) {
 		return &ServiceHealthItem{Key: "reference_path", Label: "参考路径", Status: "warn", Message: "当前为 direct_first 模式，但参考路径无法提取有效运行提示；运行时会退化为纯 AI 推理"}
 	}
+	if contractErrors := validateGeneratedServiceContract(svc.Code, json.RawMessage(svc.WorkflowJSON), json.RawMessage(svc.IntakeFormSchema)); len(contractErrors) > 0 {
+		return &ServiceHealthItem{
+			Key:     "reference_path_contract",
+			Label:   "Reference Path Contract",
+			Status:  "fail",
+			Message: contractErrors[0].Message,
+		}
+	}
 	if issue := s.checkWorkflowActionRisk(svc.ID, def); issue != nil {
 		return issue
 	}

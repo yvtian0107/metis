@@ -26,6 +26,22 @@ var (
 	ErrPathEngineUpstream      = errors.New("参考路径生成引擎上游调用失败")
 )
 
+const bossSerialChangeServiceCode = "boss-serial-change-request"
+
+var (
+	ErrGeneratedReferenceContract = errors.New("generated reference path does not satisfy the service contract")
+	bossRequiredFieldKeys         = []string{
+		"subject",
+		"request_category",
+		"risk_level",
+		"change_window",
+		"impact_scope",
+		"rollback_required",
+		"impact_modules",
+		"change_items",
+	}
+)
+
 type pathEngineConfigProvider interface {
 	PathBuilderRuntimeConfig() (LLMEngineRuntimeConfig, error)
 }
@@ -210,6 +226,134 @@ func (s *WorkflowGenerateService) Generate(ctx context.Context, req *GenerateReq
 
 	// Should not reach here
 	return nil, ErrWorkflowGeneration
+}
+
+func validateGeneratedServiceContract(serviceCode string, workflowJSON json.RawMessage, intakeFormSchema json.RawMessage) []engine.ValidationError {
+	def, parseErr := engine.ParseWorkflowDef(workflowJSON)
+	if parseErr != nil {
+		return []engine.ValidationError{{
+			Level:   "blocking",
+			Message: fmt.Sprintf("generated workflow cannot be parsed: %v", parseErr),
+		}}
+	}
+
+	if serviceCode != bossSerialChangeServiceCode {
+		return nil
+	}
+	if len(intakeFormSchema) == 0 || string(intakeFormSchema) == "null" {
+		return []engine.ValidationError{{Level: "blocking", Message: "BOSS contract requires an intake form schema"}}
+	}
+
+	fieldKeys, err := generatedFormFieldKeys(intakeFormSchema)
+	if err != nil {
+		return []engine.ValidationError{{Level: "blocking", Message: err.Error()}}
+	}
+
+	var errs []engine.ValidationError
+	if !workflowHasFormNode(def) {
+		errs = append(errs, engine.ValidationError{Level: "blocking", Message: "BOSS contract requires a form node"})
+	}
+	if !workflowHasParticipantDrivenNode(def) {
+		errs = append(errs, engine.ValidationError{Level: "blocking", Message: "BOSS contract requires participant-driven approval nodes"})
+	}
+	for _, key := range bossRequiredFieldKeys {
+		if _, ok := fieldKeys[key]; !ok {
+			errs = append(errs, engine.ValidationError{
+				Level:   "blocking",
+				Message: fmt.Sprintf("BOSS contract requires intake form field %q", key),
+			})
+		}
+	}
+	if !workflowHasPositionDepartment(def, "headquarters", "serial_reviewer") {
+		errs = append(errs, engine.ValidationError{
+			Level:   "blocking",
+			Message: "BOSS contract requires a headquarters.serial_reviewer approval node",
+		})
+	}
+	if !workflowHasPositionDepartment(def, "it", "ops_admin") {
+		errs = append(errs, engine.ValidationError{
+			Level:   "blocking",
+			Message: "BOSS contract requires an it.ops_admin approval node",
+		})
+	}
+	return errs
+}
+
+func generatedFormFieldKeys(intakeFormSchema json.RawMessage) (map[string]struct{}, error) {
+	var schema struct {
+		Fields []struct {
+			Key string `json:"key"`
+		} `json:"fields"`
+	}
+	if err := json.Unmarshal(intakeFormSchema, &schema); err != nil {
+		return nil, fmt.Errorf("generated intake form schema is invalid: %w", err)
+	}
+	if len(schema.Fields) == 0 {
+		return nil, errors.New("generated intake form schema must define at least one field")
+	}
+
+	keys := make(map[string]struct{}, len(schema.Fields))
+	for _, field := range schema.Fields {
+		key := strings.TrimSpace(field.Key)
+		if key == "" {
+			return nil, errors.New("generated intake form schema contains an empty field key")
+		}
+		keys[key] = struct{}{}
+	}
+	return keys, nil
+}
+
+func workflowHasFormNode(def *engine.WorkflowDef) bool {
+	if def == nil {
+		return false
+	}
+	for _, node := range def.Nodes {
+		if node.Type == engine.NodeForm {
+			return true
+		}
+	}
+	return false
+}
+
+func workflowHasParticipantDrivenNode(def *engine.WorkflowDef) bool {
+	if def == nil {
+		return false
+	}
+	for _, node := range def.Nodes {
+		if node.Type != engine.NodeForm && node.Type != engine.NodeApprove && node.Type != engine.NodeProcess {
+			continue
+		}
+		data, err := engine.ParseNodeData(node.Data)
+		if err == nil && len(data.Participants) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func workflowHasPositionDepartment(def *engine.WorkflowDef, departmentCode string, positionCode string) bool {
+	if def == nil {
+		return false
+	}
+	for _, node := range def.Nodes {
+		if node.Type != engine.NodeApprove && node.Type != engine.NodeProcess {
+			continue
+		}
+		data, err := engine.ParseNodeData(node.Data)
+		if err != nil {
+			continue
+		}
+		for _, participant := range data.Participants {
+			if participant.Type != "position_department" {
+				continue
+			}
+			if strings.EqualFold(strings.TrimSpace(participant.DepartmentCode), departmentCode) &&
+				strings.EqualFold(strings.TrimSpace(participant.PositionCode), positionCode) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func workflowValidationErrorsLogValue(validationErrors []engine.ValidationError) string {

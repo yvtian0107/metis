@@ -12,10 +12,12 @@ import {
   ArrowLeft,
   ArrowRight,
   Bot,
+  ChevronDown,
   CheckCircle,
   CheckCircle2,
   CircleX,
   Clock,
+  FileText,
   Info,
   Loader2,
   Play,
@@ -55,6 +57,8 @@ import {
 import { Textarea } from "@/components/ui/textarea"
 import { Progress } from "@/components/ui/progress"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { usePermission } from "@/hooks/use-permission"
 import { useAuthStore } from "@/stores/auth"
 import {
@@ -76,8 +80,13 @@ import { TicketStatusBadge } from "../../../components/ticket-status-badge"
 import { WorkflowViewer } from "../../../components/workflow"
 import {
   parseFieldDisplayMeta as parseTicketFieldDisplayMeta,
+  parseFieldDisplaySections,
+  resolveFieldDisplayModel,
   resolveFieldDisplayValue as resolveTicketFieldDisplayValue,
   resolveFieldLabel as resolveTicketFieldLabel,
+  toRecord as toDisplayRecord,
+  type FieldDisplayMeta as TicketFieldDisplayMeta,
+  type FieldDisplayModel,
 } from "./field-display"
 import { buildTicketActionContext } from "./ticket-action-context"
 
@@ -292,6 +301,8 @@ function resolveFieldDisplayValue(
   return compactValue(rawValue)
 }
 
+void [toRecord, parseFieldDisplayMeta, resolveFieldLabel, resolveFieldDisplayValue]
+
 function summarizeDecision(
   plan: DecisionPlan | null,
   fallback?: string | null,
@@ -383,6 +394,297 @@ function EvidenceList({ title, items }: { title: string; items?: unknown[] }) {
   )
 }
 
+function RequestFieldValue({
+  label,
+  model,
+}: {
+  label: string
+  model: FieldDisplayModel
+}) {
+  const [tableOpen, setTableOpen] = useState(false)
+
+  if (model.kind === "tags") {
+    return (
+      <div className="mt-1.5 flex min-h-[32px] flex-wrap content-start gap-2">
+        {model.values.length > 0 ? model.values.map((value) => (
+          <Badge key={`${label}-${value}`} variant="secondary" className="rounded-full px-2.5 py-1 text-xs font-medium">
+            {value}
+          </Badge>
+        )) : (
+          <span className="text-sm text-muted-foreground">-</span>
+        )}
+      </div>
+    )
+  }
+
+  if (model.kind === "long_text") {
+    if (!model.expandable) {
+      return (
+        <p className="mt-1.5 whitespace-pre-wrap text-sm font-medium leading-6 text-foreground">
+          {model.value}
+        </p>
+      )
+    }
+
+    return (
+      <details className="mt-1.5 rounded-xl bg-muted/35 px-3 py-2">
+        <summary className="cursor-pointer list-none text-xs font-medium text-muted-foreground">
+          查看详情
+        </summary>
+        <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-foreground">
+          {model.value}
+        </p>
+      </details>
+    )
+  }
+
+  if (model.kind === "table") {
+    return (
+      <Collapsible open={tableOpen} onOpenChange={setTableOpen}>
+        <div className="mt-2 rounded-2xl bg-muted/30">
+          <div className="flex flex-col gap-2 px-4 py-3 md:flex-row md:items-start md:justify-between">
+            <div className="min-w-0">
+              <p className="text-xs font-medium text-muted-foreground">{model.summaryLabel}</p>
+              <p className="mt-1 text-sm leading-6 text-foreground">
+                {model.summary}
+              </p>
+            </div>
+            <CollapsibleTrigger asChild>
+              <Button type="button" variant="ghost" size="sm" className="h-8 w-fit self-start gap-1.5 px-2 text-xs">
+                查看明细
+                <ChevronDown className={`h-3.5 w-3.5 transition-transform ${tableOpen ? "rotate-180" : ""}`} />
+              </Button>
+            </CollapsibleTrigger>
+          </div>
+
+          <CollapsibleContent className="border-t border-border/35 px-4 py-3">
+            <div className="hidden md:block">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    {model.columns.map((column) => (
+                      <TableHead key={`${label}-${column.key}`}>{column.label}</TableHead>
+                    ))}
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {model.rows.map((row, rowIndex) => (
+                    <TableRow key={`${label}-row-${rowIndex}`}>
+                      {model.columns.map((column) => {
+                        const cell = row.cells.find((item) => item.key === column.key)
+                        return (
+                          <TableCell key={`${label}-${rowIndex}-${column.key}`} className="align-top text-sm leading-6">
+                            <span className="whitespace-pre-wrap break-words">{cell?.value ?? "-"}</span>
+                          </TableCell>
+                        )
+                      })}
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+
+            <div className="space-y-3 md:hidden">
+              {model.rows.map((row, rowIndex) => (
+                <div key={`${label}-mobile-${rowIndex}`} className="rounded-xl border border-border/45 bg-background/55 p-3">
+                  <p className="text-xs font-medium text-muted-foreground">记录 {rowIndex + 1}</p>
+                  <div className="mt-2 grid gap-2">
+                    {row.cells.map((cell) => (
+                      <div key={`${label}-mobile-${rowIndex}-${cell.key}`} className="rounded-lg bg-muted/35 px-3 py-2">
+                        <p className="text-[11px] font-medium text-muted-foreground">{cell.label}</p>
+                        <p className="mt-1 whitespace-pre-wrap break-words text-sm leading-6 text-foreground">
+                          {cell.value}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </CollapsibleContent>
+        </div>
+      </Collapsible>
+    )
+  }
+
+  return (
+    <p className="mt-1.5 text-sm font-medium leading-6 text-foreground">
+      {model.value}
+    </p>
+  )
+}
+
+function isSimpleFieldModel(model: FieldDisplayModel) {
+  if (model.kind === "table") return false
+  if (model.kind === "long_text") return !model.expandable
+  return true
+}
+
+function chunkSimpleFieldEntries<T>(entries: T[]) {
+  const rows: T[][] = []
+  for (let index = 0; index < entries.length; index += 2) {
+    rows.push(entries.slice(index, index + 2))
+  }
+  return rows
+}
+
+function RequestFieldCell({
+  label,
+  model,
+}: {
+  label: string
+  model: FieldDisplayModel
+}) {
+  return (
+    <div className="flex min-h-[88px] flex-col justify-start px-1 py-1">
+      <p className="min-h-[16px] text-[11px] font-medium tracking-[0.08em] text-muted-foreground/90">{label}</p>
+      <RequestFieldValue label={label} model={model} />
+    </div>
+  )
+}
+
+function RequestFieldBlock({
+  label,
+  model,
+}: {
+  label: string
+  model: FieldDisplayModel
+}) {
+  return (
+    <div className="rounded-2xl bg-background/40 px-4 py-3">
+      <p className="min-h-[16px] text-[11px] font-medium tracking-[0.08em] text-muted-foreground/90">{label}</p>
+      {model.kind === "long_text" && model.expandable ? (
+        <>
+          <p className="mt-1.5 line-clamp-4 whitespace-pre-wrap text-sm font-medium leading-6 text-foreground">{model.value}</p>
+          <RequestFieldValue label={label} model={model} />
+        </>
+      ) : (
+        <RequestFieldValue label={label} model={model} />
+      )}
+    </div>
+  )
+}
+
+function RequestFieldsPanel({
+  ticket,
+  activity,
+}: {
+  ticket: TicketItem
+  activity?: ActivityItem | null
+}) {
+  const { t, i18n } = useTranslation("itsm")
+  const record = toDisplayRecord(activity?.formData) ?? toDisplayRecord(ticket.formData)
+  if (!record) return null
+
+  const fieldMeta = {
+    ...parseTicketFieldDisplayMeta(ticket.intakeFormSchema),
+    ...parseTicketFieldDisplayMeta(activity?.formSchema),
+  } satisfies Record<string, TicketFieldDisplayMeta>
+  const locale = i18n.resolvedLanguage || i18n.language || "zh-CN"
+  const schemaSections = parseFieldDisplaySections(activity?.formSchema)
+  const fallbackSections = schemaSections.length > 0 ? schemaSections : parseFieldDisplaySections(ticket.intakeFormSchema)
+  const remainingKeys = new Set(Object.keys(record))
+  const sections: Array<{ title?: string; description?: string; collapsible?: boolean; fields: string[] }> = []
+  for (const section of fallbackSections) {
+    const fields = section.fields.filter((field) => remainingKeys.has(field))
+    fields.forEach((field) => remainingKeys.delete(field))
+    if (fields.length > 0) {
+      sections.push({ ...section, fields })
+    }
+  }
+
+  if (remainingKeys.size > 0) {
+    sections.push({
+      title: locale.startsWith("zh") ? "补充字段" : "Additional fields",
+      fields: [...remainingKeys],
+    })
+  }
+
+  const effectiveSections = sections.length > 0
+    ? sections
+    : [{
+      title: locale.startsWith("zh") ? "申请内容" : "Request payload",
+      fields: Object.keys(record),
+    }]
+
+  return (
+    <section className="workspace-surface rounded-[1.1rem] p-5">
+      <div className="flex flex-col gap-3 border-b border-border/45 pb-4 md:flex-row md:items-start md:justify-between">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 text-base font-semibold">
+            <FileText className="h-4 w-4" />
+            申请内容
+          </div>
+          <p className="mt-1 text-sm text-muted-foreground">
+            按表单结构回看申请信息，复杂字段支持展开查看完整明细。
+          </p>
+        </div>
+        <Badge variant="outline" className="h-fit rounded-full px-3 py-1 text-xs">
+          {Object.keys(record).length} 个字段
+        </Badge>
+      </div>
+
+      <div className="mt-5 space-y-5">
+        {effectiveSections.map((section, sectionIndex) => (
+          <div key={`${section.title ?? "section"}-${sectionIndex}`} className="space-y-4">
+            <div className="flex flex-col gap-1 border-b border-border/25 pb-3">
+              <p className="text-sm font-semibold">{section.title ?? "申请内容"}</p>
+              {section.description && (
+                <p className="text-xs leading-5 text-muted-foreground">{section.description}</p>
+              )}
+            </div>
+            {(() => {
+              const entries = section.fields.map((fieldKey) => ({
+                fieldKey,
+                label: resolveTicketFieldLabel(fieldKey, fieldMeta, t, locale),
+                model: resolveFieldDisplayModel(fieldKey, record[fieldKey], fieldMeta, t, locale),
+              }))
+
+              const blocks: ReactNode[] = []
+              let bufferedSimpleEntries: typeof entries = []
+
+              const flushSimpleEntries = () => {
+                if (bufferedSimpleEntries.length === 0) return
+                const rows = chunkSimpleFieldEntries(bufferedSimpleEntries)
+                blocks.push(
+                  <div key={`${section.title ?? "section"}-${sectionIndex}-simple`} className="space-y-3">
+                    {rows.map((row, rowIndex) => (
+                      <div key={`${section.title ?? "section"}-${sectionIndex}-row-${rowIndex}`} className="grid gap-x-6 gap-y-3 md:grid-cols-2">
+                        {row.map((entry) => (
+                          <RequestFieldCell key={entry.fieldKey} label={entry.label} model={entry.model} />
+                        ))}
+                      </div>
+                    ))}
+                  </div>,
+                )
+                bufferedSimpleEntries = []
+              }
+
+              for (const entry of entries) {
+                if (isSimpleFieldModel(entry.model)) {
+                  bufferedSimpleEntries.push(entry)
+                  continue
+                }
+                flushSimpleEntries()
+                blocks.push(
+                  <RequestFieldBlock
+                    key={entry.fieldKey}
+                    label={entry.label}
+                    model={entry.model}
+                  />,
+                )
+              }
+
+              flushSimpleEntries()
+              return <div className="space-y-3">{blocks}</div>
+            })()}
+          </div>
+        ))}
+      </div>
+    </section>
+  )
+}
+
 function AIEvidencePanel({
   ticket,
   activity,
@@ -392,14 +694,8 @@ function AIEvidencePanel({
   activity?: ActivityItem | null
   plan: DecisionPlan | null
 }) {
-  const { t, i18n } = useTranslation("itsm")
-  const formRecord = toRecord(ticket.formData)
-  const activityFormRecord = toRecord(activity?.formData)
-  const fieldMeta = {
-    ...parseFieldDisplayMeta(activity?.formSchema),
-    ...parseFieldDisplayMeta(ticket.intakeFormSchema),
-  }
-  const locale = i18n.resolvedLanguage || i18n.language || "zh-CN"
+  useTranslation("itsm")
+  const hasFormRecord = Boolean(toDisplayRecord(activity?.formData) ?? toDisplayRecord(ticket.formData))
   const confidence = confidenceOf(activity, plan)
   const confidencePct = confidence == null ? null : Math.round(confidence * 100)
   const firstActivity = plan?.activities?.[0]
@@ -420,7 +716,7 @@ function AIEvidencePanel({
       <div className="mt-4 grid gap-x-8 gap-y-4 border-b border-border/45 pb-4 md:grid-cols-3">
         <DetailItem
           label="判断依据"
-          value={activity?.aiReasoning ? "AI 已记录推理摘要" : formRecord ? "申请字段与运行轨迹" : "流程运行轨迹"}
+          value={activity?.aiReasoning ? "AI 已记录推理摘要" : hasFormRecord ? "申请字段与运行轨迹" : "流程运行轨迹"}
         />
         <DetailItem label="下一步建议" value={nextStepSuggestion} title={nextStepSuggestion} />
         <div className="space-y-1.5">
@@ -469,47 +765,12 @@ function AIEvidencePanel({
           </div>
         )}
 
-        {(formRecord || activityFormRecord) && (
-          <div className="space-y-2 border-t border-border/45 pt-4">
-            <p className="text-sm font-medium">申请字段</p>
-            <div className="grid gap-x-6 gap-y-0.5 md:grid-cols-2">
-              {Object.entries(activityFormRecord ?? formRecord ?? {}).slice(0, 10).map(([key, value]) => {
-                const displayLabel = resolveFieldLabel(key, fieldMeta, t, locale)
-                const displayValue = resolveFieldDisplayValue(key, value, fieldMeta, t, locale)
-                const isLongField = /(remark|description|comment|note|reason|详情|描述|备注|说明|原因)/i.test(key)
-                return (
-                  <div
-                    key={key}
-                    className={`min-w-0 border-b border-border/35 py-3 ${isLongField ? "md:col-span-2" : ""}`}
-                  >
-                    <p className="truncate whitespace-nowrap text-[11px] font-medium text-muted-foreground/90" title={displayLabel}>
-                      {displayLabel}
-                    </p>
-                    {isLongField ? (
-                    <p
-                      className="mt-1 overflow-hidden text-[15px] font-medium leading-6 text-foreground [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2]"
-                      title={displayValue}
-                    >
-                      {displayValue}
-                    </p>
-                  ) : (
-                    <p className="mt-1 truncate whitespace-nowrap text-[15px] font-medium leading-6 text-foreground" title={displayValue}>
-                      {displayValue}
-                    </p>
-                  )}
-                  </div>
-                )
-              })}
-            </div>
-          </div>
-        )}
-
         <EvidenceList title="知识库命中" items={plan?.knowledge_hits ?? activity?.knowledgeHits} />
         <EvidenceList title="工具调用" items={plan?.tool_calls ?? activity?.toolCalls} />
         <EvidenceList title="动作执行" items={plan?.action_executions ?? activity?.actionExecutions} />
         <EvidenceList title="风险标记" items={plan?.risk_flags ?? activity?.riskFlags} />
 
-        {!activity?.aiReasoning && !plan && !formRecord && (
+        {!activity?.aiReasoning && !plan && !hasFormRecord && (
           <p className="text-sm text-muted-foreground">暂无结构化 AI 证据，先查看流程轨迹与审计时间线。</p>
         )}
       </div>
@@ -1097,6 +1358,7 @@ export function Component() {
         <main className="min-w-0 space-y-4">
           <SummaryBand ticket={ticket} owner={owner} nextStep={nextStep} t={t} />
           <AIEvidencePanel ticket={ticket} activity={explanationActivity} plan={plan} />
+          <RequestFieldsPanel ticket={ticket} activity={explanationActivity} />
           <TimelinePanel timeline={timeline} />
           {renderFlowTab(ticket, activities, tokens, t)}
         </main>

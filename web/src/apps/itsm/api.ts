@@ -888,8 +888,45 @@ export interface WorkflowGenerateResponse {
   healthCheck?: ServiceHealthCheck
 }
 
+function normalizeGenerateWorkflowErrorMessage(message: string) {
+  const raw = (message || "").trim()
+  const lower = raw.toLowerCase()
+  if (
+    lower.includes("path builder upstream call failed") &&
+    lower.includes("empty or invalid 502 response body")
+  ) {
+    return "协作路径生成失败：上游模型网关返回了空响应，请检查 AI Provider / 模型网关状态后重试。"
+  }
+  if (
+    lower.includes("path builder upstream call failed") &&
+    (lower.includes("502 bad gateway") || lower.includes("status code: 502"))
+  ) {
+    return "协作路径生成失败：上游模型网关暂时不可用，请稍后重试并检查引擎配置中的 Provider / 模型状态。"
+  }
+  if (lower.includes("path builder upstream call failed") && lower.includes("rate limited")) {
+    return "协作路径生成失败：上游模型服务触发限流，请稍后重试。"
+  }
+  if (lower.includes("path builder upstream call failed") && lower.includes("timed out")) {
+    return "协作路径生成失败：上游模型调用超时，请稍后重试或降低协作规范复杂度。"
+  }
+  if (lower.includes("generated workflow is missing a valid form schema")) {
+    return "协作路径生成失败：生成结果缺少可用的申请表单 schema。请先检查协作规范中的表单字段约束，或补齐服务的申请表单定义后重试。"
+  }
+  if (lower.includes("generated reference path does not satisfy the service contract")) {
+    return "协作路径生成失败：生成结果没有满足当前服务契约。请检查必填字段、审批参与者和参考路径结构后重试。"
+  }
+  return raw
+}
+
 export function generateWorkflow(data: { serviceId: number; collaborationSpec: string }) {
-  return api.post<WorkflowGenerateResponse>("/api/v1/itsm/workflows/generate", data)
+  return api
+    .post<WorkflowGenerateResponse>("/api/v1/itsm/workflows/generate", data)
+    .catch((err: unknown) => {
+      if (err instanceof Error) {
+        throw new Error(normalizeGenerateWorkflowErrorMessage(err.message))
+      }
+      throw err
+    })
 }
 
 export function fetchWorkflowCapabilities() {

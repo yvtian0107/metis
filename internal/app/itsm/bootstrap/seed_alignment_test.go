@@ -1,6 +1,7 @@
 package bootstrap
 
 import (
+	"encoding/json"
 	. "metis/internal/app/itsm/config"
 	. "metis/internal/app/itsm/domain"
 	"metis/internal/app/itsm/prompts"
@@ -225,6 +226,46 @@ func TestBuiltInSmartSeedsAlignParticipantsAndInstallAdminIdentity(t *testing.T)
 			}
 			if svc.Code == "boss-serial-change-request" && strings.Contains(svc.CollaborationSpec, "serial-reviewer") {
 				t.Fatalf("service %s should not reference fixed serial-reviewer user", svc.Code)
+			}
+			if svc.Code == "boss-serial-change-request" {
+				if len(svc.WorkflowJSON) == 0 {
+					t.Fatalf("service %s should seed a golden workflow json", svc.Code)
+				}
+				var workflow struct {
+					Nodes []struct {
+						Type string `json:"type"`
+						Data struct {
+							Participants []struct {
+								Type           string `json:"type"`
+								DepartmentCode string `json:"department_code"`
+								PositionCode   string `json:"position_code"`
+							} `json:"participants"`
+							FormSchema json.RawMessage `json:"formSchema"`
+						} `json:"data"`
+					} `json:"nodes"`
+				}
+				if err := json.Unmarshal([]byte(svc.WorkflowJSON), &workflow); err != nil {
+					t.Fatalf("unmarshal boss workflow: %v", err)
+				}
+				hasFormSchema := false
+				hasSerialReviewer := false
+				hasOpsAdmin := false
+				for _, node := range workflow.Nodes {
+					if node.Type == "form" && len(node.Data.FormSchema) > 0 && string(node.Data.FormSchema) != "null" {
+						hasFormSchema = true
+					}
+					for _, participant := range node.Data.Participants {
+						if participant.Type == "position_department" && participant.DepartmentCode == "headquarters" && participant.PositionCode == "serial_reviewer" {
+							hasSerialReviewer = true
+						}
+						if participant.Type == "position_department" && participant.DepartmentCode == "it" && participant.PositionCode == "ops_admin" {
+							hasOpsAdmin = true
+						}
+					}
+				}
+				if !hasFormSchema || !hasSerialReviewer || !hasOpsAdmin {
+					t.Fatalf("service %s seeded workflow should contain form schema and serial participants", svc.Code)
+				}
 			}
 		}
 	})
