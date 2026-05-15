@@ -130,7 +130,7 @@ func TestActionExecutorExecuteWithConfigRecordsHTTPFailures(t *testing.T) {
 
 	configJSON := fmt.Sprintf(`{"url":%q,"method":"POST","body":"retry body","timeout":5,"retries":0}`, server.URL)
 	executor := NewActionExecutor(db)
-	err := executor.ExecuteWithConfig(context.Background(), 1, 3, 99, "http", configJSON)
+	_, _, err := executor.ExecuteWithConfig(context.Background(), 1, 3, 99, "http", configJSON)
 	if err == nil || !strings.Contains(err.Error(), "HTTP 500") {
 		t.Fatalf("expected HTTP 500 error, got %v", err)
 	}

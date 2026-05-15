@@ -552,7 +552,19 @@ func (e *SmartEngine) applyDBBackupWhitelistGuard(ctx context.Context, tx *gorm.
 		}
 		forceSinglePositionProcessPlan(plan, "db_admin", "预检动作已执行成功，按协作规范交给数据库管理员处理。")
 	case !dbaDone:
-		forceSinglePositionProcessPlan(plan, "db_admin", "预检已完成，协作规范要求先由数据库管理员处理。")
+		// ticketHasSatisfiedPositionProcess only counts positive outcomes.
+		// If db_admin already completed (rejected), avoid forcing another assignment
+		// which would fail validateRejectedRecoveryDecision.
+		dbaCompleted, err := ticketHasCompletedPositionProcess(tx, ticketID, "db_admin")
+		if err != nil {
+			return err
+		}
+		if dbaCompleted {
+			// db_admin rejected — end the ticket without triggering the apply action.
+			forceCompletePlan(plan, "数据库管理员已驳回申请，按协作规范直接结束流程（不触发放行动作）。")
+		} else {
+			forceSinglePositionProcessPlan(plan, "db_admin", "预检已完成，协作规范要求先由数据库管理员处理。")
+		}
 	case !applyDone:
 		if err := e.executeServiceActionOnce(ctx, tx, ticketID, svc, "db_backup_whitelist_apply"); err != nil {
 			return err
@@ -762,11 +774,31 @@ func (e *SmartEngine) executeServiceActionOnce(ctx context.Context, tx *gorm.DB,
 
 	execCtx, cancel := context.WithTimeout(ctx, 120*time.Second)
 	defer cancel()
-	if err := e.actionExecutor.ExecuteWithConfig(execCtx, ticketID, 0, action.ID, action.ActionType, action.ConfigJSON); err != nil {
-		return fmt.Errorf("执行服务动作 %s 失败: %w", actionCode, err)
+	httpStatus, responseBody, execErr := e.actionExecutor.ExecuteWithConfig(execCtx, ticketID, 0, action.ID, action.ActionType, action.ConfigJSON)
+	respPreview := responseBody
+	if len(respPreview) > 256 {
+		respPreview = respPreview[:256] + "…"
 	}
-	e.recordTimeline(tx, ticketID, nil, 0, "ai_decision_action_executed",
-		fmt.Sprintf("AI 决策服务护栏已执行动作：%s", action.Name), "")
+	if execErr != nil {
+		e.recordTimelineWithDetails(tx, ticketID, nil, 0, "ai_decision_action_executed",
+			fmt.Sprintf("AI 决策服务护栏执行动作失败：%s", action.Name),
+			map[string]any{
+				"action_name":      action.Name,
+				"action_code":      actionCode,
+				"http_status":      httpStatus,
+				"response_preview": respPreview,
+				"error":            execErr.Error(),
+			}, "")
+		return fmt.Errorf("执行服务动作 %s 失败: %w", actionCode, execErr)
+	}
+	e.recordTimelineWithDetails(tx, ticketID, nil, 0, "ai_decision_action_executed",
+		fmt.Sprintf("AI 决策服务护栏已执行动作：%s", action.Name),
+		map[string]any{
+			"action_name":      action.Name,
+			"action_code":      actionCode,
+			"http_status":      httpStatus,
+			"response_preview": respPreview,
+		}, "")
 	return nil
 }
 
@@ -2400,6 +2432,22 @@ func (e *SmartEngine) agenticDecision(ctx context.Context, tx *gorm.DB, ticketID
 		actionExecutor:      e.actionExecutor,
 		completedActivityID: completedActivityID,
 		configProvider:      e.configProvider,
+	}
+	// Inject timeline recorder so the execute_action tool can write
+	// ai_decision_action_executed entries for every action the AI runs.
+	toolCtx.recordActionTimeline = func(actionName, actionCode string, httpStatus int, respPreview string, execErr error) {
+		details := map[string]any{
+			"action_name":      actionName,
+			"action_code":      actionCode,
+			"http_status":      httpStatus,
+			"response_preview": respPreview,
+		}
+		msg := fmt.Sprintf("AI 决策已执行动作：%s", actionName)
+		if execErr != nil {
+			details["error"] = execErr.Error()
+			msg = fmt.Sprintf("AI 决策执行动作失败：%s", actionName)
+		}
+		e.recordTimelineWithDetails(tx, ticketID, nil, 0, "ai_decision_action_executed", msg, details, "")
 	}
 	if svc.KnowledgeBaseIDs != "" {
 		var kbIDs []uint

@@ -744,11 +744,11 @@ func TestCreateSmartTicket_StartsDecisioningLifecycleAndQueuesProgressTask(t *te
 	service := testutil.SeedSmartSubmissionService(t, db)
 
 	created, err := ticketSvc.Create(CreateTicketInput{
-		Title:      "VPN 智能提单",
-		Description:"普通入口智能提单",
-		ServiceID:  service.ID,
-		PriorityID: 1,
-		FormData:   JSONField(`{"vpn_account":"smart@example.com","request_kind":"线上支持"}`),
+		Title:       "VPN 智能提单",
+		Description: "普通入口智能提单",
+		ServiceID:   service.ID,
+		PriorityID:  1,
+		FormData:    JSONField(`{"vpn_account":"smart@example.com","request_kind":"线上支持"}`),
 	}, 7)
 	if err != nil {
 		t.Fatalf("create smart ticket: %v", err)
@@ -856,11 +856,11 @@ func TestCreateCatalogClassicCreatesWorkflowWithoutSmartTask(t *testing.T) {
 	service, priority := seedClassicSubmissionService(t, db)
 
 	created, err := ticketSvc.CreateCatalog(CreateTicketInput{
-		Title:      "经典目录提单",
-		Description:"目录入口",
-		ServiceID:  service.ID,
-		PriorityID: priority.ID,
-		FormData:   JSONField(`{"request_kind":"network_support"}`),
+		Title:       "经典目录提单",
+		Description: "目录入口",
+		ServiceID:   service.ID,
+		PriorityID:  priority.ID,
+		FormData:    JSONField(`{"request_kind":"network_support"}`),
 	}, 7)
 	if err != nil {
 		t.Fatalf("create catalog ticket: %v", err)
@@ -1893,11 +1893,11 @@ func TestTicketService_CancelContracts(t *testing.T) {
 			t.Fatalf("create smart ticket: %v", err)
 		}
 		activity := TicketActivity{
-			TicketID:      ticket.ID,
-			Name:          "人工审批",
-			ActivityType:  engine.NodeProcess,
-			Status:        engine.ActivityPending,
-			StartedAt:     ptrTime(time.Now().Add(-10 * time.Minute)),
+			TicketID:     ticket.ID,
+			Name:         "人工审批",
+			ActivityType: engine.NodeProcess,
+			Status:       engine.ActivityPending,
+			StartedAt:    ptrTime(time.Now().Add(-10 * time.Minute)),
 		}
 		if err := db.Create(&activity).Error; err != nil {
 			t.Fatalf("create smart activity: %v", err)
@@ -2489,8 +2489,14 @@ func TestTicketService_AssignmentRoutingContracts(t *testing.T) {
 		if reassigned.ParticipantType != "user" || reassigned.UserID == nil || *reassigned.UserID != 33 || reassigned.AssigneeID == nil || *reassigned.AssigneeID != 33 {
 			t.Fatalf("assignment should retarget current owner, got %+v", reassigned)
 		}
-		if reassigned.PositionID != nil || reassigned.DepartmentID != nil {
-			t.Fatalf("assignment should clear org-scoped participant fields, got %+v", reassigned)
+		// position_id and department_id are intentionally preserved after Assign() so
+		// that deterministic service guards can still identify the completed step by role
+		// (ticketHasSatisfiedPositionProcess uses INNER JOIN on position_id).
+		if reassigned.PositionID == nil || *reassigned.PositionID != positionID {
+			t.Fatalf("assignment should preserve position_id for guard queries, got %+v", reassigned)
+		}
+		if reassigned.DepartmentID == nil || *reassigned.DepartmentID != departmentID {
+			t.Fatalf("assignment should preserve department_id for guard queries, got %+v", reassigned)
 		}
 		if reassigned.Status != AssignmentPending || reassigned.ClaimedAt != nil {
 			t.Fatalf("assignment should return to pending unclaimed state, got %+v", reassigned)

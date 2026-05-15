@@ -3,9 +3,13 @@ package bdd
 // steps_db_backup_test.go — step definitions for the DB backup whitelist BDD scenarios.
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	app "metis/internal/app"
+	ai "metis/internal/app/ai/runtime"
 	. "metis/internal/app/itsm/domain"
+	"metis/internal/app/itsm/engine"
 	"strings"
 	"time"
 
@@ -16,6 +20,7 @@ import (
 func registerDbBackupSteps(sc *godog.ScenarioContext, bc *bddContext) {
 	sc.Given(`^已定义数据库备份白名单临时放行协作规范$`, bc.givenDbBackupCollaborationSpec)
 	sc.Given(`^已基于协作规范发布数据库备份白名单放行服务（智能引擎）$`, bc.givenDbBackupSmartServicePublished)
+	sc.Given(`^已基于静态工作流发布数据库备份白名单放行服务（智能引擎）$`, bc.givenDbBackupStaticSmartServicePublished)
 	sc.Given(`^放行接收端临时失败$`, bc.givenApplyReceiverTemporarilyFails)
 	sc.Given(`^"([^"]*)" 已创建数据库备份白名单放行工单，场景为 "([^"]*)"$`, bc.givenDbBackupTicketCreated)
 	sc.Given(`^"([^"]*)" 已创建数据库备份白名单放行工单 "([^"]*)"，场景为 "([^"]*)"$`, bc.givenDbBackupTicketCreatedWithAlias)
@@ -38,6 +43,20 @@ func registerDbBackupSteps(sc *godog.ScenarioContext, bc *bddContext) {
 	sc.Then(`^数据库备份白名单流程图包含预检和放行动作节点$`, bc.thenDbBackupWorkflowContainsActionNodes)
 
 	sc.When(`^放行接收端恢复成功$`, bc.whenApplyReceiverRecovers)
+
+	// DBW-204 steps
+	sc.Given(`^预检接收端临时失败$`, bc.givenPrecheckReceiverTemporarilyFails)
+	sc.Then(`^预检动作执行失败$`, bc.thenPrecheckActionFailed)
+
+	// DBW-509 steps
+	sc.Then(`^放行动作失败记录包含完整故障信息$`, bc.thenApplyActionFailureRecordContainsDetail)
+
+	// TICK-00109 回归 steps
+	sc.When(`^管理员将当前活动指派给 "([^"]*)"$`, bc.whenAdminAssignsCurrentActivityTo)
+	sc.When(`^被指派人认领并处理完成当前活动$`, bc.whenAssignedUserCompletesCurrentActivity)
+
+	// DBW-407 steps
+	sc.Then(`^当前工单所有活动均已取消$`, bc.thenAllCurrentTicketActivitiesCancelled)
 }
 
 // --- Given steps ---
@@ -558,3 +577,306 @@ func (bc *bddContext) thenActionRecordsIsolated(ticketRefA, ticketRefB string) e
 
 	return nil
 }
+
+// --- DBW-204: Precheck failure steps ---
+
+func (bc *bddContext) givenPrecheckReceiverTemporarilyFails() error {
+	if bc.actionReceiver == nil {
+		return fmt.Errorf("action receiver not initialized")
+	}
+	bc.actionReceiver.SetResponder("/precheck", func(ActionRecord) (int, string) {
+		return 500, `{"status":"error","message":"temporary precheck failure"}`
+	})
+	return nil
+}
+
+func (bc *bddContext) thenPrecheckActionFailed() error {
+	return bc.assertActionExecutionCountAtLeast("db_backup_whitelist_precheck", "failed", 1)
+}
+
+// --- DBW-509: Failure traceability step ---
+
+func (bc *bddContext) thenApplyActionFailureRecordContainsDetail() error {
+	if bc.ticket == nil {
+		return fmt.Errorf("no ticket in context")
+	}
+	action, ok := bc.serviceActions["db_backup_whitelist_apply"]
+	if !ok {
+		return fmt.Errorf("service action %q not found in context", "db_backup_whitelist_apply")
+	}
+	var exec TicketActionExecution
+	if err := bc.db.Where("ticket_id = ? AND service_action_id = ? AND status = ?",
+		bc.ticket.ID, action.ID, "failed").
+		Order("id DESC").First(&exec).Error; err != nil {
+		return fmt.Errorf("no failed execution record for apply action: %w", err)
+	}
+	if strings.TrimSpace(exec.FailureReason) == "" {
+		return fmt.Errorf("failure_reason is empty; expected non-empty (e.g. 'HTTP 500')")
+	}
+	if len(exec.ResponsePayload) == 0 || string(exec.ResponsePayload) == "null" || string(exec.ResponsePayload) == "" {
+		return fmt.Errorf("response_payload is empty; failed action must persist response body for traceability")
+	}
+	return nil
+}
+
+// --- TICK-00109 regression steps ---
+
+// whenAdminAssignsCurrentActivityTo simulates admin Assign (指派), which transfers ownership
+// of the current pending activity to the named user while preserving position/department context.
+func (bc *bddContext) whenAdminAssignsCurrentActivityTo(username string) error {
+	assignee, ok := bc.usersByName[username]
+	if !ok {
+		return fmt.Errorf("user %q not found in context", username)
+	}
+	if bc.ticket == nil {
+		return fmt.Errorf("no ticket in context")
+	}
+	svc := newBDDTicketService(bc)
+	updated, err := svc.Assign(bc.ticket.ID, assignee.ID, 0)
+	if err != nil {
+		bc.lastErr = err
+		return fmt.Errorf("admin assign current activity to %q: %w", username, err)
+	}
+	bc.ticket = updated
+	return nil
+}
+
+// whenAssignedUserCompletesCurrentActivity has the recently assigned user claim and complete
+// the current activity. Used together with whenAdminAssignsCurrentActivityTo.
+func (bc *bddContext) whenAssignedUserCompletesCurrentActivity() error {
+	if bc.ticket == nil {
+		return fmt.Errorf("no ticket in context")
+	}
+	activity, err := bc.getCurrentActivity()
+	if err != nil {
+		return fmt.Errorf("get current activity: %w", err)
+	}
+
+	// Find the assignee from the current assignment.
+	var assignment TicketAssignment
+	if err := bc.db.Where("activity_id = ? AND is_current = true", activity.ID).
+		First(&assignment).Error; err != nil {
+		return fmt.Errorf("load current assignment for activity %d: %w", activity.ID, err)
+	}
+	if assignment.AssigneeID == nil || *assignment.AssigneeID == 0 {
+		return fmt.Errorf("current assignment for activity %d has no assignee_id", activity.ID)
+	}
+	assigneeID := *assignment.AssigneeID
+
+	// Mark as claimed.
+	if err := bc.db.Model(&TicketAssignment{}).
+		Where("id = ?", assignment.ID).
+		Updates(map[string]any{"status": "claimed"}).Error; err != nil {
+		return fmt.Errorf("claim assignment: %w", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	if err := bc.smartEngine.Progress(ctx, bc.db, engine.ProgressParams{
+		TicketID:   bc.ticket.ID,
+		ActivityID: activity.ID,
+		Outcome:    "completed",
+		OperatorID: assigneeID,
+	}); err != nil {
+		bc.lastErr = err
+		return fmt.Errorf("progress current activity as assignee %d: %w", assigneeID, err)
+	}
+	bc.lastCompletedUserID = assigneeID
+	return bc.db.First(bc.ticket, bc.ticket.ID).Error
+}
+
+// --- DBW-407: Cancel step ---
+
+func (bc *bddContext) thenAllCurrentTicketActivitiesCancelled() error {
+	if bc.ticket == nil {
+		return fmt.Errorf("no ticket in context")
+	}
+	var activeCount int64
+	if err := bc.db.Model(&TicketActivity{}).
+		Where("ticket_id = ? AND status = ?", bc.ticket.ID, "active").
+		Count(&activeCount).Error; err != nil {
+		return fmt.Errorf("count active activities: %w", err)
+	}
+	if activeCount > 0 {
+		return fmt.Errorf("expected all activities cancelled, but %d are still active", activeCount)
+	}
+	var pendingCount int64
+	if err := bc.db.Model(&TicketActivity{}).
+		Where("ticket_id = ? AND status = ?", bc.ticket.ID, "pending").
+		Count(&pendingCount).Error; err != nil {
+		return fmt.Errorf("count pending activities: %w", err)
+	}
+	if pendingCount > 0 {
+		return fmt.Errorf("expected all activities cancelled, but %d are still pending", pendingCount)
+	}
+	return nil
+}
+
+// --- Static-workflow service publish (no LLM) ---
+
+// givenDbBackupStaticSmartServicePublished publishes the db backup whitelist service
+// using a hardcoded workflow JSON so that deterministic BDD tests run without LLM.
+// It performs the same setup as publishDbBackupSmartService but skips the LLM call.
+func (bc *bddContext) givenDbBackupStaticSmartServicePublished() error {
+	// 0. Initialize LocalActionReceiver.
+	if bc.actionReceiver == nil {
+		bc.actionReceiver = NewLocalActionReceiver()
+	}
+
+	// 1. ServiceCatalog
+	catalog := &ServiceCatalog{
+		Name:     "数据库服务（确定性）",
+		Code:     "db-services-det",
+		IsActive: true,
+	}
+	if err := bc.db.Create(catalog).Error; err != nil {
+		return fmt.Errorf("create service catalog: %w", err)
+	}
+
+	// 2. Priority
+	priority := &Priority{
+		Name:     "紧急",
+		Code:     "urgent-db-det",
+		Value:    2,
+		Color:    "#f5222d",
+		IsActive: true,
+	}
+	if err := bc.db.Create(priority).Error; err != nil {
+		return fmt.Errorf("create priority: %w", err)
+	}
+	bc.priority = priority
+
+	// 3. Agent
+	agent := &ai.Agent{
+		Name:         "流程决策智能体（确定性）",
+		Type:         "assistant",
+		IsActive:     true,
+		Visibility:   "private",
+		Strategy:     "react",
+		SystemPrompt: decisionAgentSystemPrompt,
+		MaxTokens:    2048,
+		MaxTurns:     1,
+		CreatedBy:    1,
+	}
+	if err := bc.db.Create(agent).Error; err != nil {
+		return fmt.Errorf("create agent: %w", err)
+	}
+	bc.db.Model(agent).Update("temperature", 0)
+
+	// 4. ServiceDefinition (placeholder workflow; replaced after actions are created)
+	svc := &ServiceDefinition{
+		Name:              "数据库备份白名单临时放行（确定性）",
+		Code:              "db-backup-whitelist-det",
+		CatalogID:         catalog.ID,
+		EngineType:        "smart",
+		WorkflowJSON:      JSONField(`{"nodes":[],"edges":[]}`),
+		CollaborationSpec: dbBackupCollaborationSpec,
+		IntakeFormSchema:  JSONField(dbBackupFormSchema),
+		AgentID:           &agent.ID,
+		IsActive:          true,
+	}
+	if err := bc.db.Create(svc).Error; err != nil {
+		return fmt.Errorf("create service definition: %w", err)
+	}
+	bc.service = svc
+
+	// 5. Create service actions
+	precheckConfig, _ := json.Marshal(engine.ActionConfig{
+		URL:     bc.actionReceiver.URL("/precheck"),
+		Method:  "POST",
+		Body:    `{"ticket_code":"{{ticket.code}}","database_name":"{{ticket.form_data.database_name}}","source_ip":"{{ticket.form_data.source_ip}}","whitelist_window":"{{ticket.form_data.whitelist_window}}","access_reason":"{{ticket.form_data.access_reason}}"}`,
+		Timeout: 10,
+		Retries: 0,
+	})
+	precheckAction := &ServiceAction{
+		Name:        "数据库备份白名单预检",
+		Code:        "db_backup_whitelist_precheck",
+		Description: "验证数据库备份白名单放行参数的合法性",
+		ActionType:  "http",
+		ConfigJSON:  JSONField(precheckConfig),
+		ServiceID:   svc.ID,
+		IsActive:    true,
+	}
+	if err := bc.db.Create(precheckAction).Error; err != nil {
+		return fmt.Errorf("create precheck action: %w", err)
+	}
+	bc.serviceActions["db_backup_whitelist_precheck"] = precheckAction
+
+	applyConfig, _ := json.Marshal(engine.ActionConfig{
+		URL:     bc.actionReceiver.URL("/apply"),
+		Method:  "POST",
+		Body:    `{"ticket_code":"{{ticket.code}}","database_name":"{{ticket.form_data.database_name}}","source_ip":"{{ticket.form_data.source_ip}}","whitelist_window":"{{ticket.form_data.whitelist_window}}"}`,
+		Timeout: 10,
+		Retries: 0,
+	})
+	applyAction := &ServiceAction{
+		Name:        "数据库备份白名单放行",
+		Code:        "db_backup_whitelist_apply",
+		Description: "执行数据库备份白名单放行配置",
+		ActionType:  "http",
+		ConfigJSON:  JSONField(applyConfig),
+		ServiceID:   svc.ID,
+		IsActive:    true,
+	}
+	if err := bc.db.Create(applyAction).Error; err != nil {
+		return fmt.Errorf("create apply action: %w", err)
+	}
+	bc.serviceActions["db_backup_whitelist_apply"] = applyAction
+
+	// 6. Build static workflow JSON with real action_id values.
+	staticWorkflow, err := json.Marshal(map[string]any{
+		"nodes": []map[string]any{
+			{"id": "start", "type": "start", "data": map[string]any{"label": "开始", "nodeType": "start"}},
+			{"id": "action_precheck", "type": "action", "data": map[string]any{"label": "备份白名单预检", "nodeType": "action", "action_id": precheckAction.ID}},
+			{"id": "db_process", "type": "process", "data": map[string]any{
+				"label":    "数据库管理员处理",
+				"nodeType": "process",
+				"participants": []map[string]any{
+					{"type": "position_department", "position_code": "db_admin", "department_code": "it"},
+				},
+			}},
+			{"id": "action_apply", "type": "action", "data": map[string]any{"label": "执行备份白名单放行", "nodeType": "action", "action_id": applyAction.ID}},
+			{"id": "end", "type": "end", "data": map[string]any{"label": "结束", "nodeType": "end"}},
+			{"id": "end_rejected", "type": "end", "data": map[string]any{"label": "驳回结束", "nodeType": "end"}},
+		},
+		"edges": []map[string]any{
+			{"id": "e1", "source": "start", "target": "action_precheck"},
+			{"id": "e2", "source": "action_precheck", "target": "db_process"},
+			{"id": "e3", "source": "db_process", "target": "action_apply", "data": map[string]any{"outcome": "completed"}},
+			{"id": "e4", "source": "db_process", "target": "end_rejected", "data": map[string]any{"outcome": "rejected"}},
+			{"id": "e5", "source": "action_apply", "target": "end"},
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("marshal static workflow: %w", err)
+	}
+	if err := bc.db.Model(svc).Update("workflow_json", JSONField(staticWorkflow)).Error; err != nil {
+		return fmt.Errorf("update workflow_json: %w", err)
+	}
+	svc.WorkflowJSON = JSONField(staticWorkflow)
+
+	// 7. Re-wire engines with syncActionSubmitter.
+	orgSvc := &testOrgService{db: bc.db}
+	resolver := engine.NewParticipantResolver(orgSvc)
+	bc.engine = engine.NewClassicEngine(resolver, &noopSubmitter{}, nil)
+	submitter := &syncActionSubmitter{db: bc.db, classicEngine: bc.engine}
+	executor := &dbBackupGuardStubExecutor{}
+	userProvider := &testUserProvider{db: bc.db}
+	bc.smartEngine = engine.NewSmartEngine(executor, nil, userProvider, resolver, submitter, &bddConfigProvider{bc: bc})
+	bc.smartEngine.SetActionExecutor(engine.NewActionExecutor(bc.db))
+
+	return nil
+}
+
+// dbBackupGuardStubExecutor is a deterministic executor that returns a minimal dummy plan.
+// The db_backup whitelist guard will override this plan; no LLM call is made.
+type dbBackupGuardStubExecutor struct{}
+
+func (e *dbBackupGuardStubExecutor) Execute(_ context.Context, _ uint, req app.AIDecisionRequest) (*app.AIDecisionResponse, error) {
+	// Return minimal JSON so parseDecisionPlan succeeds; the guard overrides it.
+	content := `{"next_step_type":"process","activities":[],"reasoning":"db-backup-guard-stub","confidence":0.9,"execution_mode":"single"}`
+	return &app.AIDecisionResponse{Content: content, Turns: 1}, nil
+}
+
+var _ app.AIDecisionExecutor = (*dbBackupGuardStubExecutor)(nil)

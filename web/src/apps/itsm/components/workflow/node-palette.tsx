@@ -12,6 +12,7 @@ import { fetchServiceActions } from "../../api"
 import type { WorkflowCapability } from "../../contract"
 import { itsmQueryKeys } from "../../query-keys"
 import type { FormField, FormSchema } from "../form-engine"
+import { formatServiceActionType } from "../service-action-types"
 
 interface NodePaletteProps {
   serviceId?: number
@@ -122,7 +123,7 @@ export function NodePalette({ serviceId, nodes = [], intakeFormSchema, workflowC
                 <div className="truncate text-xs font-medium">{action.name}</div>
                 <div className="mt-1 flex items-center justify-between gap-2">
                   <span className="truncate font-mono text-[10px] text-muted-foreground">{action.code}</span>
-                  <Badge variant="outline" className="h-4 px-1.5 text-[10px]">{action.actionType}</Badge>
+                  <Badge variant="outline" className="h-4 px-1.5 text-[10px]">{formatServiceActionType(action.actionType, t)}</Badge>
                 </div>
               </div>
             ))}

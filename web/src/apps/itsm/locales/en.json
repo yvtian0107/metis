@@ -186,6 +186,7 @@
     "name": "Name",
     "code": "Code",
     "actionType": "Action Type",
+    "webhook": "Webhook",
     "config": "Configuration",
     "empty": "No actions",
     "emptyHint": "Click \"New Action\" to add one",

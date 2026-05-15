@@ -103,6 +103,15 @@ var dbBackupCasePayloads = map[string]dbBackupCasePayload{
 			"access_reason":    "生产数据库备份任务需要临时放行白名单，并验证失败后恢复重试。",
 		},
 	},
+	"precheck-failure": {
+		Summary: "数据库备份白名单临时放行申请：预检接口返回失败后阻断主链路。",
+		FormData: map[string]any{
+			"database_name":    "prod-mysql-99",
+			"source_ip":        "10.20.30.99",
+			"whitelist_window": "2026-05-21 22:00:00 ~ 2026-05-21 23:00:00",
+			"access_reason":    "预检失败阻断放行链路验证场景。",
+		},
+	},
 }
 
 // generateDbBackupWorkflow calls the LLM to generate a db backup whitelist workflow JSON

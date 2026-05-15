@@ -26,6 +26,7 @@ import {
   ShieldCheck,
   UserPlus,
   XCircle,
+  Zap,
   type LucideIcon,
 } from "lucide-react"
 import { toast } from "sonner"
@@ -104,9 +105,10 @@ const TIMELINE_EVENT_STYLE: Record<string, { icon: LucideIcon; bg: string; fg: s
   workflow_started:      { icon: Play, bg: "bg-blue-100", fg: "text-blue-600" },
   workflow_completed:    { icon: CheckCircle, bg: "bg-green-100", fg: "text-green-600" },
   activity_completed:    { icon: CheckCircle, bg: "bg-green-100", fg: "text-green-600" },
-  ai_decision_pending:   { icon: Bot, bg: "bg-amber-100", fg: "text-amber-600" },
-  ai_decision_executed:  { icon: Bot, bg: "bg-green-100", fg: "text-green-600" },
-  ai_decision_failed:    { icon: AlertTriangle, bg: "bg-red-100", fg: "text-red-600" },
+  ai_decision_pending:           { icon: Bot, bg: "bg-amber-100", fg: "text-amber-600" },
+  ai_decision_executed:          { icon: Bot, bg: "bg-green-100", fg: "text-green-600" },
+  ai_decision_failed:            { icon: AlertTriangle, bg: "bg-red-100", fg: "text-red-600" },
+  ai_decision_action_executed:   { icon: Zap, bg: "bg-green-100", fg: "text-green-600" },
   ai_disabled:           { icon: AlertTriangle, bg: "bg-amber-100", fg: "text-amber-600" },
   ai_retry:              { icon: RotateCcw, bg: "bg-amber-100", fg: "text-amber-600" },
   override_jump:         { icon: ArrowRight, bg: "bg-orange-100", fg: "text-orange-600" },
@@ -803,6 +805,30 @@ function TimelinePanel({ timeline }: { timeline: TimelineItem[] }) {
                     <p className="mt-0.5 text-xs text-muted-foreground">
                       {event.operatorName} · {formatDate(event.createdAt)}
                     </p>
+                    {event.eventType === "ai_decision_action_executed" && event.details != null && (() => {
+                      const d = toRecord(event.details) ?? toRecord(
+                        (() => { try { return JSON.parse(event.details as unknown as string) } catch { return null } })()
+                      )
+                      if (!d) return null
+                      const httpStatus = d["http_status"] as number | undefined
+                      const respPreview = d["response_preview"] as string | undefined
+                      const errMsg = d["error"] as string | undefined
+                      if (!httpStatus && !respPreview && !errMsg) return null
+                      return (
+                        <details className="mt-1.5">
+                          <summary className="cursor-pointer text-xs text-muted-foreground hover:text-foreground">
+                            {httpStatus ? `HTTP ${httpStatus}` : "执行详情"}
+                          </summary>
+                          <div className="mt-1 rounded-md bg-muted/50 p-2.5 text-xs leading-relaxed space-y-1">
+                            {httpStatus != null && <p><span className="font-medium">状态码：</span>{httpStatus}</p>}
+                            {errMsg && <p className="text-red-600"><span className="font-medium">错误：</span>{errMsg}</p>}
+                            {respPreview && (
+                              <p className="break-all whitespace-pre-wrap"><span className="font-medium">响应：</span>{respPreview}</p>
+                            )}
+                          </div>
+                        </details>
+                      )
+                    })()}
                     {event.reasoning && (
                       <details className="mt-1.5">
                         <summary className="cursor-pointer text-xs text-muted-foreground hover:text-foreground">

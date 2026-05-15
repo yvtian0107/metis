@@ -369,10 +369,10 @@ func (s *TicketService) createAgentTicket(ctx context.Context, input CreateTicke
 				return errSubmissionAlreadyExists
 			default:
 				if err := tx.Model(&existing).Updates(map[string]any{
-					"ticket_id":     0,
-					"status":        "submitting",
-					"submitted_by":  req.UserID,
-					"submitted_at":  time.Now(),
+					"ticket_id":    0,
+					"status":       "submitting",
+					"submitted_by": req.UserID,
+					"submitted_at": time.Now(),
 				}).Error; err != nil {
 					return err
 				}
@@ -1658,12 +1658,15 @@ func (s *TicketService) Assign(id uint, assigneeID uint, operatorID uint) (*Tick
 				Updates(map[string]any{
 					"participant_type": "user",
 					"user_id":          assigneeID,
-					"position_id":      nil,
-					"department_id":    nil,
-					"assignee_id":      assigneeID,
-					"status":           AssignmentPending,
-					"claimed_at":       nil,
-					"is_current":       true,
+					// position_id and department_id are intentionally preserved so that
+					// deterministic service guards (e.g. applyDBBackupWhitelistGuard) can
+					// still recognise this activity as having satisfied the required role,
+					// even though the actual processing person is a named user rather than
+					// a position-matched candidate.
+					"assignee_id": assigneeID,
+					"status":      AssignmentPending,
+					"claimed_at":  nil,
+					"is_current":  true,
 				}).Error; err != nil {
 				return err
 			}
@@ -1767,10 +1770,10 @@ func (s *TicketService) Cancel(id uint, reason string, operatorID uint) (*Ticket
 			}
 		}
 		updates := map[string]any{
-			"status":      TicketStatusCancelled,
-			"outcome":     TicketOutcomeCancelled,
-			"finished_at": now,
-			"assignee_id": nil,
+			"status":              TicketStatusCancelled,
+			"outcome":             TicketOutcomeCancelled,
+			"finished_at":         now,
+			"assignee_id":         nil,
 			"current_activity_id": nil,
 		}
 		if err := s.ticketRepo.UpdateInTx(tx, id, updates); err != nil {

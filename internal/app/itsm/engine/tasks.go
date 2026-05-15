@@ -350,7 +350,7 @@ func HandleSmartRecovery(db *gorm.DB, smartEngine *SmartEngine) func(ctx context
 
 		if len(tickets) == 0 {
 			slog.Info("smart recovery: no orphaned decisioning smart tickets found")
-			return nil
+			return recoverSuspendedTickets(ctx, db, smartEngine)
 		}
 
 		recovered := 0

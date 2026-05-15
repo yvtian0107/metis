@@ -108,6 +108,66 @@ func TestApplyDBBackupWhitelistGuardCompletesAfterDBAdminAndApply(t *testing.T) 
 	}
 }
 
+// TestApplyDBBackupWhitelistGuardRecognizesAssignCompletion is a regression test
+// for the bug in TICK-00109: when an admin uses the "Assign" operation to take
+// over a db_admin step, the Assign() call used to clear position_id/department_id.
+// The guard's ticketHasSatisfiedPositionProcess INNER-JOINs on position_id, so a
+// NULL value caused it to conclude the db_admin step had never happened, routing
+// the ticket back to db_admin instead of executing the apply action.
+//
+// After the fix, Assign() preserves position_id and department_id, so the guard
+// correctly recognises the step as completed even though participant_type="user".
+func TestApplyDBBackupWhitelistGuardRecognizesAssignCompletion(t *testing.T) {
+	db := newSmartGuardDB(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer server.Close()
+
+	service := createDBBackupGuardService(t, db, server.URL)
+	ticket := ticketModel{
+		ID:        44,
+		ServiceID: service.ID,
+		Status:    TicketStatusDecisioning,
+		FormData:  validDBBackupFormData,
+	}
+	if err := db.Create(&ticket).Error; err != nil {
+		t.Fatalf("create ticket: %v", err)
+	}
+	// precheck already done
+	if err := db.Create(&actionExecutionModel{TicketID: ticket.ID, ServiceActionID: 8, Status: "success"}).Error; err != nil {
+		t.Fatalf("seed precheck execution: %v", err)
+	}
+	// db_admin step completed by admin via Assign() — participant_type="user" but
+	// position_id/department_id preserved (positionID=1 maps to db_admin in test DB)
+	const adminUserID uint = 99
+	seedCompletedUserAssignedPositionProcess(t, db, ticket.ID, 200, 1, 1, adminUserID, ActivityApproved)
+
+	engine := &SmartEngine{actionExecutor: NewActionExecutor(db)}
+	plan := &DecisionPlan{NextStepType: NodeProcess, Confidence: 0.2}
+	if err := engine.applyDBBackupWhitelistGuard(context.Background(), db, ticket.ID, plan, &service); err != nil {
+		t.Fatalf("apply db backup whitelist guard: %v", err)
+	}
+
+	// Guard should advance to "complete" (execute apply action then end), not re-route to db_admin.
+	if plan.NextStepType != "complete" {
+		t.Fatalf("expected complete plan when db_admin step was processed via Assign, got nextStepType=%q (plan=%+v)", plan.NextStepType, plan)
+	}
+	if len(plan.Activities) != 0 {
+		t.Fatalf("expected no pending activities in complete plan, got %+v", plan.Activities)
+	}
+
+	// Apply action must have been executed.
+	var executions []actionExecutionModel
+	if err := db.Where("ticket_id = ?", ticket.ID).Order("id asc").Find(&executions).Error; err != nil {
+		t.Fatalf("list executions: %v", err)
+	}
+	if len(executions) != 2 || executions[1].ServiceActionID != 9 || executions[1].Status != "success" {
+		t.Fatalf("expected apply execution after assign-completed db_admin step, got %+v", executions)
+	}
+}
+
 func TestApplyBossSerialChangeGuardFollowsRequiredTwoStageSequence(t *testing.T) {
 	t.Run("routes to headquarters first", func(t *testing.T) {
 		db := newSmartGuardDB(t)
@@ -325,7 +385,7 @@ func TestExecuteServiceActionOnceHonorsCacheSnapshotAndMissingExecutor(t *testin
 			t.Fatalf("create ticket: %v", err)
 		}
 		svc := &serviceModel{
-			ID: 8,
+			ID:          8,
 			ActionsJSON: fmt.Sprintf(`[{"id":31,"code":"db_backup_whitelist_apply","name":"放行","description":"snapshot","actionType":"http","configJson":{"url":%q,"method":"POST","body":"{}","timeout":5,"retries":0},"isActive":true}]`, server.URL),
 		}
 		engine := &SmartEngine{actionExecutor: NewActionExecutor(db)}
@@ -430,6 +490,38 @@ func seedCompletedPositionProcess(t *testing.T, db *gorm.DB, ticketID, activityI
 		Status:          "completed",
 	}).Error; err != nil {
 		t.Fatalf("create completed assignment: %v", err)
+	}
+}
+
+// seedCompletedUserAssignedPositionProcess simulates the outcome of Assign():
+// participant_type is "user" (a named user processed the step), but position_id
+// and department_id are still set to the original role context.  This is the
+// correct state after the Phase-1 fix to Assign().
+func seedCompletedUserAssignedPositionProcess(t *testing.T, db *gorm.DB, ticketID, activityID, positionID, departmentID, userAssigneeID uint, outcome string) {
+	t.Helper()
+
+	activity := activityModel{
+		ID:                activityID,
+		TicketID:          ticketID,
+		Name:              "处理",
+		ActivityType:      NodeProcess,
+		Status:            HumanActivityResultStatus(outcome),
+		TransitionOutcome: outcome,
+	}
+	if err := db.Create(&activity).Error; err != nil {
+		t.Fatalf("create completed activity: %v", err)
+	}
+	if err := db.Create(&assignmentModel{
+		TicketID:        ticketID,
+		ActivityID:      activity.ID,
+		ParticipantType: "user", // Assign() sets this to "user"
+		UserID:          &userAssigneeID,
+		PositionID:      &positionID,   // preserved — not cleared by Assign()
+		DepartmentID:    &departmentID, // preserved — not cleared by Assign()
+		AssigneeID:      &userAssigneeID,
+		Status:          "completed",
+	}).Error; err != nil {
+		t.Fatalf("create completed user-assigned assignment: %v", err)
 	}
 }
 

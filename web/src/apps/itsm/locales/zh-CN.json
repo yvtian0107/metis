@@ -186,6 +186,7 @@
     "name": "动作名称",
     "code": "动作编码",
     "actionType": "动作类型",
+    "webhook": "Webhook",
     "config": "配置",
     "empty": "暂无动作",
     "emptyHint": "点击「新增动作」添加",

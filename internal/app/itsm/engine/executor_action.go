@@ -12,8 +12,9 @@ import (
 	"strings"
 	"time"
 
-	"gorm.io/gorm"
 	"metis/internal/app/itsm/domain"
+
+	"gorm.io/gorm"
 )
 
 // ActionExecutor handles HTTP webhook execution for action nodes.
@@ -37,23 +38,24 @@ func (e *ActionExecutor) Execute(ctx context.Context, ticketID, activityID, acti
 		return fmt.Errorf("action %d not found: %w", actionID, err)
 	}
 
-	return e.ExecuteWithConfig(ctx, ticketID, activityID, actionID, action.ActionType, action.ConfigJSON)
+	_, _, err := e.ExecuteWithConfig(ctx, ticketID, activityID, actionID, action.ActionType, action.ConfigJSON)
+	return err
 }
 
-func (e *ActionExecutor) ExecuteWithConfig(ctx context.Context, ticketID, activityID, actionID uint, actionType, configJSON string) error {
-	normalized, err := domain.NormalizeServiceActionConfig(actionType, domain.JSONField(configJSON))
-	if err != nil {
-		return fmt.Errorf("invalid action config: %w", err)
+func (e *ActionExecutor) ExecuteWithConfig(ctx context.Context, ticketID, activityID, actionID uint, actionType, configJSON string) (httpStatus int, responseBody string, err error) {
+	normalized, nErr := domain.NormalizeServiceActionConfig(actionType, domain.JSONField(configJSON))
+	if nErr != nil {
+		return 0, "", fmt.Errorf("invalid action config: %w", nErr)
 	}
 	var config domain.ServiceActionHTTPConfig
-	if err := json.Unmarshal(normalized, &config); err != nil {
-		return fmt.Errorf("invalid action config: %w", err)
+	if uErr := json.Unmarshal(normalized, &config); uErr != nil {
+		return 0, "", fmt.Errorf("invalid action config: %w", uErr)
 	}
 
 	// Load ticket for template variable substitution
 	var ticket ticketModel
-	if err := e.db.First(&ticket, ticketID).Error; err != nil {
-		return fmt.Errorf("ticket %d not found: %w", ticketID, err)
+	if tErr := e.db.First(&ticket, ticketID).Error; tErr != nil {
+		return 0, "", fmt.Errorf("ticket %d not found: %w", ticketID, tErr)
 	}
 
 	// Replace template variables in body
@@ -61,24 +63,28 @@ func (e *ActionExecutor) ExecuteWithConfig(ctx context.Context, ticketID, activi
 
 	// Execute with retry
 	var lastErr error
+	var lastStatus int
+	var lastRespBody string
 	for attempt := 0; attempt <= config.Retries; attempt++ {
 		if attempt > 0 {
 			// Exponential backoff: 2^attempt seconds
 			backoff := time.Duration(math.Pow(2, float64(attempt))) * time.Second
 			select {
 			case <-ctx.Done():
-				return ctx.Err()
+				return 0, "", ctx.Err()
 			case <-time.After(backoff):
 			}
 		}
 
-		status, respBody, err := e.doHTTPRequest(ctx, config, body)
+		status, respBody, reqErr := e.doHTTPRequest(ctx, config, body)
+		lastStatus = status
+		lastRespBody = respBody
 		execStatus := "success"
 		failureReason := ""
-		if err != nil {
+		if reqErr != nil {
 			execStatus = "failed"
-			failureReason = err.Error()
-			lastErr = err
+			failureReason = reqErr.Error()
+			lastErr = reqErr
 		} else if status < 200 || status >= 300 {
 			execStatus = "failed"
 			failureReason = fmt.Sprintf("HTTP %d", status)
@@ -101,14 +107,14 @@ func (e *ActionExecutor) ExecuteWithConfig(ctx context.Context, ticketID, activi
 		e.db.Create(exec)
 
 		if lastErr == nil {
-			return nil
+			return lastStatus, lastRespBody, nil
 		}
 
 		slog.Warn("action execution failed, retrying",
 			"ticketID", ticketID, "actionID", actionID, "attempt", attempt, "error", lastErr)
 	}
 
-	return lastErr
+	return lastStatus, lastRespBody, lastErr
 }
 
 func (e *ActionExecutor) doHTTPRequest(ctx context.Context, config domain.ServiceActionHTTPConfig, body string) (int, string, error) {

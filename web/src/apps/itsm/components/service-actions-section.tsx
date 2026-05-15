@@ -45,6 +45,11 @@ import {
 } from "../api"
 import { itsmQueryKeys } from "../query-keys"
 import { parseServiceActionConfigInput } from "./service-action-config"
+import {
+  formatServiceActionType,
+  SERVICE_ACTION_TYPE_HTTP,
+  SERVICE_ACTION_TYPE_OPTIONS,
+} from "./service-action-types"
 
 function useActionSchema() {
   const { t } = useTranslation("itsm")
@@ -95,7 +100,7 @@ export function ServiceActionsSection({
   const form = useForm<ActionFormValues>({
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     resolver: zodResolver(schema as any),
-    defaultValues: { name: "", code: "", actionType: "webhook", configJson: "" },
+    defaultValues: { name: "", code: "", actionType: SERVICE_ACTION_TYPE_HTTP, configJson: "" },
   })
 
   useEffect(() => {
@@ -108,7 +113,7 @@ export function ServiceActionsSection({
           configJson: editing.configJson ? JSON.stringify(editing.configJson, null, 2) : "",
         })
       } else {
-        form.reset({ name: "", code: "", actionType: "webhook", configJson: "" })
+        form.reset({ name: "", code: "", actionType: SERVICE_ACTION_TYPE_HTTP, configJson: "" })
       }
     }
   }, [formOpen, editing, form])
@@ -208,7 +213,7 @@ export function ServiceActionsSection({
                 <TableRow key={item.id}>
                   <TableCell className="font-medium">{item.name}</TableCell>
                   <TableCell className="text-sm text-muted-foreground">{item.code}</TableCell>
-                  <TableCell className="text-sm">{item.actionType}</TableCell>
+                  <TableCell className="text-sm">{formatServiceActionType(item.actionType, t)}</TableCell>
                   <DataTableActionsCell>
                     <DataTableActions>
                       {canUpdate && (
@@ -266,9 +271,11 @@ export function ServiceActionsSection({
                   <Select onValueChange={field.onChange} value={field.value}>
                     <FormControl><SelectTrigger><SelectValue /></SelectTrigger></FormControl>
                     <SelectContent>
-                      <SelectItem value="webhook">Webhook</SelectItem>
-                      <SelectItem value="email">Email</SelectItem>
-                      <SelectItem value="notification">Notification</SelectItem>
+                      {SERVICE_ACTION_TYPE_OPTIONS.map((option) => (
+                        <SelectItem key={option.value} value={option.value}>
+                          {t(option.labelKey)}
+                        </SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                   <FormMessage />

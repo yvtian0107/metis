@@ -9,6 +9,7 @@ import (
 	"metis/internal/app/itsm/engine"
 	"metis/internal/database"
 	"metis/internal/model"
+
 	"gorm.io/gorm"
 )
 
@@ -871,6 +872,92 @@ func TestTicketService_RecoveryAndOverrideContracts(t *testing.T) {
 			t.Fatalf("expected no assignment for explicit zero assignee override, got %d", assignmentCount)
 		}
 	})
+}
+
+// TestAssignPreservesPositionContext is a regression test for the bug in TICK-00109.
+// Assign() must NOT clear position_id / department_id so that deterministic service
+// guards (e.g. applyDBBackupWhitelistGuard) can still recognise the completed step
+// via their INNER JOIN on position_id.
+func TestAssignPreservesPositionContext(t *testing.T) {
+	db := newTestDB(t)
+	svc := newSubmissionTicketService(t, db)
+	service := testutilSeedSmartTicketService(t, db)
+
+	positionID := uint(1)
+	departmentID := uint(1)
+	originalAssignee := uint(10)
+	newAssignee := uint(20)
+
+	ticket := Ticket{
+		Code:        "TICK-ASSIGN-PRESERVE-POS",
+		Title:       "assign preserves position",
+		ServiceID:   service.ID,
+		EngineType:  "smart",
+		Status:      TicketStatusWaitingHuman,
+		PriorityID:  1,
+		RequesterID: 7,
+	}
+	if err := db.Create(&ticket).Error; err != nil {
+		t.Fatalf("create ticket: %v", err)
+	}
+
+	activity := TicketActivity{
+		TicketID:     ticket.ID,
+		Name:         "db_admin 处理",
+		ActivityType: engine.NodeProcess,
+		Status:       engine.ActivityPending,
+	}
+	if err := db.Create(&activity).Error; err != nil {
+		t.Fatalf("create activity: %v", err)
+	}
+	if err := db.Model(&ticket).Update("current_activity_id", activity.ID).Error; err != nil {
+		t.Fatalf("set current_activity_id: %v", err)
+	}
+
+	// Simulate initial AI-created assignment: position_department type, db_admin role.
+	assignment := TicketAssignment{
+		TicketID:        ticket.ID,
+		ActivityID:      activity.ID,
+		ParticipantType: "position_department",
+		PositionID:      &positionID,
+		DepartmentID:    &departmentID,
+		AssigneeID:      &originalAssignee,
+		Status:          AssignmentPending,
+		IsCurrent:       true,
+	}
+	if err := db.Create(&assignment).Error; err != nil {
+		t.Fatalf("create assignment: %v", err)
+	}
+
+	// Admin invokes Assign() to take over the step.
+	if _, err := svc.Assign(ticket.ID, newAssignee, 99); err != nil {
+		t.Fatalf("Assign: %v", err)
+	}
+
+	var refreshed TicketAssignment
+	if err := db.First(&refreshed, assignment.ID).Error; err != nil {
+		t.Fatalf("reload assignment: %v", err)
+	}
+
+	// participant_type must be "user" and assignee must be the new user.
+	if refreshed.ParticipantType != "user" {
+		t.Errorf("participant_type = %q, want \"user\"", refreshed.ParticipantType)
+	}
+	if refreshed.AssigneeID == nil || *refreshed.AssigneeID != newAssignee {
+		t.Errorf("assignee_id = %v, want %d", refreshed.AssigneeID, newAssignee)
+	}
+	if refreshed.UserID == nil || *refreshed.UserID != newAssignee {
+		t.Errorf("user_id = %v, want %d", refreshed.UserID, newAssignee)
+	}
+
+	// position_id and department_id MUST be preserved so guards can still
+	// identify the completed step by role.
+	if refreshed.PositionID == nil || *refreshed.PositionID != positionID {
+		t.Errorf("position_id = %v, want %d — Assign must not clear position_id", refreshed.PositionID, positionID)
+	}
+	if refreshed.DepartmentID == nil || *refreshed.DepartmentID != departmentID {
+		t.Errorf("department_id = %v, want %d — Assign must not clear department_id", refreshed.DepartmentID, departmentID)
+	}
 }
 
 func TestTicketService_SignalRejectsActivityFromAnotherTicket(t *testing.T) {

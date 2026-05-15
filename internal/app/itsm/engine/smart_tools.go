@@ -31,6 +31,9 @@ type decisionToolContext struct {
 	actionExecutor      *ActionExecutor
 	completedActivityID *uint
 	configProvider      EngineConfigProvider
+	// recordActionTimeline is injected by SmartEngine.agenticDecision to write
+	// ai_decision_action_executed timeline entries when the AI tool runs an action.
+	recordActionTimeline func(actionName, actionCode string, httpStatus int, respPreview string, execErr error)
 }
 
 // allDecisionTools returns the complete set of decision domain tools.
@@ -737,25 +740,38 @@ func toolExecuteAction() decisionToolDef {
 			execCtx, cancel := context.WithTimeout(ctx.ctx, 120*time.Second)
 			defer cancel()
 
-			err = ctx.actionExecutor.ExecuteWithConfig(
+			httpStatus, responseBody, err := ctx.actionExecutor.ExecuteWithConfig(
 				execCtx,
 				ctx.ticketID, 0, params.ActionID, action.ActionType, action.ConfigJSON,
 			)
 
+			respPreview := responseBody
+			if len(respPreview) > 256 {
+				respPreview = respPreview[:256] + "…"
+			}
+
+			if ctx.recordActionTimeline != nil {
+				ctx.recordActionTimeline(action.Name, action.Code, httpStatus, respPreview, err)
+			}
+
 			if err != nil {
 				return json.Marshal(map[string]any{
-					"success":     false,
-					"action_name": action.Name,
-					"action_code": action.Code,
-					"error":       err.Error(),
+					"success":          false,
+					"action_name":      action.Name,
+					"action_code":      action.Code,
+					"http_status":      httpStatus,
+					"response_preview": respPreview,
+					"error":            err.Error(),
 				})
 			}
 
 			return json.Marshal(map[string]any{
-				"success":     true,
-				"action_name": action.Name,
-				"action_code": action.Code,
-				"message":     fmt.Sprintf("动作 [%s] 执行成功", action.Name),
+				"success":          true,
+				"action_name":      action.Name,
+				"action_code":      action.Code,
+				"http_status":      httpStatus,
+				"response_preview": respPreview,
+				"message":          fmt.Sprintf("动作 [%s] 执行成功", action.Name),
 			})
 		},
 	}

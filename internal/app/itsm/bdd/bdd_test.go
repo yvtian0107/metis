@@ -109,6 +109,7 @@ func initializeScenario(sc *godog.ScenarioContext) {
 	registerKnowledgeRoutingSteps(sc, bc)
 	registerSLAAssuranceSteps(sc, bc)
 	registerAgenticQualitySteps(sc, bc)
+	registerParallelApprovalNewSteps(sc, bc)
 }
 
 func initializeAPIScenario(sc *godog.ScenarioContext) {
